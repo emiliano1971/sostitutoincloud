@@ -1,0 +1,342 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.0</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>it.gavia.cloud</groupId>
+    <artifactId>sostitutoincloud</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>war</packaging>
+    <name>sostitutoincloud</name>
+    <description>PMS fiscale — Sostituto in Cloud</description>
+
+    <!--
+        Proprietà master: cambiare spring.profiles.active per propagare a deploy.env.
+        Questi valori sono i default per il profilo local (attivo per default).
+        Ogni profilo Maven sovrascrive le proprie proprietà qui sotto.
+    -->
+    <properties>
+        <java.version>21</java.version>
+        <spring.profiles.active>local</spring.profiles.active>
+        <deploy.env>${spring.profiles.active}</deploy.env>
+        <db.properties.source>db-local.properties</db.properties.source>
+        <log4j.source>log4j2.xml</log4j.source>
+        <log.level>DEBUG</log.level>
+        <console.threshold>ALL</console.threshold>
+        <skip.frontend>true</skip.frontend>
+    </properties>
+
+    <dependencies>
+
+        <!-- ── Web ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ── Security ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ── JDBC ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ── PostgreSQL driver ── -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- ── Lombok ── -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ── Log4j2 (sostituisce logback default di Spring Boot) ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-log4j2</artifactId>
+        </dependency>
+
+        <!-- ── Tomcat embedded: provided — il WAR gira su Tomcat esterno ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-tomcat</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- ── Test ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+
+        <!-- Filtering abilitato su src/main/resources: sostituisce @property@ al momento della build -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
+
+        <plugins>
+
+            <!-- ── Compilatore Java ── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!-- ── WAR plugin: web.xml opzionale ── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <configuration>
+                    <failOnMissingWebXml>false</failOnMissingWebXml>
+                </configuration>
+            </plugin>
+
+            <!-- ── Spring Boot: repackage disabilitato.
+                      Il deploy avviene tramite Ant (my-build.xml), non tramite WAR file.
+                      spring-boot:run rimane disponibile per sviluppo locale. ── -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>repackage</id>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ── Copia dipendenze runtime in target/lib/ per poi copiarle in WEB-INF/lib/ via Ant ── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>prepare-package</phase>
+                        <goals><goal>copy-dependencies</goal></goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                            <excludeScope>provided</excludeScope>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ── Ant deploy: copia compilato in WEB-INF/ del progetto Tomcat ── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>deploy-to-webapps</id>
+                        <phase>package</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <ant antfile="${project.basedir}/my-build.xml">
+                                    <property name="project.basedir"
+                                              value="${project.basedir}"/>
+                                    <property name="project.build.directory"
+                                              value="${project.build.directory}"/>
+                                    <property name="project.build.outputDirectory"
+                                              value="${project.build.outputDirectory}"/>
+                                    <property name="deploy.env"
+                                              value="${deploy.env}"/>
+                                    <property name="db.properties.source"
+                                              value="${db.properties.source}"/>
+                                    <property name="log4j.source"
+                                              value="${log4j.source}"/>
+                                </ant>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
+
+    <profiles>
+
+        <!-- ══════════════════════════════════════════════
+             local (default): porta 8081, log DEBUG, console attiva
+             ══════════════════════════════════════════════ -->
+        <profile>
+            <id>local</id>
+            <activation><activeByDefault>true</activeByDefault></activation>
+            <properties>
+                <spring.profiles.active>local</spring.profiles.active>
+                <deploy.env>local</deploy.env>
+                <db.properties.source>db-local.properties</db.properties.source>
+                <log4j.source>log4j2.xml</log4j.source>
+                <log.level>DEBUG</log.level>
+                <console.threshold>ALL</console.threshold>
+                <skip.frontend>true</skip.frontend>
+            </properties>
+        </profile>
+
+        <!-- ══════════════════════════════════════════════
+             test: log INFO, solo file appender
+             ══════════════════════════════════════════════ -->
+        <profile>
+            <id>test</id>
+            <properties>
+                <spring.profiles.active>test</spring.profiles.active>
+                <deploy.env>test</deploy.env>
+                <db.properties.source>db-test.properties</db.properties.source>
+                <log4j.source>log4j2.xml</log4j.source>
+                <log.level>INFO</log.level>
+                <console.threshold>OFF</console.threshold>
+                <skip.frontend>true</skip.frontend>
+            </properties>
+        </profile>
+
+        <!-- ══════════════════════════════════════════════
+             prod: log INFO, solo file appender, include build frontend React
+             ══════════════════════════════════════════════ -->
+        <profile>
+            <id>prod</id>
+            <properties>
+                <spring.profiles.active>prod</spring.profiles.active>
+                <deploy.env>prod</deploy.env>
+                <db.properties.source>db-prod.properties</db.properties.source>
+                <log4j.source>log4j2.xml</log4j.source>
+                <log.level>INFO</log.level>
+                <console.threshold>OFF</console.threshold>
+                <skip.frontend>false</skip.frontend>
+            </properties>
+            <build>
+                <plugins>
+                    <!-- npm install + npm run build del frontend React -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.3.0</version>
+                        <executions>
+                            <execution>
+                                <id>npm-install</id>
+                                <phase>generate-resources</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>npm</executable>
+                                    <workingDirectory>${project.basedir}/frontend</workingDirectory>
+                                    <arguments>
+                                        <argument>install</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>npm-build</id>
+                                <phase>generate-resources</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>npm</executable>
+                                    <workingDirectory>${project.basedir}/frontend</workingDirectory>
+                                    <arguments>
+                                        <argument>run</argument>
+                                        <argument>build</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- Copia frontend/dist → target/classes/static dopo npm build -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-frontend-dist</id>
+                                <phase>process-resources</phase>
+                                <goals><goal>copy-resources</goal></goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.basedir}/frontend/dist</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+    </profiles>
+
+</project>

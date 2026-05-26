@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    my-build.xml — Deploy locale nel progetto Tomcat
+    =====================================================
+    Eseguito da maven-antrun-plugin nella fase package.
+    Parametri passati da pom.xml:
+      project.basedir              root del progetto (= webapps/sostitutoincloud/)
+      project.build.directory      cartella target/
+      project.build.outputDirectory cartella target/classes/
+      deploy.env                   profilo attivo (local | test | prod)
+      db.properties.source         file properties DB per ambiente
+      log4j.source                 file Log4j2 (sempre log4j2.xml)
+-->
+<project name="sostitutoincloud-deploy" default="deploy">
+
+    <target name="deploy">
+
+        <echo message="[my-build] Deploy ambiente: ${deploy.env}"/>
+        <echo message="[my-build] DB properties:   ${db.properties.source}"/>
+
+        <!-- ── 1. Cancella e ricrea WEB-INF/classes/ ── -->
+        <delete dir="${project.basedir}/WEB-INF/classes" quiet="true"/>
+        <mkdir  dir="${project.basedir}/WEB-INF/classes"/>
+
+        <!-- ── 2. Copia classi compilate da target/classes/ → WEB-INF/classes/ ── -->
+        <copy todir="${project.basedir}/WEB-INF/classes" overwrite="true">
+            <fileset dir="${project.build.outputDirectory}">
+                <include name="**/*.class"/>
+            </fileset>
+        </copy>
+
+        <!--
+            ── 3. Copia risorse da src/main/resources/ → WEB-INF/classes/ ──
+            Esclude i file ambiente-specifici (db-*.properties) gestiti al passo 6.
+            Esclude i file log4j2*.xml gestiti al passo 7 (serve la versione filtrata).
+        -->
+        <copy todir="${project.basedir}/WEB-INF/classes" overwrite="true">
+            <fileset dir="${project.basedir}/src/main/resources">
+                <exclude name="db-*.properties"/>
+                <exclude name="log4j2*.xml"/>
+            </fileset>
+        </copy>
+
+        <!-- ── 4. Pulisce e ricopia JAR da target/lib/ → WEB-INF/lib/ ── -->
+        <delete dir="${project.basedir}/WEB-INF/lib" quiet="true"/>
+        <mkdir  dir="${project.basedir}/WEB-INF/lib"/>
+        <copy todir="${project.basedir}/WEB-INF/lib" overwrite="true">
+            <fileset dir="${project.build.directory}/lib">
+                <include name="*.jar"/>
+            </fileset>
+        </copy>
+
+        <!-- ── 5. Copia web.xml da src/main/webapp/WEB-INF/ ── -->
+        <copy todir="${project.basedir}/WEB-INF"
+              file="${project.basedir}/src/main/webapp/WEB-INF/web.xml"
+              failonerror="false"
+              overwrite="true"/>
+
+        <!--
+            ── 6. Copia il file DB properties per ambiente → WEB-INF/classes/db.properties ──
+            Il nome del file sorgente è determinato dalla proprietà db.properties.source.
+        -->
+        <copy tofile="${project.basedir}/WEB-INF/classes/db.properties"
+              file="${project.basedir}/src/main/resources/${db.properties.source}"
+              overwrite="true"/>
+
+        <!--
+            ── 7. Copia il file Log4j2 filtrato → WEB-INF/classes/log4j2.xml ──
+            Usa la versione in target/classes/ dove Maven ha già sostituito @log.level@
+            e @deploy.env@ con i valori del profilo corrente.
+        -->
+        <copy tofile="${project.basedir}/WEB-INF/classes/log4j2.xml"
+              file="${project.build.outputDirectory}/${log4j.source}"
+              overwrite="true"/>
+
+        <echo message="[my-build] Deploy completato in WEB-INF/"/>
+
+    </target>
+
+</project>

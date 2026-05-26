@@ -1,0 +1,9 @@
+server:
+  port: 8443
+  servlet:
+    context-path: /sostitutoincloud
+
+app:
+  base-url: https://testpms.siv.cloud.it:8443/sostitutoincloud
+  cors:
+    allowed-origins: https://testpms.siv.cloud.it:8443
