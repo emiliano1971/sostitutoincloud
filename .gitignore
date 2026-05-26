@@ -1,0 +1,44 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Spring Boot build
+target/
+WEB-INF/classes/
+WEB-INF/lib/
+
+# File di configurazione locali (contengono credenziali)
+application-local.yml
+db-local.properties
+
+# Log applicazione
+logs/
+
+# Certificati e chiavi
+*.p12
+*.jks
+*.key
+
+# Maven wrapper (opzionale, rimuovi se vuoi committarlo)
+.mvn/wrapper/maven-wrapper.jar
