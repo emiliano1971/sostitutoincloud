@@ -19,4 +19,5 @@
 │ Reset sequenze   │ 7     │ setval per ogni tabella con ID espliciti                                │
 └──────────────────┴───────┴─────────────────────────────────────────────────────────────────────────┘
 
-Tutti gli importi sono coerenti: owner_net = gross − ota_comm − cleaning − pm_fee, withholding = net × 21%, tassa di soggiorno calcolata sulle tariffe Roma (€3,50/notte, max 10 notti).
+Tutti gli importi sono coerenti: owner_net = gross − ota_comm − cleaning − pm_fee, withholding = net × 21%, 
+tassa di soggiorno calcolata sulle tariffe Roma (€3,50/notte, max 10 notti).

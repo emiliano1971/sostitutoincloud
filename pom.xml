@@ -24,7 +24,7 @@
         Ogni profilo Maven sovrascrive le proprie proprietà qui sotto.
     -->
     <properties>
-        <java.version>21</java.version>
+        <java.version>17</java.version>
         <spring.profiles.active>local</spring.profiles.active>
         <deploy.env>${spring.profiles.active}</deploy.env>
         <db.properties.source>db-local.properties</db.properties.source>
