@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { mockSettlements } from '@/data/mock-data';
 import { Receipt } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { getSettlements, type SettlementListItem } from '@/api/settlementApi';
 
 const statusColors: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
@@ -11,7 +13,22 @@ const statusColors: Record<string, string> = {
 };
 
 const OwnerSettlements = () => {
-  const settlements = mockSettlements.filter(s => s.owner_id === 'o1');
+  const { user } = useAuth();
+  const ownerId = user?.owner_id ? parseInt(user.owner_id) : undefined;
+  const [settlements, setSettlements] = useState<SettlementListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ownerId) return;
+    getSettlements({ ownerId })
+      .then(setSettlements)
+      .catch(() => setError('Errore nel caricamento delle liquidazioni'))
+      .finally(() => setLoading(false));
+  }, [ownerId]);
+
+  if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
+  if (error) return <div className="p-6 text-destructive">{error}</div>;
 
   return (
     <div className="space-y-4">
@@ -20,7 +37,7 @@ const OwnerSettlements = () => {
 
       <div className="space-y-3">
         {settlements.map(s => (
-          <Card key={s.settlement_id}>
+          <Card key={s.id}>
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div className="flex gap-3">
@@ -29,20 +46,23 @@ const OwnerSettlements = () => {
                   </div>
                   <div>
                     <p className="font-medium text-sm">Periodo {s.period}</p>
-                    <p className="text-xs text-muted-foreground">{s.bookings_count} prenotazioni</p>
-                    {s.payment_date && <p className="text-xs text-muted-foreground">Pagato il {s.payment_date}</p>}
-                    <Badge variant="outline" className={`mt-1.5 text-[10px] ${statusColors[s.status]}`}>{s.status}</Badge>
+                    <p className="text-xs text-muted-foreground">{s.bookingsCount} prenotazioni</p>
+                    {s.paymentDate && <p className="text-xs text-muted-foreground">Pagato il {s.paymentDate}</p>}
+                    <Badge variant="outline" className={`mt-1.5 text-[10px] ${statusColors[s.stato] ?? ''}`}>{s.stato}</Badge>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="font-bold text-sm">€{s.net_amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</p>
+                  <p className="font-bold text-sm">€{s.netAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</p>
                   <p className="text-[10px] text-muted-foreground">netto</p>
-                  <p className="text-[10px] text-destructive mt-0.5">-€{s.withholding_amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })} rit.</p>
+                  <p className="text-[10px] text-destructive mt-0.5">-€{s.withholdingAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })} rit.</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         ))}
+        {settlements.length === 0 && (
+          <Card><CardContent className="p-8 text-center text-muted-foreground">Nessuna liquidazione</CardContent></Card>
+        )}
       </div>
     </div>
   );

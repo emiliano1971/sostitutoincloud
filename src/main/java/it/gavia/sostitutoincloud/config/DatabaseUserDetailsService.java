@@ -25,7 +25,7 @@ public class DatabaseUserDetailsService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        String sql = "SELECT id, email, password_hash, ruolo, fk_tenant_id, attivo " +
+        String sql = "SELECT id, email, password_hash, ruolo, fk_tenant_id, fk_owner_id, attivo " +
                      "FROM utente WHERE email = ?";
 
         List<CustomUserDetails> results = jdbcTemplate.query(sql, (rs, rowNum) -> {
@@ -33,11 +33,12 @@ public class DatabaseUserDetailsService implements UserDetailsService {
             String pwd = rs.getString("password_hash");
             String ruolo = rs.getString("ruolo");
             Integer fkTenantId = rs.getObject("fk_tenant_id", Integer.class);
+            Integer fkOwnerId = rs.getObject("fk_owner_id", Integer.class);
             boolean attivo = rs.getBoolean("attivo");
 
             GrantedAuthority authority = new SimpleGrantedAuthority(mapRuoloToRole(ruolo));
 
-            return new CustomUserDetails(email, pwd, List.of(authority), fkTenantId, id, attivo);
+            return new CustomUserDetails(email, pwd, List.of(authority), fkTenantId, id, fkOwnerId, attivo);
         }, email);
 
         if (results.isEmpty()) {
@@ -69,13 +70,15 @@ public class DatabaseUserDetailsService implements UserDetailsService {
 
         private final Integer tenantId;
         private final Integer utenteId;
+        private final Integer ownerId;
 
         public CustomUserDetails(String username, String password,
                                   Collection<? extends GrantedAuthority> authorities,
-                                  Integer tenantId, Integer utenteId, boolean enabled) {
+                                  Integer tenantId, Integer utenteId, Integer ownerId, boolean enabled) {
             super(username, password, enabled, true, true, true, authorities);
             this.tenantId = tenantId;
             this.utenteId = utenteId;
+            this.ownerId = ownerId;
         }
 
         public Integer getTenantId() {
@@ -84,6 +87,10 @@ public class DatabaseUserDetailsService implements UserDetailsService {
 
         public Integer getUtenteId() {
             return utenteId;
+        }
+
+        public Integer getOwnerId() {
+            return ownerId;
         }
     }
 }

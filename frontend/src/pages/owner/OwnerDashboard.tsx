@@ -1,29 +1,58 @@
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TrendingUp, CalendarDays, FileText, Receipt, Download } from 'lucide-react';
-import { mockBookings, mockRevenueData, mockSettlements, mockCU } from '@/data/mock-data';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuth } from '@/contexts/AuthContext';
+import { getOwnerDashboard, type OwnerDashboardDTO } from '@/api/ownerApi';
+import { getBookings, type BookingListItem } from '@/api/bookingApi';
+import { getCuList, type CuListItem } from '@/api/cuApi';
 
 const OwnerDashboard = () => {
-  const ownerBookings = mockBookings.filter(b => b.owner_name === 'Anna Moretti');
-  const totalRevenue = ownerBookings.reduce((s, b) => s + b.owner_net_amount, 0);
-  const totalWithholding = ownerBookings.reduce((s, b) => s + b.withholding_amount, 0);
-  const ownerSettlements = mockSettlements.filter(s => s.owner_id === 'o1');
-  const paidAmount = ownerSettlements.filter(s => s.status === 'paid').reduce((sum, s) => sum + s.net_amount, 0);
+  const { user } = useAuth();
+  const ownerId = user?.owner_id ? parseInt(user.owner_id) : undefined;
+
+  const [dashboard, setDashboard] = useState<OwnerDashboardDTO | null>(null);
+  const [recentBookings, setRecentBookings] = useState<BookingListItem[]>([]);
+  const [cuList, setCuList] = useState<CuListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ownerId) return;
+    setLoading(true);
+    Promise.all([
+      getOwnerDashboard(ownerId),
+      getBookings(),
+      getCuList({ ownerId }),
+    ])
+      .then(([dash, bookings, cus]) => {
+        setDashboard(dash);
+        const ownerFullName = `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim();
+        setRecentBookings(
+          bookings.filter(b => b.ownerName === ownerFullName).slice(0, 5)
+        );
+        setCuList(cus);
+      })
+      .catch(() => setError('Errore nel caricamento dei dati'))
+      .finally(() => setLoading(false));
+  }, [ownerId]);
+
+  if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
+  if (error) return <div className="p-6 text-destructive">{error}</div>;
 
   const kpis = [
-    { label: 'Ricavi Totali', value: `€${totalRevenue.toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: TrendingUp, color: 'text-primary' },
-    { label: 'Prenotazioni', value: ownerBookings.length, icon: CalendarDays, color: 'text-success' },
-    { label: 'Ritenute', value: `€${totalWithholding.toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: FileText, color: 'text-warning' },
-    { label: 'Liquidato', value: `€${paidAmount.toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: Receipt, color: 'text-success' },
+    { label: 'Ricavi Totali', value: `€${(dashboard?.ricaviTotali ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: TrendingUp, color: 'text-primary' },
+    { label: 'Prenotazioni', value: dashboard?.prenotazioniCount ?? 0, icon: CalendarDays, color: 'text-success' },
+    { label: 'Ritenute', value: `€${(dashboard?.totalRitenute ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: FileText, color: 'text-warning' },
+    { label: 'Liquidato', value: `€${(dashboard?.totalLiquidato ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: Receipt, color: 'text-success' },
   ];
 
-  // Simplified owner revenue data
-  const ownerRevenue = mockRevenueData.map(d => ({
-    month: d.month,
-    netto: Math.round((d.ricavi_pm + d.ricavi_ow) * 0.45),
-    ritenute: Math.round((d.ricavi_pm + d.ricavi_ow) * 0.45 * 0.21),
+  const ownerRevenue = (dashboard?.ricaviMensili ?? []).map(d => ({
+    month: d.mese,
+    netto: d.ricaviOw,
+    ritenute: d.ritenute,
   }));
 
   return (
@@ -69,31 +98,34 @@ const OwnerDashboard = () => {
       <Card>
         <CardHeader><CardTitle className="text-base">Ultime Prenotazioni</CardTitle></CardHeader>
         <CardContent className="space-y-3 p-4">
-          {ownerBookings.slice(0, 5).map(b => (
-            <div key={b.booking_id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+          {recentBookings.map(b => (
+            <div key={b.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
               <div>
-                <p className="text-sm font-medium">{b.guest_name}</p>
-                <p className="text-xs text-muted-foreground">{b.property_name} · {b.checkin_date}</p>
+                <p className="text-sm font-medium">{b.guestName}</p>
+                <p className="text-xs text-muted-foreground">{b.propertyName} · {b.checkinDate}</p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-medium">€{b.owner_net_amount.toLocaleString('it-IT')}</p>
-                <Badge variant="outline" className="text-[10px]">{b.booking_status}</Badge>
+                <p className="text-sm font-medium">€{b.ownerNetAmount.toLocaleString('it-IT')}</p>
+                <Badge variant="outline" className="text-[10px]">{b.statoPrenotazione}</Badge>
               </div>
             </div>
           ))}
+          {recentBookings.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center">Nessuna prenotazione</p>
+          )}
         </CardContent>
       </Card>
 
       {/* CU */}
-      {mockCU.filter(cu => cu.owner_id === 'o1').length > 0 && (
+      {cuList.length > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-base">Certificazioni Uniche</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {mockCU.filter(cu => cu.owner_id === 'o1').map(cu => (
-              <div key={cu.cu_id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+            {cuList.map(cu => (
+              <div key={cu.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                 <div>
-                  <p className="text-sm font-medium">CU {cu.tax_year}</p>
-                  <p className="text-xs text-muted-foreground">Compensi: €{cu.total_compensi.toLocaleString('it-IT')} · Ritenute: €{cu.total_ritenute.toLocaleString('it-IT')}</p>
+                  <p className="text-sm font-medium">CU {cu.taxYear}</p>
+                  <p className="text-xs text-muted-foreground">Compensi: €{cu.totalCompensi.toLocaleString('it-IT')} · Ritenute: €{cu.totalRitenute.toLocaleString('it-IT')}</p>
                 </div>
                 <Button variant="outline" size="sm" className="gap-1"><Download className="h-3.5 w-3.5" /> PDF</Button>
               </div>

@@ -26,6 +26,14 @@ public class SecurityUtils {
         throw new RuntimeException("Utente non autenticato");
     }
 
+    public static Integer getCurrentOwnerId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof CustomUserDetails user) {
+            return user.getOwnerId();
+        }
+        throw new RuntimeException("Utente non autenticato");
+    }
+
     public static String getCurrentUserEmail() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null) {

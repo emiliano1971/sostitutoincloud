@@ -15,6 +15,7 @@ public class UserMeDTO {
     private String email;
     private String ruolo;
     private Integer fkTenantId;
+    private Integer fkOwnerId;
     private String firstName;
     private String lastName;
     private Boolean attivo;

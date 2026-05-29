@@ -1,11 +1,28 @@
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Download, Award } from 'lucide-react';
-import { mockCU } from '@/data/mock-data';
+import { useAuth } from '@/contexts/AuthContext';
+import { getCuList, type CuListItem } from '@/api/cuApi';
 
 const OwnerCU = () => {
-  const cus = mockCU.filter(cu => cu.owner_id === 'o1');
+  const { user } = useAuth();
+  const ownerId = user?.owner_id ? parseInt(user.owner_id) : undefined;
+  const [cus, setCus] = useState<CuListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ownerId) return;
+    getCuList({ ownerId })
+      .then(setCus)
+      .catch(() => setError('Errore nel caricamento delle CU'))
+      .finally(() => setLoading(false));
+  }, [ownerId]);
+
+  if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
+  if (error) return <div className="p-6 text-destructive">{error}</div>;
 
   return (
     <div className="space-y-4">
@@ -14,7 +31,7 @@ const OwnerCU = () => {
 
       <div className="space-y-3">
         {cus.map(cu => (
-          <Card key={cu.cu_id}>
+          <Card key={cu.id}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex gap-3">
@@ -22,10 +39,10 @@ const OwnerCU = () => {
                     <Award className="h-5 w-5 text-primary" />
                   </div>
                   <div>
-                    <p className="font-medium">CU {cu.tax_year}</p>
-                    <p className="text-xs text-muted-foreground">Compensi: €{cu.total_compensi.toLocaleString('it-IT')}</p>
-                    <p className="text-xs text-muted-foreground">Ritenute: €{cu.total_ritenute.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</p>
-                    <Badge variant="outline" className="mt-1 text-[10px]">{cu.status}</Badge>
+                    <p className="font-medium">CU {cu.taxYear}</p>
+                    <p className="text-xs text-muted-foreground">Compensi: €{cu.totalCompensi.toLocaleString('it-IT')}</p>
+                    <p className="text-xs text-muted-foreground">Ritenute: €{cu.totalRitenute.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</p>
+                    <Badge variant="outline" className="mt-1 text-[10px]">{cu.stato}</Badge>
                   </div>
                 </div>
                 <Button variant="outline" size="sm" className="gap-1.5">

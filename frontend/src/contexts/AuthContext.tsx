@@ -1,15 +1,21 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { UserContext, UserRole } from '@/types';
-import { get, setCredentials, clearCredentials } from '@/lib/apiClient';
+import { get, post, setToken, getToken, clearToken } from '@/lib/apiClient';
 
 interface UserMeResponse {
   id: number;
   email: string;
   ruolo: string;
   fkTenantId: number;
+  fkOwnerId?: number;
   firstName?: string;
   lastName?: string;
   attivo: boolean;
+}
+
+interface LoginResponse {
+  token: string;
+  user: UserMeResponse;
 }
 
 interface AuthContextType {
@@ -31,31 +37,35 @@ function mapToUserContext(me: UserMeResponse): UserContext {
     last_name: me.lastName ?? '',
     role: me.ruolo as UserRole,
     tenant_id: me.fkTenantId ? String(me.fkTenantId) : undefined,
+    owner_id: me.fkOwnerId ? String(me.fkOwnerId) : undefined,
   };
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserContext | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // On mount: if sessionStorage has email (stale from previous session) → clear it
+  // On mount: if there's a stored token, verify it and restore session
   useEffect(() => {
-    const savedEmail = sessionStorage.getItem('auth_email');
-    if (savedEmail) {
-      // Basic Auth doesn't persist credentials — force re-login on refresh
-      sessionStorage.removeItem('auth_email');
+    const token = getToken();
+    if (!token) {
+      setIsLoading(false);
+      return;
     }
+    get<UserMeResponse>('/auth/me')
+      .then(me => setUser(mapToUserContext(me)))
+      .catch(() => clearToken())
+      .finally(() => setIsLoading(false));
   }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<void> => {
     setIsLoading(true);
     try {
-      setCredentials(email, password);
-      const me = await get<UserMeResponse>('/auth/me');
-      setUser(mapToUserContext(me));
-      sessionStorage.setItem('auth_email', email);
+      const response = await post<LoginResponse>('/public/login', { email, password });
+      setToken(response.token);
+      setUser(mapToUserContext(response.user));
     } catch (err) {
-      clearCredentials();
+      clearToken();
       const message = err instanceof Error && err.message === 'UNAUTHORIZED'
         ? 'Credenziali non valide'
         : 'Errore di connessione al server';
@@ -66,8 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = useCallback(() => {
-    clearCredentials();
-    sessionStorage.removeItem('auth_email');
+    clearToken();
     setUser(null);
   }, []);
 

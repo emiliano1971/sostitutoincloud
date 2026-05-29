@@ -1,4 +1,5 @@
 import { get } from '@/lib/apiClient';
+import type { MensileDTO } from './dashboardApi';
 
 export interface OwnerListItem {
   id: number;
@@ -33,4 +34,16 @@ export async function getOwners(attivo?: boolean): Promise<OwnerListItem[]> {
 
 export async function getOwnerById(id: number): Promise<OwnerDetail> {
   return get<OwnerDetail>(`/owners/${id}`);
+}
+
+export interface OwnerDashboardDTO {
+  ricaviTotali: number;
+  prenotazioniCount: number;
+  totalRitenute: number;
+  totalLiquidato: number;
+  ricaviMensili: MensileDTO[];
+}
+
+export async function getOwnerDashboard(ownerId: number): Promise<OwnerDashboardDTO> {
+  return get<OwnerDashboardDTO>(`/owners/${ownerId}/dashboard`);
 }

@@ -1,23 +1,17 @@
 import { getConfig } from '@/config/AppConfig';
 
-let _email: string | null = null;
-let _password: string | null = null;
+const TOKEN_KEY = 'auth_token';
 
-export function setCredentials(email: string, password: string): void {
-  _email = email;
-  _password = password;
+export function setToken(token: string): void {
+  sessionStorage.setItem(TOKEN_KEY, token);
 }
 
-export function clearCredentials(): void {
-  _email = null;
-  _password = null;
+export function getToken(): string | null {
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
-export function getAuthHeader(): string | null {
-  if (_email && _password) {
-    return 'Basic ' + btoa(_email + ':' + _password);
-  }
-  return null;
+export function clearToken(): void {
+  sessionStorage.removeItem(TOKEN_KEY);
 }
 
 function apiUrl(path: string): string {
@@ -26,11 +20,11 @@ function apiUrl(path: string): string {
 }
 
 function buildHeaders(): Record<string, string> {
-  const authHeader = getAuthHeader();
+  const token = getToken();
   return {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    ...(authHeader ? { 'Authorization': authHeader } : {}),
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
   };
 }
 
