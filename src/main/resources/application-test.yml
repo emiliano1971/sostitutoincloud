@@ -7,3 +7,5 @@ app:
   base-url: https://testpms.siv.cloud.it:8443/sostitutoincloud
   cors:
     allowed-origins: https://testpms.siv.cloud.it:8443
+  security:
+    admin-password: ${ADMIN_PASSWORD:CHANGE_ME}

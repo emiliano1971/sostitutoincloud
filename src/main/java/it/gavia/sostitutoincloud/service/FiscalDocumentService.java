@@ -1,0 +1,236 @@
+package it.gavia.sostitutoincloud.service;
+
+import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.PropertyDAO;
+import it.gavia.sostitutoincloud.dao.SdiEsitoDAO;
+import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
+import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
+import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentRowDTO;
+import it.gavia.sostitutoincloud.model.Booking;
+import it.gavia.sostitutoincloud.model.CanaleOta;
+import it.gavia.sostitutoincloud.model.FiscalDocument;
+import it.gavia.sostitutoincloud.model.Property;
+import it.gavia.sostitutoincloud.model.SdiEsito;
+import it.gavia.sostitutoincloud.model.StatoDocumento;
+import it.gavia.sostitutoincloud.model.TipoDocumento;
+import lombok.extern.log4j.Log4j2;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+@Service
+@Log4j2
+public class FiscalDocumentService {
+
+    private static final BigDecimal IVA_22 = new BigDecimal("0.22");
+
+    private final FiscalDocumentDAO fiscalDocumentDAO;
+    private final BookingDAO bookingDAO;
+    private final PropertyDAO propertyDAO;
+    private final CanaleOtaDAO canaleOtaDAO;
+    private final TipoDocumentoDAO tipoDocumentoDAO;
+    private final StatoDocumentoDAO statoDocumentoDAO;
+    private final SdiEsitoDAO sdiEsitoDAO;
+
+    public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
+                                  BookingDAO bookingDAO,
+                                  PropertyDAO propertyDAO,
+                                  CanaleOtaDAO canaleOtaDAO,
+                                  TipoDocumentoDAO tipoDocumentoDAO,
+                                  StatoDocumentoDAO statoDocumentoDAO,
+                                  SdiEsitoDAO sdiEsitoDAO) {
+        this.fiscalDocumentDAO = fiscalDocumentDAO;
+        this.bookingDAO = bookingDAO;
+        this.propertyDAO = propertyDAO;
+        this.canaleOtaDAO = canaleOtaDAO;
+        this.tipoDocumentoDAO = tipoDocumentoDAO;
+        this.statoDocumentoDAO = statoDocumentoDAO;
+        this.sdiEsitoDAO = sdiEsitoDAO;
+    }
+
+    private record LookupMaps(
+            Map<Integer, TipoDocumento> tipiById,
+            Map<Integer, StatoDocumento> statiById,
+            Map<Integer, SdiEsito> sdiEsitiById
+    ) {}
+
+    private LookupMaps buildLookupMaps() {
+        Map<Integer, TipoDocumento> tipiById = tipoDocumentoDAO.findAll().stream()
+                .collect(Collectors.toMap(TipoDocumento::getId, t -> t));
+        Map<Integer, StatoDocumento> statiById = statoDocumentoDAO.findAll().stream()
+                .collect(Collectors.toMap(StatoDocumento::getId, s -> s));
+        Map<Integer, SdiEsito> sdiEsitiById = sdiEsitoDAO.findAll().stream()
+                .collect(Collectors.toMap(SdiEsito::getId, e -> e));
+        return new LookupMaps(tipiById, statiById, sdiEsitiById);
+    }
+
+    private List<DocumentRowDTO> buildRighe(FiscalDocument doc, Booking booking, TipoDocumento tipo) {
+        if (tipo == null || booking == null) return Collections.emptyList();
+        List<DocumentRowDTO> righe = new ArrayList<>();
+        if (Boolean.TRUE.equals(tipo.getRichiedeIva())) {
+            righe.add(buildRigaConIva("Riaddebito commissione OTA", booking.getOtaCommissionAmount()));
+            righe.add(buildRigaConIva("Riaddebito pulizie", booking.getCleaningAmount()));
+            righe.add(buildRigaConIva("Provvigione PM", booking.getPmFeeAmount()));
+        } else {
+            BigDecimal gross = booking.getGrossAmount() != null ? booking.getGrossAmount() : BigDecimal.ZERO;
+            righe.add(DocumentRowDTO.builder()
+                    .descrizione("Compenso lordo ospite")
+                    .importoNetto(gross)
+                    .aliquotaIva(BigDecimal.ZERO)
+                    .importoIva(BigDecimal.ZERO)
+                    .importoLordo(gross)
+                    .build());
+        }
+        return righe;
+    }
+
+    private DocumentRowDTO buildRigaConIva(String descrizione, BigDecimal netto) {
+        BigDecimal n = netto != null ? netto : BigDecimal.ZERO;
+        BigDecimal iva = n.multiply(IVA_22).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal lordo = n.add(iva).setScale(2, RoundingMode.HALF_UP);
+        return DocumentRowDTO.builder()
+                .descrizione(descrizione)
+                .importoNetto(n)
+                .aliquotaIva(IVA_22)
+                .importoIva(iva)
+                .importoLordo(lordo)
+                .build();
+    }
+
+    public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
+                                                  Integer page, Integer size) {
+        LookupMaps lookup = buildLookupMaps();
+
+        List<FiscalDocument> docs = fiscalDocumentDAO.findByTenantId(tenantId);
+        List<Booking> bookings = bookingDAO.findByTenantId(tenantId);
+        List<Property> properties = propertyDAO.findByTenantId(tenantId);
+        List<CanaleOta> canali = canaleOtaDAO.findAll();
+
+        Map<Integer, Booking> bookingsById = bookings.stream()
+                .collect(Collectors.toMap(Booking::getId, b -> b));
+        Map<Integer, Property> propertiesById = properties.stream()
+                .collect(Collectors.toMap(Property::getId, p -> p));
+        Map<Integer, CanaleOta> canaliById = canali.stream()
+                .collect(Collectors.toMap(CanaleOta::getId, c -> c));
+
+        int pageNum = page != null ? page : 0;
+        int pageSize = size != null ? size : 20;
+
+        List<DocumentListDTO> result = docs.stream()
+                .filter(d -> {
+                    if (statoFilter != null) {
+                        StatoDocumento stato = lookup.statiById().get(d.getFkStatoDocumentoId());
+                        return stato != null && statoFilter.equalsIgnoreCase(stato.getCodice());
+                    }
+                    return true;
+                })
+                .filter(d -> {
+                    if (q != null && !q.isBlank()) {
+                        String ql = q.toLowerCase();
+                        boolean matchNum = d.getDocumentNumber() != null
+                                && d.getDocumentNumber().toLowerCase().contains(ql);
+                        boolean matchName = d.getRecipientName() != null
+                                && d.getRecipientName().toLowerCase().contains(ql);
+                        return matchNum || matchName;
+                    }
+                    return true;
+                })
+                .skip((long) pageNum * pageSize)
+                .limit(pageSize)
+                .map(d -> {
+                    Booking booking = d.getFkBookingId() != null ? bookingsById.get(d.getFkBookingId()) : null;
+                    Property property = booking != null ? propertiesById.get(booking.getFkPropertyId()) : null;
+                    CanaleOta canale = booking != null ? canaliById.get(booking.getFkCanaleOtaId()) : null;
+                    TipoDocumento tipo = lookup.tipiById().get(d.getFkTipoDocumentoId());
+                    StatoDocumento stato = lookup.statiById().get(d.getFkStatoDocumentoId());
+                    SdiEsito sdiEsito = d.getFkSdiEsitoId() != null
+                            ? lookup.sdiEsitiById().get(d.getFkSdiEsitoId()) : null;
+
+                    return DocumentListDTO.builder()
+                            .id(d.getId())
+                            .documentNumber(d.getDocumentNumber())
+                            .documentType(tipo != null ? tipo.getCodice() : null)
+                            .issueDate(d.getIssueDate())
+                            .recipientName(d.getRecipientName())
+                            .recipientTaxCode(d.getRecipientTaxCode())
+                            .totalAmount(d.getTotalAmount())
+                            .vatAmount(d.getVatAmount())
+                            .statoDocumento(stato != null ? stato.getCodice() : null)
+                            .sdiIdentifier(d.getSdiIdentifier())
+                            .sdiEsito(sdiEsito != null ? sdiEsito.getCodice() : null)
+                            .propertyName(property != null ? property.getDisplayName() : null)
+                            .channelName(canale != null ? canale.getNome() : null)
+                            .fkBookingId(d.getFkBookingId())
+                            .createdAt(d.getCreatedAt())
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        log.info("FiscalDocumentService.findByTenantId() - tenantId={}, risultati={}", tenantId, result.size());
+        return result;
+    }
+
+    public Optional<DocumentDetailDTO> findById(Integer tenantId, Integer documentId) {
+        Optional<FiscalDocument> opt = fiscalDocumentDAO.findById(documentId);
+        if (opt.isEmpty() || !tenantId.equals(opt.get().getFkTenantId())) {
+            return Optional.empty();
+        }
+        FiscalDocument doc = opt.get();
+        LookupMaps lookup = buildLookupMaps();
+
+        Booking booking = doc.getFkBookingId() != null
+                ? bookingDAO.findById(doc.getFkBookingId()).orElse(null)
+                : null;
+        Property property = booking != null
+                ? propertyDAO.findById(booking.getFkPropertyId()).orElse(null)
+                : null;
+        CanaleOta canale = booking != null
+                ? canaleOtaDAO.findById(booking.getFkCanaleOtaId()).orElse(null)
+                : null;
+
+        TipoDocumento tipo = lookup.tipiById().get(doc.getFkTipoDocumentoId());
+        StatoDocumento stato = lookup.statiById().get(doc.getFkStatoDocumentoId());
+        SdiEsito sdiEsito = doc.getFkSdiEsitoId() != null
+                ? lookup.sdiEsitiById().get(doc.getFkSdiEsitoId()) : null;
+
+        List<DocumentRowDTO> righe = buildRighe(doc, booking, tipo);
+
+        DocumentDetailDTO detail = DocumentDetailDTO.builder()
+                .id(doc.getId())
+                .fkTenantId(doc.getFkTenantId())
+                .fkTipoDocumentoId(doc.getFkTipoDocumentoId())
+                .fkStatoDocumentoId(doc.getFkStatoDocumentoId())
+                .documentNumber(doc.getDocumentNumber())
+                .documentType(tipo != null ? tipo.getCodice() : null)
+                .richiedeIva(tipo != null ? tipo.getRichiedeIva() : null)
+                .issueDate(doc.getIssueDate())
+                .recipientName(doc.getRecipientName())
+                .recipientTaxCode(doc.getRecipientTaxCode())
+                .totalAmount(doc.getTotalAmount())
+                .vatAmount(doc.getVatAmount())
+                .statoDocumento(stato != null ? stato.getCodice() : null)
+                .sdiIdentifier(doc.getSdiIdentifier())
+                .sdiEsito(sdiEsito != null ? sdiEsito.getCodice() : null)
+                .propertyName(property != null ? property.getDisplayName() : null)
+                .channelName(canale != null ? canale.getNome() : null)
+                .fkBookingId(doc.getFkBookingId())
+                .createdAt(doc.getCreatedAt())
+                .updatedAt(doc.getUpdatedAt())
+                .righe(righe)
+                .build();
+
+        log.info("FiscalDocumentService.findById() - tenantId={}, documentId={}", tenantId, documentId);
+        return Optional.of(detail);
+    }
+}

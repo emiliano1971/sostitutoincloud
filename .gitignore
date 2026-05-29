@@ -42,3 +42,6 @@ logs/
 
 # Maven wrapper (opzionale, rimuovi se vuoi committarlo)
 .mvn/wrapper/maven-wrapper.jar
+
+# Config runtime frontend (contiene URL ambiente specifici)
+frontend/public/config.json

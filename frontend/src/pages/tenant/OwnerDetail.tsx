@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -5,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { ArrowLeft, User, Building2, CreditCard, Mail, Phone, FileText, PowerOff, Power } from 'lucide-react';
-import { mockOwners, mockProperties, mockBookings, mockSettlements } from '@/data/mock-data';
-import { useState } from 'react';
+import { ArrowLeft, User, Building2, CreditCard, Mail, Phone, FileText, PowerOff, Power, Loader2, AlertCircle } from 'lucide-react';
+import { getOwnerById, type OwnerDetail as OwnerDetailType } from '@/api/ownerApi';
+import { getProperties, type PropertyListItem } from '@/api/propertyApi';
+import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
 
 const regimeLabels: Record<string, string> = {
@@ -26,8 +28,49 @@ const OwnerDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const owner = mockOwners.find(o => o.owner_id === id);
+  const [owner, setOwner] = useState<OwnerDetailType | null>(null);
+  const [properties, setProperties] = useState<PropertyListItem[]>([]);
+  const [recentBookings, setRecentBookings] = useState<BookingListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showDeactivate, setShowDeactivate] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    setIsLoading(true);
+    getOwnerById(Number(id))
+      .then(ownerData => {
+        setOwner(ownerData);
+        const fullName = `${ownerData.firstName} ${ownerData.lastName}`;
+        return Promise.all([
+          getProperties(),
+          getBookings({ page: 0, size: 5 }),
+        ]).then(([allProps, allBookings]) => {
+          setProperties(allProps.filter(p => p.ownerName === fullName));
+          setRecentBookings(allBookings.filter(b => b.ownerName === fullName));
+        });
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setIsLoading(false));
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span>Caricamento proprietario…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-20 gap-2 text-destructive">
+        <AlertCircle className="h-5 w-5" />
+        <span>{error}</span>
+      </div>
+    );
+  }
 
   if (!owner) {
     return (
@@ -38,17 +81,10 @@ const OwnerDetail = () => {
     );
   }
 
-  const ownerProperties = mockProperties.filter(p => p.owner_id === owner.owner_id);
-  const ownerBookings = mockBookings.filter(b => b.owner_name === `${owner.first_name} ${owner.last_name}`).slice(0, 5);
-  const ownerSettlements = mockSettlements.filter(s => s.owner_id === owner.owner_id);
-
-  const totalRevenue = ownerBookings.reduce((sum, b) => sum + b.gross_amount, 0);
-  const totalNet = ownerBookings.reduce((sum, b) => sum + b.owner_net_amount, 0);
-
   const handleToggleStatus = () => {
     toast({
-      title: owner.status === 'active' ? 'Proprietario disattivato' : 'Proprietario riattivato',
-      description: `${owner.first_name} ${owner.last_name} è stato ${owner.status === 'active' ? 'disattivato' : 'riattivato'}.`,
+      title: owner.attivo ? 'Proprietario disattivato' : 'Proprietario riattivato',
+      description: `${owner.firstName} ${owner.lastName} è stato ${owner.attivo ? 'disattivato' : 'riattivato'}.`,
     });
     setShowDeactivate(false);
   };
@@ -60,11 +96,11 @@ const OwnerDetail = () => {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">{owner.first_name} {owner.last_name}</h1>
-          <p className="text-sm text-muted-foreground">{ownerTypeLabels[owner.owner_type]} · {regimeLabels[owner.fiscal_regime]}</p>
+          <h1 className="text-2xl font-bold">{owner.firstName} {owner.lastName}</h1>
+          <p className="text-sm text-muted-foreground">{ownerTypeLabels[owner.ownerType]} · {regimeLabels[owner.fiscalRegime]}</p>
         </div>
-        <Badge variant={owner.status === 'active' ? 'default' : 'secondary'} className="text-sm">
-          {owner.status === 'active' ? 'Attivo' : 'Inattivo'}
+        <Badge variant={owner.attivo ? 'default' : 'secondary'} className="text-sm">
+          {owner.attivo ? 'Attivo' : 'Inattivo'}
         </Badge>
       </div>
 
@@ -73,25 +109,25 @@ const OwnerDetail = () => {
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><User className="h-4 w-4" /> Anagrafica</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Nome</span><span className="font-medium">{owner.first_name} {owner.last_name}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Nome</span><span className="font-medium">{owner.firstName} {owner.lastName}</span></div>
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Tipo</span><Badge variant="outline">{ownerTypeLabels[owner.owner_type]}</Badge></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Tipo</span><Badge variant="outline">{ownerTypeLabels[owner.ownerType]}</Badge></div>
             <Separator />
-            {owner.legal_name && (
+            {owner.legalName && (
               <>
-                <div className="flex justify-between"><span className="text-muted-foreground">Ragione Sociale</span><span>{owner.legal_name}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Ragione Sociale</span><span>{owner.legalName}</span></div>
                 <Separator />
               </>
             )}
-            <div className="flex justify-between"><span className="text-muted-foreground">Codice Fiscale</span><span className="font-mono text-xs">{owner.tax_code}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Codice Fiscale</span><span className="font-mono text-xs">{owner.taxCode}</span></div>
             <Separator />
-            {owner.vat_number && (
+            {owner.vatNumber && (
               <>
-                <div className="flex justify-between"><span className="text-muted-foreground">P.IVA</span><span className="font-mono text-xs">{owner.vat_number}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">P.IVA</span><span className="font-mono text-xs">{owner.vatNumber}</span></div>
                 <Separator />
               </>
             )}
-            <div className="flex justify-between"><span className="text-muted-foreground">Registrato il</span><span>{owner.created_at}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Registrato il</span><span>{owner.createdAt}</span></div>
           </CardContent>
         </Card>
 
@@ -99,7 +135,7 @@ const OwnerDetail = () => {
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><CreditCard className="h-4 w-4" /> Dati Fiscali & Contatto</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Regime Fiscale</span><Badge variant="outline">{regimeLabels[owner.fiscal_regime]}</Badge></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Regime Fiscale</span><Badge variant="outline">{regimeLabels[owner.fiscalRegime]}</Badge></div>
             <Separator />
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground flex items-center gap-1"><Mail className="h-3 w-3" /> Email</span>
@@ -119,15 +155,15 @@ const OwnerDetail = () => {
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4" /> Riepilogo Economico</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Immobili gestiti</span><span className="font-semibold">{ownerProperties.length}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Immobili gestiti</span><span className="font-semibold">{owner.propertiesCount}</span></div>
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Prenotazioni recenti</span><span className="font-semibold">{ownerBookings.length}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Prenotazioni recenti</span><span className="font-semibold">{owner.bookingsCount}</span></div>
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Lordo recente</span><span className="font-mono font-semibold">€{totalRevenue.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Lordo recente</span><span className="font-mono font-semibold">€{owner.totalGrossAmount.toFixed(2)}</span></div>
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Netto proprietario</span><span className="font-mono font-semibold text-primary">€{totalNet.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Netto proprietario</span><span className="font-mono font-semibold text-primary">€{owner.totalOwnerNet.toFixed(2)}</span></div>
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Liquidazioni</span><span className="font-semibold">{ownerSettlements.length}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Liquidazioni</span><span className="font-semibold">{owner.settlementsCount}</span></div>
           </CardContent>
         </Card>
 
@@ -140,19 +176,19 @@ const OwnerDetail = () => {
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {ownerProperties.length === 0 ? (
+            {properties.length === 0 ? (
               <p className="text-sm text-muted-foreground italic">Nessun immobile associato</p>
-            ) : ownerProperties.map(p => (
+            ) : properties.map(p => (
               <div
-                key={p.property_id}
+                key={p.id}
                 className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 cursor-pointer"
-                onClick={() => navigate(`/properties/${p.property_id}`)}
+                onClick={() => navigate(`/properties/${p.id}`)}
               >
                 <div>
-                  <p className="font-medium text-sm">{p.display_name}</p>
-                  <p className="text-xs text-muted-foreground">{p.internal_code} · {p.city} · CIN: {p.cin_code}</p>
+                  <p className="font-medium text-sm">{p.displayName}</p>
+                  <p className="text-xs text-muted-foreground">{p.internalCode} · {p.city} · CIN: {p.cinCode}</p>
                 </div>
-                <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-xs">{p.status === 'active' ? 'Attivo' : 'Inattivo'}</Badge>
+                <Badge variant={p.attivo ? 'default' : 'secondary'} className="text-xs">{p.attivo ? 'Attivo' : 'Inattivo'}</Badge>
               </div>
             ))}
           </CardContent>
@@ -177,18 +213,18 @@ const OwnerDetail = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ownerBookings.length === 0 ? (
+              {recentBookings.length === 0 ? (
                 <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Nessuna prenotazione</TableCell></TableRow>
-              ) : ownerBookings.map(b => (
-                <TableRow key={b.booking_id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/bookings/${b.booking_id}`)}>
-                  <TableCell className="font-medium">{b.guest_name}</TableCell>
-                  <TableCell className="text-sm">{b.property_name}</TableCell>
-                  <TableCell><Badge variant="outline" className="text-xs">{b.channel_name}</Badge></TableCell>
-                  <TableCell className="text-sm">{b.checkin_date}</TableCell>
-                  <TableCell className="text-sm">{b.checkout_date}</TableCell>
-                  <TableCell className="text-right font-mono">€{b.gross_amount.toFixed(2)}</TableCell>
-                  <TableCell className="text-right font-mono text-primary">€{b.owner_net_amount.toFixed(2)}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{b.booking_status}</Badge></TableCell>
+              ) : recentBookings.map(b => (
+                <TableRow key={b.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/bookings/${b.id}`)}>
+                  <TableCell className="font-medium">{b.guestName}</TableCell>
+                  <TableCell className="text-sm">{b.propertyName}</TableCell>
+                  <TableCell><Badge variant="outline" className="text-xs">{b.channelName}</Badge></TableCell>
+                  <TableCell className="text-sm">{b.checkinDate}</TableCell>
+                  <TableCell className="text-sm">{b.checkoutDate}</TableCell>
+                  <TableCell className="text-right font-mono">€{b.grossAmount.toFixed(2)}</TableCell>
+                  <TableCell className="text-right font-mono text-primary">€{b.ownerNetAmount.toFixed(2)}</TableCell>
+                  <TableCell><Badge variant="secondary" className="text-xs">{b.statoPrenotazione}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -199,8 +235,8 @@ const OwnerDetail = () => {
       {/* Azioni */}
       <Card>
         <CardContent className="p-4 flex gap-3">
-          <Button variant={owner.status === 'active' ? 'destructive' : 'default'} size="sm" className="gap-2" onClick={() => setShowDeactivate(true)}>
-            {owner.status === 'active' ? <><PowerOff className="h-4 w-4" /> Disattiva Proprietario</> : <><Power className="h-4 w-4" /> Riattiva Proprietario</>}
+          <Button variant={owner.attivo ? 'destructive' : 'default'} size="sm" className="gap-2" onClick={() => setShowDeactivate(true)}>
+            {owner.attivo ? <><PowerOff className="h-4 w-4" /> Disattiva Proprietario</> : <><Power className="h-4 w-4" /> Riattiva Proprietario</>}
           </Button>
         </CardContent>
       </Card>
@@ -209,16 +245,16 @@ const OwnerDetail = () => {
       <Dialog open={showDeactivate} onOpenChange={setShowDeactivate}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{owner.status === 'active' ? 'Disattiva' : 'Riattiva'} Proprietario</DialogTitle>
+            <DialogTitle>{owner.attivo ? 'Disattiva' : 'Riattiva'} Proprietario</DialogTitle>
             <DialogDescription>
-              {owner.status === 'active'
-                ? `Sei sicuro di voler disattivare "${owner.first_name} ${owner.last_name}"? Non verranno più generate liquidazioni e documenti.`
-                : `Vuoi riattivare "${owner.first_name} ${owner.last_name}"?`}
+              {owner.attivo
+                ? `Sei sicuro di voler disattivare "${owner.firstName} ${owner.lastName}"? Non verranno più generate liquidazioni e documenti.`
+                : `Vuoi riattivare "${owner.firstName} ${owner.lastName}"?`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeactivate(false)}>Annulla</Button>
-            <Button variant={owner.status === 'active' ? 'destructive' : 'default'} onClick={handleToggleStatus}>Conferma</Button>
+            <Button variant={owner.attivo ? 'destructive' : 'default'} onClick={handleToggleStatus}>Conferma</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

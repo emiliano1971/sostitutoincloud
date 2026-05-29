@@ -1,0 +1,4 @@
+{
+  "apiBaseUrl": "http://localhost:8081/sostitutoincloud/api",
+  "environment": "local"
+}

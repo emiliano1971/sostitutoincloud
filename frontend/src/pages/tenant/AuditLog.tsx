@@ -1,18 +1,29 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter } from 'lucide-react';
-import { mockAuditLog } from '@/data/mock-data';
+import { Search, Filter, Loader2, AlertCircle } from 'lucide-react';
+import { getAuditLog, type AuditLogItem } from '@/api/auditApi';
 
 const AuditLog = () => {
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('all');
+  const [logs, setLogs] = useState<AuditLogItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const logs = mockAuditLog
-    .filter(l => actionFilter === 'all' || l.action.startsWith(actionFilter))
-    .filter(l => search === '' || l.details.toLowerCase().includes(search.toLowerCase()) || l.user_email.toLowerCase().includes(search.toLowerCase()));
+  useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+    getAuditLog({
+      q: search || undefined,
+      action: actionFilter !== 'all' ? actionFilter : undefined,
+    })
+      .then(setLogs)
+      .catch(err => setError(err.message))
+      .finally(() => setIsLoading(false));
+  }, [search, actionFilter]);
 
   return (
     <div className="space-y-6">
@@ -44,30 +55,46 @@ const AuditLog = () => {
         </CardContent>
       </Card>
 
-      <div className="space-y-2">
-        {logs.map(log => (
-          <Card key={log.log_id}>
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{log.details}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                    <span className="text-xs text-muted-foreground">{log.user_email}</span>
-                    <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-xs text-muted-foreground">{new Date(log.created_at).toLocaleString('it-IT')}</span>
-                    <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-xs font-mono text-muted-foreground">{log.ip_address}</span>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span>Caricamento log…</span>
+        </div>
+      ) : error ? (
+        <div className="flex items-center justify-center py-16 text-destructive gap-2">
+          <AlertCircle className="h-5 w-5" />
+          <span>{error}</span>
+        </div>
+      ) : logs.length === 0 ? (
+        <div className="flex items-center justify-center py-16 text-muted-foreground">
+          Nessun log trovato
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {logs.map(log => (
+            <Card key={log.id}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{log.details}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                      <span className="text-xs text-muted-foreground">{log.userEmail}</span>
+                      <span className="text-xs text-muted-foreground">·</span>
+                      <span className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString('it-IT')}</span>
+                      <span className="text-xs text-muted-foreground">·</span>
+                      <span className="text-xs font-mono text-muted-foreground">{log.ipAddress}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <Badge variant="outline" className="text-[10px]">{log.action}</Badge>
+                    <Badge variant="secondary" className="text-[10px]">{log.entityType}</Badge>
                   </div>
                 </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <Badge variant="outline" className="text-[10px]">{log.action}</Badge>
-                  <Badge variant="secondary" className="text-[10px]">{log.entity_type}</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

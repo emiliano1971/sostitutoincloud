@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Search, Filter, Eye, Upload, AlertTriangle } from 'lucide-react';
-import { mockBookings } from '@/data/mock-data';
+import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { useNavigate } from 'react-router-dom';
 
 const statusLabels: Record<string, string> = {
@@ -33,29 +33,38 @@ const channelColors: Record<string, string> = {
   vrbo: 'bg-[#3B5998]/10 text-[#3B5998]',
 };
 
+const isFinalStatus = (status: string) =>
+  ['doc_issued', 'settled', 'cancelled'].includes(status);
+
 const BookingsList = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('da_completare');
   const [channelFilter, setChannelFilter] = useState<string>('all');
+  const [allBookings, setAllBookings] = useState<BookingListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const filtered = mockBookings
-    .filter(b => b.tenant_id === 't1')
-    .filter(b => {
-      if (statusFilter === 'da_completare') {
-        return b.checkout_date <= today && !['doc_issued', 'settled'].includes(b.booking_status) && b.booking_status !== 'cancelled';
-      }
-      return statusFilter === 'all' || b.booking_status === statusFilter;
-    })
-    .filter(b => channelFilter === 'all' || b.channel_name === channelFilter)
-    .filter(b =>
-      search === '' ||
-      b.guest_name.toLowerCase().includes(search.toLowerCase()) ||
-      b.property_name.toLowerCase().includes(search.toLowerCase()) ||
-      b.external_booking_id.toLowerCase().includes(search.toLowerCase())
-    );
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const params: Parameters<typeof getBookings>[0] = {};
+    if (statusFilter !== 'all') params.status = statusFilter;
+    if (channelFilter !== 'all') params.channel = channelFilter;
+    getBookings(params)
+      .then(data => setAllBookings(data))
+      .catch(err => setError(err.message ?? 'Errore nel caricamento'))
+      .finally(() => setLoading(false));
+  }, [statusFilter, channelFilter]);
+
+  const filtered = allBookings.filter(b =>
+    search === '' ||
+    b.guestName.toLowerCase().includes(search.toLowerCase()) ||
+    b.propertyName.toLowerCase().includes(search.toLowerCase()) ||
+    b.externalBookingId.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
@@ -110,66 +119,75 @@ const BookingsList = () => {
       {/* Table */}
       <Card>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID / Canale</TableHead>
-                <TableHead>Ospite</TableHead>
-                <TableHead>Immobile</TableHead>
-                <TableHead>Check-in</TableHead>
-                <TableHead>Check-out</TableHead>
-                <TableHead className="text-right">Notti</TableHead>
-                <TableHead className="text-right">Lordo €</TableHead>
-                <TableHead>Stato</TableHead>
-                <TableHead className="w-10"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.slice(0, 20).map(b => {
-                const checkoutDate = new Date(b.checkout_date);
-                const todayDate = new Date(today);
-                const daysSinceCheckout = Math.floor((todayDate.getTime() - checkoutDate.getTime()) / (1000 * 60 * 60 * 24));
-                const isOverdue = daysSinceCheckout > 0 && !['doc_issued', 'settled'].includes(b.booking_status) && b.booking_status !== 'cancelled';
-                const isPenalty = daysSinceCheckout > 12 && isOverdue;
-
-                return (
-                <TableRow key={b.booking_id} className={`cursor-pointer ${isPenalty ? 'bg-destructive/8 hover:bg-destructive/12' : isOverdue ? 'bg-warning/6 hover:bg-warning/10' : ''}`} onClick={() => navigate(`/bookings/${b.booking_id}`)}>
-                  <TableCell>
-                    <div>
-                      <p className="text-xs font-mono text-muted-foreground">{b.external_booking_id}</p>
-                      <Badge variant="outline" className={`text-[10px] mt-0.5 ${channelColors[b.channel_name] || ''}`}>
-                        {b.channel_name}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-medium text-sm">{b.guest_name}</TableCell>
-                  <TableCell className="text-sm">{b.property_name}</TableCell>
-                  <TableCell className="text-sm">{b.checkin_date}</TableCell>
-                  <TableCell className="text-sm">{b.checkout_date}</TableCell>
-                  <TableCell className="text-right text-sm">{b.nights}</TableCell>
-                  <TableCell className="text-right text-sm font-medium">€{b.gross_amount.toLocaleString('it-IT')}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      {isPenalty && <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />}
-                      <Badge variant="outline" className={
-                        isPenalty ? 'bg-destructive/15 text-destructive border-destructive/30' :
-                        isOverdue ? statusColors[b.booking_status] :
-                        statusColors[b.booking_status]
-                      }>
-                        {isPenalty ? `${daysSinceCheckout}gg - PENALE` : isOverdue ? `${daysSinceCheckout}gg - Scaduta` : (statusLabels[b.booking_status] || b.booking_status)}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
+          {loading && (
+            <div className="p-6 text-center text-sm text-muted-foreground">Caricamento...</div>
+          )}
+          {error && (
+            <div className="p-6 text-center text-sm text-destructive">{error}</div>
+          )}
+          {!loading && !error && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID / Canale</TableHead>
+                  <TableHead>Ospite</TableHead>
+                  <TableHead>Immobile</TableHead>
+                  <TableHead>Check-in</TableHead>
+                  <TableHead>Check-out</TableHead>
+                  <TableHead className="text-right">Notti</TableHead>
+                  <TableHead className="text-right">Lordo €</TableHead>
+                  <TableHead>Stato</TableHead>
+                  <TableHead className="w-10"></TableHead>
                 </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.slice(0, 20).map(b => {
+                  const checkoutDate = new Date(b.checkoutDate);
+                  const todayDate = new Date(today);
+                  const daysSinceCheckout = Math.floor((todayDate.getTime() - checkoutDate.getTime()) / (1000 * 60 * 60 * 24));
+                  const isOverdue = daysSinceCheckout > 0 && !isFinalStatus(b.statoPrenotazione);
+                  const isPenalty = daysSinceCheckout > 12 && isOverdue;
+                  const channelKey = b.channelName.toLowerCase();
+
+                  return (
+                    <TableRow key={b.id} className={`cursor-pointer ${isPenalty ? 'bg-destructive/8 hover:bg-destructive/12' : isOverdue ? 'bg-warning/6 hover:bg-warning/10' : ''}`} onClick={() => navigate(`/bookings/${b.id}`)}>
+                      <TableCell>
+                        <div>
+                          <p className="text-xs font-mono text-muted-foreground">{b.externalBookingId}</p>
+                          <Badge variant="outline" className={`text-[10px] mt-0.5 ${channelColors[channelKey] || ''}`}>
+                            {b.channelName}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium text-sm">{b.guestName}</TableCell>
+                      <TableCell className="text-sm">{b.propertyName}</TableCell>
+                      <TableCell className="text-sm">{b.checkinDate}</TableCell>
+                      <TableCell className="text-sm">{b.checkoutDate}</TableCell>
+                      <TableCell className="text-right text-sm">{b.nights}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">€{b.grossAmount.toLocaleString('it-IT')}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          {isPenalty && <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />}
+                          <Badge variant="outline" className={
+                            isPenalty ? 'bg-destructive/15 text-destructive border-destructive/30' :
+                            isOverdue ? statusColors[b.statoPrenotazione] :
+                            statusColors[b.statoPrenotazione]
+                          }>
+                            {isPenalty ? `${daysSinceCheckout}gg - PENALE` : isOverdue ? `${daysSinceCheckout}gg - Scaduta` : (statusLabels[b.statoPrenotazione] || b.statoPrenotazione)}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

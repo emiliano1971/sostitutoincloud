@@ -1,3 +1,5 @@
 spring:
   application:
     name: sostitutoincloud
+  profiles:
+    active: "@spring.profiles.active@"

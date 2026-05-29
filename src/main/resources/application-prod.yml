@@ -7,3 +7,5 @@ app:
   base-url: https://prodpms.siv.cloud.it:8443/sostitutoincloud
   cors:
     allowed-origins: https://prodpms.siv.cloud.it:8443
+  security:
+    admin-password: ${ADMIN_PASSWORD:CHANGE_ME}

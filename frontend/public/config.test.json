@@ -1,0 +1,4 @@
+{
+  "apiBaseUrl": "https://testpms.siv.cloud.it:8443/sostitutoincloud/api",
+  "environment": "test"
+}

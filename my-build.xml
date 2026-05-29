@@ -73,6 +73,14 @@
               file="${project.build.outputDirectory}/${log4j.source}"
               overwrite="true"/>
 
+        <!-- ── 8. Copia config.{env}.json → WEB-INF/classes/static/config.json ──
+             Permette di cambiare URL API senza ricompilare il frontend.
+             Il file viene cercato in frontend/public/ dove risiedono i config per ambiente. -->
+        <copy tofile="${project.basedir}/WEB-INF/classes/static/config.json"
+              file="${project.basedir}/frontend/public/config.${deploy.env}.json"
+              overwrite="true"
+              failonerror="false"/>
+
         <echo message="[my-build] Deploy completato in WEB-INF/"/>
 
     </target>

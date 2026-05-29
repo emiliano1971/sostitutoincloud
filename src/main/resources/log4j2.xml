@@ -12,27 +12,20 @@
 
     <Properties>
         <Property name="logLevel">@log.level@</Property>
-        <Property name="logFile">logs/sostitutoincloud-@deploy.env@.log</Property>
+        <Property name="logFile">${sys:catalina.home}/logs/sostitutoincloud-@deploy.env@.log</Property>
         <Property name="logPattern">%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n</Property>
         <Property name="consoleThreshold">@console.threshold@</Property>
     </Properties>
 
     <Appenders>
-
-        <!--
-            Console: attiva solo in locale.
-            ThresholdFilter a consoleThreshold=ALL in local (passa tutto),
-            consoleThreshold=OFF in test/prod (blocca tutto poiché nessun evento è >= OFF).
-        -->
         <Console name="ConsoleAppender" target="SYSTEM_OUT">
             <ThresholdFilter level="${consoleThreshold}" onMatch="ACCEPT" onMismatch="DENY"/>
             <PatternLayout pattern="${logPattern}"/>
         </Console>
 
-        <!-- File con rotazione giornaliera e retention 30 giorni -->
         <RollingFile name="FileAppender"
                      fileName="${logFile}"
-                     filePattern="logs/sostitutoincloud-@deploy.env@-%d{yyyy-MM-dd}.log.gz">
+                     filePattern="${sys:catalina.home}/logs/sostitutoincloud-@deploy.env@-%d{yyyy-MM-dd}.log.gz">
             <PatternLayout pattern="${logPattern}"/>
             <Policies>
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
@@ -44,7 +37,6 @@
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
-
     </Appenders>
 
     <Loggers>

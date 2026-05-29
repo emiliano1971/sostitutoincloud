@@ -1,40 +1,81 @@
-/* v2 */ import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { UserContext, UserRole } from '@/types';
-import { mockUsers } from '@/data/mock-data';
+import { get, setCredentials, clearCredentials } from '@/lib/apiClient';
+
+interface UserMeResponse {
+  id: number;
+  email: string;
+  ruolo: string;
+  fkTenantId: number;
+  firstName?: string;
+  lastName?: string;
+  attivo: boolean;
+}
 
 interface AuthContextType {
   user: UserContext | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => boolean;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   switchRole: (role: UserRole) => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+function mapToUserContext(me: UserMeResponse): UserContext {
+  return {
+    user_id: String(me.id),
+    email: me.email,
+    first_name: me.firstName ?? '',
+    last_name: me.lastName ?? '',
+    role: me.ruolo as UserRole,
+    tenant_id: me.fkTenantId ? String(me.fkTenantId) : undefined,
+  };
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserContext | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const login = useCallback((email: string, _password: string) => {
-    if (_password !== 'atene') return false;
-    const found = mockUsers.find(u => u.email === email);
-    if (found) {
-      setUser(found);
-      return true;
+  // On mount: if sessionStorage has email (stale from previous session) → clear it
+  useEffect(() => {
+    const savedEmail = sessionStorage.getItem('auth_email');
+    if (savedEmail) {
+      // Basic Auth doesn't persist credentials — force re-login on refresh
+      sessionStorage.removeItem('auth_email');
     }
-    setUser(mockUsers[1]);
-    return true;
   }, []);
 
-  const logout = useCallback(() => setUser(null), []);
-
-  const switchRole = useCallback((role: UserRole) => {
-    const found = mockUsers.find(u => u.role === role);
-    if (found) setUser(found);
+  const login = useCallback(async (email: string, password: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      setCredentials(email, password);
+      const me = await get<UserMeResponse>('/auth/me');
+      setUser(mapToUserContext(me));
+      sessionStorage.setItem('auth_email', email);
+    } catch (err) {
+      clearCredentials();
+      const message = err instanceof Error && err.message === 'UNAUTHORIZED'
+        ? 'Credenziali non valide'
+        : 'Errore di connessione al server';
+      throw new Error(message);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  const logout = useCallback(() => {
+    clearCredentials();
+    sessionStorage.removeItem('auth_email');
+    setUser(null);
+  }, []);
+
+  // No-op: role switching not supported with real auth
+  const switchRole = useCallback((_role: UserRole) => {}, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout, switchRole }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, switchRole }}>
       {children}
     </AuthContext.Provider>
   );

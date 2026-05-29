@@ -321,7 +321,7 @@ La configurazione è divisa in due livelli:
 ```xml
 <Properties>
     <Property name="logLevel">${log.level}</Property>
-    <Property name="logFile">logs/sostitutoincloud-${deploy.env}.log</Property>
+    <Property name="logFile">${sys:catalina.home}/logs/sostitutoincloud-${deploy.env}.log</Property>
 </Properties>
 <Appenders>
     <RollingFile name="FileAppender" fileName="${logFile}" .../>
