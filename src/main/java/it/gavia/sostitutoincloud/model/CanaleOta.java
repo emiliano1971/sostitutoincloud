@@ -21,6 +21,7 @@ public class CanaleOta {
     private String nome;
     private BigDecimal commissioneDefaultPct;
     private Boolean tassaSoggiornoInclusa;
+    private String touristTaxCollection;
     private Boolean attivo;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

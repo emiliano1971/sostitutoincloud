@@ -1,9 +1,11 @@
 package it.gavia.sostitutoincloud.controller;
 
+import it.gavia.sostitutoincloud.dto.owner.OwnerCreateDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerDashboardDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerDetailDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerListDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerStatusUpdateDTO;
+import it.gavia.sostitutoincloud.dto.owner.OwnerUpdateDTO;
 import it.gavia.sostitutoincloud.service.OwnerDashboardService;
 import it.gavia.sostitutoincloud.service.OwnerService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
@@ -11,6 +13,8 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.net.URI;
 
 import java.util.List;
 
@@ -25,6 +29,13 @@ public class OwnerController {
     public OwnerController(OwnerService ownerService, OwnerDashboardService ownerDashboardService) {
         this.ownerService = ownerService;
         this.ownerDashboardService = ownerDashboardService;
+    }
+
+    @PostMapping
+    public ResponseEntity<OwnerDetailDTO> create(@RequestBody OwnerCreateDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        OwnerDetailDTO created = ownerService.create(tenantId, dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @GetMapping
@@ -43,6 +54,15 @@ public class OwnerController {
         return ownerService.findById(tenantId, id)
                 .map(ResponseEntity::ok)
                 .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + id));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<OwnerDetailDTO> update(
+            @PathVariable Integer id,
+            @RequestBody OwnerUpdateDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        OwnerDetailDTO updated = ownerService.update(tenantId, id, dto);
+        return ResponseEntity.ok(updated);
     }
 
     @PatchMapping("/{id}/status")

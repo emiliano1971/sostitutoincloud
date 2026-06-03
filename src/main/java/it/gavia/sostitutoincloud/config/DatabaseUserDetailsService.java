@@ -52,6 +52,21 @@ public class DatabaseUserDetailsService implements UserDetailsService {
             throw new DisabledException("Utente disabilitato: " + email);
         }
 
+        if (user.getTenantId() != null) {
+            String statoTenant = jdbcTemplate.queryForObject(
+                    "SELECT stato FROM tenant WHERE id = ?", String.class, user.getTenantId());
+            if ("suspended".equals(statoTenant)) {
+                log.warn("Login bloccato - tenant sospeso: email={} tenantId={}", email, user.getTenantId());
+                throw new DisabledException(
+                        "Tenant sospeso — contatta l'amministratore di sistema per riattivare l'account");
+            }
+            if ("draft".equals(statoTenant)) {
+                log.warn("Login bloccato - tenant in draft: email={} tenantId={}", email, user.getTenantId());
+                throw new DisabledException(
+                        "Account non ancora attivato — contatta l'amministratore di sistema");
+            }
+        }
+
         log.debug("Utente autenticato: email={}, ruolo={}", email, user.getAuthorities());
         return user;
     }

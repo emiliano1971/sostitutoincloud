@@ -118,6 +118,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- ── CSV parsing ── -->
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>5.9</version>
+        </dependency>
+
         <!-- ── Test ── -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -30,11 +30,22 @@ function buildHeaders(): Record<string, string> {
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (res.status === 401) {
-    throw new Error('UNAUTHORIZED');
+    const text = await res.text().catch(() => '');
+    let message = 'UNAUTHORIZED';
+    try {
+      const json = JSON.parse(text);
+      if (json.error) message = json.error;
+    } catch { /* non-JSON body */ }
+    throw new Error(message);
   }
   if (!res.ok) {
-    const error = await res.text().catch(() => res.statusText);
-    throw new Error(`HTTP ${res.status}: ${error}`);
+    const text = await res.text().catch(() => res.statusText);
+    let message = text;
+    try {
+      const json = JSON.parse(text);
+      if (json.message) message = json.message;
+    } catch { /* non-JSON body */ }
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -57,6 +68,15 @@ export async function post<T>(path: string, body: unknown): Promise<T> {
 export async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(apiUrl(path), {
     method: 'PUT',
+    headers: buildHeaders(),
+    body: JSON.stringify(body),
+  });
+  return handleResponse<T>(res);
+}
+
+export async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(apiUrl(path), {
+    method: 'PATCH',
     headers: buildHeaders(),
     body: JSON.stringify(body),
   });

@@ -1,0 +1,6 @@
+external_booking_id,channel_code,property_code,guest_name,guest_email,guest_phone,guest_tax_code,checkin_date,checkout_date,nights,guests,status,gross_amount,ota_commission_amount,cleaning_amount,tourist_tax_amount,tourist_tax_included,currency
+AIRBNB-TEST-0010,airbnb,ROM-001,Mario Rossi,mario.rossi@email.it,+39 333 1000001,RSSMRA80A01H501Z,2026-07-10,2026-07-14,4,2,confirmed,480.00,72.00,50.00,14.00,false,EUR
+BOOKING-TEST-0011,booking,ROM-001,Sophie Müller,sophie.muller@email.de,,MLLSPH90B42F205X,2026-07-20,2026-07-25,5,3,confirmed,750.00,135.00,60.00,17.50,false,EUR
+AIRBNB-TEST-0012,airbnb,ROM-002,James Wilson,jwilson@email.co.uk,+44 20 1234567,,2026-08-01,2026-08-05,4,2,confirmed,560.00,84.00,50.00,0.00,false,EUR
+AIRBNB-20260523-0001,airbnb,ROM-001,John Smith,john.smith@email.com,+39 06 1234567,SMTJHN85A01H501X,2026-05-23,2026-05-27,4,2,confirmed,620.00,93.00,50.00,14.00,false,EUR
+AIRBNB-TEST-0013,airbnb,ROM-INESISTENTE,Carlo Bianchi,carlo@email.it,,,2026-08-10,2026-08-12,2,1,confirmed,280.00,42.00,0.00,7.00,false,EUR

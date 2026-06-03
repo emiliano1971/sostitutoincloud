@@ -4,9 +4,11 @@ import it.gavia.sostitutoincloud.dto.property.PropertyCreateDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyDetailDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyListDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyStatusUpdateDTO;
+import it.gavia.sostitutoincloud.dto.property.PropertyUpdateOwnerDTO;
 import it.gavia.sostitutoincloud.service.PropertyService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -45,7 +47,7 @@ public class PropertyController {
     public ResponseEntity<PropertyDetailDTO> create(@RequestBody PropertyCreateDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         PropertyDetailDTO created = propertyService.create(tenantId, dto);
-        return ResponseEntity.ok(created);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PatchMapping("/{id}/status")
@@ -54,6 +56,15 @@ public class PropertyController {
             @RequestBody PropertyStatusUpdateDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         PropertyDetailDTO updated = propertyService.updateStatus(tenantId, id, dto.getAttivo());
+        return ResponseEntity.ok(updated);
+    }
+
+    @PutMapping("/{id}/owner")
+    public ResponseEntity<PropertyDetailDTO> updateOwner(
+            @PathVariable Integer id,
+            @RequestBody PropertyUpdateOwnerDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        PropertyDetailDTO updated = propertyService.updateOwner(tenantId, id, dto.getFkOwnerId());
         return ResponseEntity.ok(updated);
     }
 }

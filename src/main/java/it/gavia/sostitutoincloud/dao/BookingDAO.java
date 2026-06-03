@@ -4,8 +4,12 @@ import it.gavia.sostitutoincloud.dao.mapper.BookingRowMapper;
 import it.gavia.sostitutoincloud.model.Booking;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
+import java.sql.Types;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -90,6 +94,50 @@ public class BookingDAO {
         log.debug("BookingDAO.findByTenantIdAndCheckinDateBetween() - tenantId={}, from={}, to={}", tenantId, from, to);
         String sql = SELECT_ALL + " WHERE b.fk_tenant_id = ? AND b.checkin_date BETWEEN ? AND ? ORDER BY b.checkin_date";
         return jdbcTemplate.query(sql, bookingRowMapper, tenantId, from, to);
+    }
+
+    public Booking insert(Booking booking) {
+        String sql = "INSERT INTO booking (" +
+                "fk_tenant_id, fk_property_id, fk_canale_ota_id, fk_scenario_fiscale_id, " +
+                "external_booking_id, guest_name, guest_tax_code, " +
+                "checkin_date, checkout_date, nights, guests, " +
+                "gross_amount, ota_commission_amount, cleaning_amount, pm_fee_amount, " +
+                "owner_net_amount, withholding_amount, tourist_tax_amount, " +
+                "tourist_tax_included_in_gross, tourist_tax_collection, " +
+                "fk_stato_prenotazione_id, payment_status, fk_stato_documento_id, settlement_status" +
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
+            ps.setObject(1, booking.getFkTenantId());
+            ps.setObject(2, booking.getFkPropertyId());
+            ps.setObject(3, booking.getFkCanaleOtaId());
+            ps.setObject(4, booking.getFkScenarioFiscaleId());
+            ps.setObject(5, booking.getExternalBookingId());
+            ps.setString(6, booking.getGuestName());
+            ps.setObject(7, booking.getGuestTaxCode());
+            ps.setObject(8, booking.getCheckinDate());
+            ps.setObject(9, booking.getCheckoutDate());
+            ps.setObject(10, booking.getNights());
+            ps.setObject(11, booking.getGuests());
+            ps.setObject(12, booking.getGrossAmount());
+            ps.setObject(13, booking.getOtaCommissionAmount());
+            ps.setObject(14, booking.getCleaningAmount());
+            ps.setObject(15, booking.getPmFeeAmount());
+            ps.setObject(16, booking.getOwnerNetAmount());
+            ps.setObject(17, booking.getWithholdingAmount());
+            ps.setObject(18, booking.getTouristTaxAmount());
+            ps.setBoolean(19, Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()));
+            ps.setObject(20, booking.getTouristTaxCollection(), Types.OTHER);
+            ps.setObject(21, booking.getFkStatoPrenotazioneId());
+            ps.setObject(22, booking.getPaymentStatus(), Types.OTHER);
+            ps.setObject(23, booking.getFkStatoDocumentoId());
+            ps.setObject(24, booking.getSettlementStatus(), Types.OTHER);
+            return ps;
+        }, keyHolder);
+        Integer id = keyHolder.getKey().intValue();
+        log.info("BookingDAO.insert() - externalId={} tenantId={}", booking.getExternalBookingId(), booking.getFkTenantId());
+        return findById(id).orElseThrow();
     }
 
     public Integer countByTenantIdAndStatoPrenotazioneId(Integer tenantId, Integer statoId) {

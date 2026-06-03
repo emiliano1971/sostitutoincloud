@@ -45,7 +45,8 @@ const Login = () => {
         { replace: true }
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Errore durante il login');
+      const msg = err instanceof Error ? err.message : 'Errore durante il login';
+      setError(msg === 'UNAUTHORIZED' ? 'Credenziali non valide' : msg);
     }
   };
 

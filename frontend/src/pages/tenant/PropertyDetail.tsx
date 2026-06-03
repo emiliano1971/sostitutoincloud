@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Building2, MapPin, User, Hash, Globe, Link2, Power, PowerOff, FileText, Loader2, AlertCircle } from 'lucide-react';
-import { getPropertyById, type PropertyDetail as PropertyDetailType } from '@/api/propertyApi';
+import { getPropertyById, updatePropertyStatus, updatePropertyOwner, type PropertyDetail as PropertyDetailType } from '@/api/propertyApi';
 import { getOwnerById, getOwners, type OwnerListItem } from '@/api/ownerApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
@@ -74,24 +74,38 @@ const PropertyDetail = () => {
     );
   }
 
-  const handleDeactivate = () => {
-    toast({
-      title: property.attivo ? 'Immobile disattivato' : 'Immobile riattivato',
-      description: `${property.displayName} è stato ${property.attivo ? 'disattivato' : 'riattivato'}.`,
-    });
-    setShowDeactivate(false);
+  const handleDeactivate = async () => {
+    try {
+      const updated = await updatePropertyStatus(property.id, !property.attivo);
+      setProperty(updated);
+      toast({
+        title: updated.attivo ? 'Immobile riattivato' : 'Immobile disattivato',
+        description: `${updated.displayName} è stato ${updated.attivo ? 'riattivato' : 'disattivato'}.`,
+      });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setShowDeactivate(false);
+    }
   };
 
-  const handleAssignOwner = () => {
-    const newOwner = tenantOwners.find(o => String(o.id) === selectedOwner);
-    if (newOwner) {
+  const handleAssignOwner = async () => {
+    const ownerId = Number(selectedOwner);
+    try {
+      const updated = await updatePropertyOwner(property.id, ownerId);
+      setProperty(updated);
+      const newOwner = tenantOwners.find(o => o.id === ownerId) ?? null;
+      setOwner(newOwner);
       toast({
         title: 'Proprietario assegnato',
-        description: `${newOwner.firstName} ${newOwner.lastName} è ora il proprietario di ${property.displayName}.`,
+        description: `${newOwner?.firstName} ${newOwner?.lastName} è ora il proprietario di ${updated.displayName}.`,
       });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setShowAssignOwner(false);
+      setSelectedOwner('');
     }
-    setShowAssignOwner(false);
-    setSelectedOwner('');
   };
 
   return (

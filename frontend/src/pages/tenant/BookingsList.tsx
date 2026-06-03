@@ -8,15 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Search, Filter, Eye, Upload, AlertTriangle } from 'lucide-react';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { useNavigate } from 'react-router-dom';
-
-const statusLabels: Record<string, string> = {
-  imported: 'Importata',
-  enriched: 'Arricchita',
-  ready: 'Pronta',
-  doc_issued: 'Doc. Emesso',
-  settled: 'Liquidata',
-  cancelled: 'Annullata',
-};
+import { useLookup } from '@/contexts/LookupContext';
 
 const statusColors: Record<string, string> = {
   imported: 'bg-muted text-muted-foreground',
@@ -38,6 +30,10 @@ const isFinalStatus = (status: string) =>
 
 const BookingsList = () => {
   const navigate = useNavigate();
+  const { lookups, getLabelByCodice } = useLookup();
+
+  const getStatusLabel = (codice: string) =>
+    getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('da_completare');
   const [channelFilter, setChannelFilter] = useState<string>('all');
@@ -94,11 +90,9 @@ const BookingsList = () => {
               <SelectContent>
                 <SelectItem value="da_completare">Da completare</SelectItem>
                 <SelectItem value="all">Tutti gli stati</SelectItem>
-                <SelectItem value="imported">Importata</SelectItem>
-                <SelectItem value="enriched">Arricchita</SelectItem>
-                <SelectItem value="ready">Pronta</SelectItem>
-                <SelectItem value="doc_issued">Doc. Emesso</SelectItem>
-                <SelectItem value="settled">Liquidata</SelectItem>
+                {lookups?.statiPrenotazione.filter(s => s.attivo).map(s => (
+                  <SelectItem key={s.codice} value={s.codice}>{s.descrizione}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={channelFilter} onValueChange={setChannelFilter}>
@@ -107,9 +101,9 @@ const BookingsList = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tutti i canali</SelectItem>
-                <SelectItem value="airbnb">Airbnb</SelectItem>
-                <SelectItem value="booking">Booking</SelectItem>
-                <SelectItem value="vrbo">Vrbo</SelectItem>
+                {lookups?.canaliOta.filter(c => c.attivo).map(c => (
+                  <SelectItem key={c.codice} value={c.codice}>{c.descrizione}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -173,7 +167,7 @@ const BookingsList = () => {
                             isOverdue ? statusColors[b.statoPrenotazione] :
                             statusColors[b.statoPrenotazione]
                           }>
-                            {isPenalty ? `${daysSinceCheckout}gg - PENALE` : isOverdue ? `${daysSinceCheckout}gg - Scaduta` : (statusLabels[b.statoPrenotazione] || b.statoPrenotazione)}
+                            {isPenalty ? `${daysSinceCheckout}gg - PENALE` : isOverdue ? `${daysSinceCheckout}gg - Scaduta` : getStatusLabel(b.statoPrenotazione)}
                           </Badge>
                         </div>
                       </TableCell>

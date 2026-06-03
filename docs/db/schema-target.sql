@@ -862,3 +862,47 @@ CREATE INDEX idx_tassa_soggiorno_comune
 CREATE INDEX idx_tassa_soggiorno_attivo
     ON regola_tassa_soggiorno(attivo, valida_dal, valida_al);
     -- regole attualmente in vigore
+
+-- ============================================================
+-- TENANT SETTINGS
+-- ============================================================
+CREATE TABLE tenant_settings (
+    id                          SERIAL          PRIMARY KEY,
+    fk_tenant_id                INTEGER         NOT NULL UNIQUE
+                                REFERENCES tenant(id) ON DELETE CASCADE,
+    -- Parametri fiscali
+    withholding_rate_primary    DECIMAL(5,2)    NOT NULL DEFAULT 21.00,
+    withholding_rate_secondary  DECIMAL(5,2)    NOT NULL DEFAULT 26.00,
+    codice_tributo_f24          VARCHAR(10)     NOT NULL DEFAULT '1919',
+    document_window_days        SMALLINT        NOT NULL DEFAULT 14,
+    cedolare_secca_enabled      BOOLEAN         NOT NULL DEFAULT TRUE,
+    -- Policy documentali
+    sdi_auto_send               BOOLEAN         NOT NULL DEFAULT TRUE,
+    deroga_ricevuta_enabled     BOOLEAN         NOT NULL DEFAULT FALSE,
+    numerazione_automatica      BOOLEAN         NOT NULL DEFAULT TRUE,
+    -- Notifiche
+    alert_scadenze_documenti    BOOLEAN         NOT NULL DEFAULT TRUE,
+    alert_scadenze_f24          BOOLEAN         NOT NULL DEFAULT TRUE,
+    notifiche_email             BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMP       NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE tenant_settings IS
+  'Parametri fiscali, policy documentali e notifiche per tenant';
+
+CREATE TRIGGER trg_tenant_settings_updated_at
+    BEFORE UPDATE ON tenant_settings
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- AGGIORNAMENTI SUCCESSIVI
+-- ============================================================
+
+-- Aggiunta tourist_tax_collection a canale_ota
+ALTER TABLE canale_ota
+  ADD COLUMN IF NOT EXISTS tourist_tax_collection
+  VARCHAR(20) DEFAULT 'contanti';
+
+COMMENT ON COLUMN canale_ota.tourist_tax_collection IS
+  'Modalità default riscossione tassa soggiorno per questo canale';

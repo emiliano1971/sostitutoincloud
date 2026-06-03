@@ -4,12 +4,17 @@ import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
+import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
+import it.gavia.sostitutoincloud.dto.tenant.TenantCreateDTO;
 import it.gavia.sostitutoincloud.dto.tenant.TenantDetailDTO;
 import it.gavia.sostitutoincloud.dto.tenant.TenantListDTO;
+import it.gavia.sostitutoincloud.dto.tenant.TenantUpdateDTO;
 import it.gavia.sostitutoincloud.model.Tenant;
+import it.gavia.sostitutoincloud.model.TenantSettings;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -24,15 +29,18 @@ public class TenantService {
     private final PropertyDAO propertyDAO;
     private final OwnerProfileDAO ownerProfileDAO;
     private final BookingDAO bookingDAO;
+    private final TenantSettingsDAO tenantSettingsDAO;
 
     public TenantService(TenantDAO tenantDAO,
                          PropertyDAO propertyDAO,
                          OwnerProfileDAO ownerProfileDAO,
-                         BookingDAO bookingDAO) {
+                         BookingDAO bookingDAO,
+                         TenantSettingsDAO tenantSettingsDAO) {
         this.tenantDAO = tenantDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
         this.bookingDAO = bookingDAO;
+        this.tenantSettingsDAO = tenantSettingsDAO;
     }
 
     public List<TenantListDTO> findAll() {
@@ -49,8 +57,53 @@ public class TenantService {
                 .map(this::toDetailDTO);
     }
 
+    public TenantDetailDTO create(TenantCreateDTO dto) {
+        log.info("TenantService.create() - taxCode={}", dto.getTaxCode());
+        tenantDAO.findByTaxCode(dto.getTaxCode()).ifPresent(t -> {
+            throw new IllegalArgumentException("Tenant con questo codice fiscale già esistente");
+        });
+        Tenant tenant = Tenant.builder()
+                .legalName(dto.getLegalName())
+                .displayName(dto.getDisplayName())
+                .taxCode(dto.getTaxCode())
+                .vatNumber(dto.getVatNumber())
+                .stato("draft")
+                .administrativeEmail(dto.getAdministrativeEmail())
+                .pec(dto.getPec())
+                .phone(dto.getPhone())
+                .legalAddress(dto.getLegalAddress())
+                .build();
+        Tenant saved = tenantDAO.insert(tenant);
+        tenantSettingsDAO.save(defaultSettings(saved.getId()));
+        return toDetailDTO(saved);
+    }
+
+    public TenantDetailDTO update(Integer id, TenantUpdateDTO dto) {
+        log.info("TenantService.update() - id={}", id);
+        Tenant existing = tenantDAO.findById(id)
+                .orElseThrow(() -> new RuntimeException("Tenant non trovato: id=" + id));
+        if (dto.getTaxCode() != null && !dto.getTaxCode().equals(existing.getTaxCode())) {
+            tenantDAO.findByTaxCode(dto.getTaxCode())
+                    .filter(t -> !t.getId().equals(id))
+                    .ifPresent(t -> { throw new IllegalArgumentException("Tenant con questo codice fiscale già esistente"); });
+        }
+        Tenant toUpdate = Tenant.builder()
+                .id(existing.getId())
+                .legalName(dto.getLegalName() != null ? dto.getLegalName() : existing.getLegalName())
+                .displayName(dto.getDisplayName() != null ? dto.getDisplayName() : existing.getDisplayName())
+                .taxCode(dto.getTaxCode() != null ? dto.getTaxCode() : existing.getTaxCode())
+                .vatNumber(dto.getVatNumber() != null ? dto.getVatNumber() : existing.getVatNumber())
+                .administrativeEmail(dto.getAdministrativeEmail() != null ? dto.getAdministrativeEmail() : existing.getAdministrativeEmail())
+                .pec(dto.getPec() != null ? dto.getPec() : existing.getPec())
+                .phone(dto.getPhone() != null ? dto.getPhone() : existing.getPhone())
+                .legalAddress(dto.getLegalAddress() != null ? dto.getLegalAddress() : existing.getLegalAddress())
+                .build();
+        Tenant updated = tenantDAO.update(toUpdate);
+        return toDetailDTO(updated);
+    }
+
     public TenantDetailDTO updateStatus(Integer id, String nuovoStato) {
-        log.warn("TenantService.updateStatus() - id={} stato={}", id, nuovoStato);
+        log.info("TenantService.updateStatus() - id={} stato={}", id, nuovoStato);
         if (!tenantDAO.existsById(id)) {
             throw new RuntimeException("Tenant non trovato: id=" + id);
         }
@@ -58,8 +111,25 @@ public class TenantService {
             throw new IllegalArgumentException(
                     "Stato non valido: '" + nuovoStato + "'. Valori ammessi: " + STATI_VALIDI);
         }
-        throw new UnsupportedOperationException(
-                "Update stato non ancora implementato - richiede insert/update nel DAO");
+        Tenant updated = tenantDAO.updateStatus(id, nuovoStato);
+        return toDetailDTO(updated);
+    }
+
+    private TenantSettings defaultSettings(Integer tenantId) {
+        return TenantSettings.builder()
+                .fkTenantId(tenantId)
+                .withholdingRatePrimary(new BigDecimal("21.00"))
+                .withholdingRateSecondary(new BigDecimal("26.00"))
+                .codiceTributoF24("1919")
+                .documentWindowDays(14)
+                .cedolareSeccaEnabled(true)
+                .sdiAutoSend(true)
+                .derogaRicevutaEnabled(false)
+                .numerazioneAutomatica(true)
+                .alertScadenzeDocumenti(true)
+                .alertScadenzeF24(true)
+                .notificheEmail(true)
+                .build();
     }
 
     private TenantListDTO toListDTO(Tenant t) {

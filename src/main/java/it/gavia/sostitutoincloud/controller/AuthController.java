@@ -12,8 +12,11 @@ import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @Log4j2
@@ -50,11 +53,14 @@ public class AuthController {
             UserMeDTO userDto = buildUserMeDTO(utente);
             log.info("Login riuscito per: {}", request.getEmail());
             return ResponseEntity.ok(LoginResponseDTO.builder().token(token).user(userDto).build());
-        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException |
-                 org.springframework.security.authentication.DisabledException e) {
+        } catch (DisabledException e) {
+            log.warn("Login bloccato - tenant sospeso: {}", request.getEmail());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", e.getMessage()));
+        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
             log.warn("Login fallito per: {} — {}", request.getEmail(), e.getMessage());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("{\"message\":\"Credenziali non valide\"}");
+                    .body(Map.of("message", "Credenziali non valide"));
         }
     }
 

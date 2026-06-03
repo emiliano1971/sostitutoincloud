@@ -196,3 +196,18 @@ SELECT setval('owner_profile_id_seq',    1);
 SELECT setval('property_id_seq',         2);
 SELECT setval('booking_id_seq',          6);
 SELECT setval('fiscal_document_id_seq',  2);
+
+-- tenant_settings per il tenant di test
+INSERT INTO tenant_settings (
+    fk_tenant_id,
+    withholding_rate_primary, withholding_rate_secondary,
+    codice_tributo_f24, document_window_days,
+    cedolare_secca_enabled, sdi_auto_send,
+    deroga_ricevuta_enabled, numerazione_automatica,
+    alert_scadenze_documenti, alert_scadenze_f24,
+    notifiche_email
+) VALUES (
+    1, 21.00, 26.00, '1919', 14,
+    TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, TRUE
+);
+SELECT setval('tenant_settings_id_seq', 1);

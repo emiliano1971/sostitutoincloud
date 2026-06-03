@@ -1,4 +1,4 @@
-import { get } from '@/lib/apiClient';
+import { get, post, put, patch } from '@/lib/apiClient';
 import type { MensileDTO } from './dashboardApi';
 
 export interface OwnerListItem {
@@ -46,4 +46,42 @@ export interface OwnerDashboardDTO {
 
 export async function getOwnerDashboard(ownerId: number): Promise<OwnerDashboardDTO> {
   return get<OwnerDashboardDTO>(`/owners/${ownerId}/dashboard`);
+}
+
+export interface OwnerCreateRequest {
+  ownerType: string;
+  firstName: string;
+  lastName: string;
+  taxCode: string;
+  email: string;
+  legalName?: string;
+  vatNumber?: string;
+  fkRegimeFiscaleId?: number;
+  phone?: string;
+  iban?: string;
+}
+
+export async function createOwner(data: OwnerCreateRequest): Promise<OwnerDetail> {
+  return post<OwnerDetail>('/owners', data);
+}
+
+export async function updateOwnerStatus(id: number, attivo: boolean): Promise<OwnerDetail> {
+  return patch<OwnerDetail>(`/owners/${id}/status`, { attivo });
+}
+
+export interface OwnerUpdateRequest {
+  ownerType?: string;
+  firstName?: string;
+  lastName?: string;
+  legalName?: string;
+  taxCode?: string;
+  vatNumber?: string;
+  fkRegimeFiscaleId?: number;
+  email?: string;
+  phone?: string;
+  iban?: string;
+}
+
+export async function updateOwner(id: number, data: OwnerUpdateRequest): Promise<OwnerDetail> {
+  return put<OwnerDetail>(`/owners/${id}`, data);
 }

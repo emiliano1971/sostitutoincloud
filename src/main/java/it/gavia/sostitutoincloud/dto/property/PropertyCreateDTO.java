@@ -14,6 +14,7 @@ public class PropertyCreateDTO {
     private String displayName;
     private String internalCode;
     private Integer fkTipoImmobileId;
+    private String propertyType;
     private String city;
     private String address;
     private String region;

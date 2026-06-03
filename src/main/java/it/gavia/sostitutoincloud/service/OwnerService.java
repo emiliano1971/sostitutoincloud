@@ -5,8 +5,10 @@ import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.SettlementDAO;
+import it.gavia.sostitutoincloud.dto.owner.OwnerCreateDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerDetailDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerListDTO;
+import it.gavia.sostitutoincloud.dto.owner.OwnerUpdateDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.RegimeFiscale;
@@ -84,13 +86,93 @@ public class OwnerService {
                 });
     }
 
-    public OwnerDetailDTO updateStatus(Integer tenantId, Integer ownerId, Boolean attivo) {
-        log.warn("OwnerService.updateStatus() - tenantId={}, ownerId={}, attivo={}", tenantId, ownerId, attivo);
-        OwnerProfile owner = ownerProfileDAO.findById(ownerId)
+    public OwnerDetailDTO create(Integer tenantId, OwnerCreateDTO dto) {
+        log.info("OwnerService.create() - tenantId={} taxCode={}", tenantId, dto.getTaxCode());
+        ownerProfileDAO.findByTaxCode(dto.getTaxCode())
+                .filter(o -> tenantId.equals(o.getFkTenantId()))
+                .ifPresent(o -> { throw new IllegalArgumentException("Proprietario con questo CF già esistente"); });
+        Integer regimeId = dto.getFkRegimeFiscaleId();
+        if (regimeId == null) {
+            regimeId = regimeFiscaleDAO.findByCodice("cedolare_secca")
+                    .orElseThrow(() -> new RuntimeException("Regime cedolare_secca non trovato"))
+                    .getId();
+        }
+        OwnerProfile owner = OwnerProfile.builder()
+                .fkTenantId(tenantId)
+                .ownerType(dto.getOwnerType())
+                .firstName(dto.getFirstName())
+                .lastName(dto.getLastName())
+                .legalName(dto.getLegalName())
+                .taxCode(dto.getTaxCode())
+                .vatNumber(dto.getVatNumber())
+                .fkRegimeFiscaleId(regimeId)
+                .email(dto.getEmail())
+                .phone(dto.getPhone())
+                .iban(dto.getIban())
+                .attivo(true)
+                .build();
+        OwnerProfile saved = ownerProfileDAO.insert(owner);
+        Map<Integer, String> regimeMap = buildRegimeMap();
+        return toDetailDTO(saved, regimeMap, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO, 0);
+    }
+
+    public OwnerDetailDTO update(Integer tenantId, Integer ownerId, OwnerUpdateDTO dto) {
+        log.info("OwnerService.update() - id={}", ownerId);
+        OwnerProfile existing = ownerProfileDAO.findById(ownerId)
                 .filter(o -> tenantId.equals(o.getFkTenantId()))
                 .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + ownerId));
-        throw new UnsupportedOperationException(
-                "Update stato non ancora implementato - richiede insert/update nel DAO");
+        if (dto.getTaxCode() != null && !dto.getTaxCode().equals(existing.getTaxCode())) {
+            ownerProfileDAO.findByTaxCode(dto.getTaxCode())
+                    .filter(o -> tenantId.equals(o.getFkTenantId()) && !o.getId().equals(ownerId))
+                    .ifPresent(o -> { throw new IllegalArgumentException("Proprietario con questo CF già esistente"); });
+        }
+        OwnerProfile toUpdate = OwnerProfile.builder()
+                .id(existing.getId())
+                .fkTenantId(existing.getFkTenantId())
+                .ownerType(dto.getOwnerType() != null ? dto.getOwnerType() : existing.getOwnerType())
+                .firstName(dto.getFirstName() != null ? dto.getFirstName() : existing.getFirstName())
+                .lastName(dto.getLastName() != null ? dto.getLastName() : existing.getLastName())
+                .legalName(dto.getLegalName() != null ? dto.getLegalName() : existing.getLegalName())
+                .taxCode(dto.getTaxCode() != null ? dto.getTaxCode() : existing.getTaxCode())
+                .vatNumber(dto.getVatNumber() != null ? dto.getVatNumber() : existing.getVatNumber())
+                .fkRegimeFiscaleId(dto.getFkRegimeFiscaleId() != null ? dto.getFkRegimeFiscaleId() : existing.getFkRegimeFiscaleId())
+                .email(dto.getEmail() != null ? dto.getEmail() : existing.getEmail())
+                .phone(dto.getPhone() != null ? dto.getPhone() : existing.getPhone())
+                .iban(dto.getIban() != null ? dto.getIban() : existing.getIban())
+                .build();
+        OwnerProfile updated = ownerProfileDAO.updateAnagrafica(toUpdate);
+        Map<Integer, String> regimeMap = buildRegimeMap();
+        List<Booking> bookings = bookingDAO.findByOwnerId(updated.getId());
+        BigDecimal totalGross = bookings.stream()
+                .map(Booking::getGrossAmount).filter(v -> v != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalOwnerNet = bookings.stream()
+                .map(Booking::getOwnerNetAmount).filter(v -> v != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return toDetailDTO(updated, regimeMap,
+                propertyDAO.findByOwnerId(updated.getId()).size(),
+                bookings.size(), totalGross, totalOwnerNet,
+                settlementDAO.findByOwnerId(updated.getId()).size());
+    }
+
+    public OwnerDetailDTO updateStatus(Integer tenantId, Integer ownerId, Boolean attivo) {
+        log.info("OwnerService.updateStatus() - tenantId={}, ownerId={}, attivo={}", tenantId, ownerId, attivo);
+        ownerProfileDAO.findById(ownerId)
+                .filter(o -> tenantId.equals(o.getFkTenantId()))
+                .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + ownerId));
+        OwnerProfile updated = ownerProfileDAO.updateStatus(ownerId, attivo);
+        Map<Integer, String> regimeMap = buildRegimeMap();
+        List<Booking> bookings = bookingDAO.findByOwnerId(updated.getId());
+        BigDecimal totalGross = bookings.stream()
+                .map(Booking::getGrossAmount).filter(v -> v != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalOwnerNet = bookings.stream()
+                .map(Booking::getOwnerNetAmount).filter(v -> v != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return toDetailDTO(updated, regimeMap,
+                propertyDAO.findByOwnerId(updated.getId()).size(),
+                bookings.size(), totalGross, totalOwnerNet,
+                settlementDAO.findByOwnerId(updated.getId()).size());
     }
 
     private Map<Integer, String> buildRegimeMap() {

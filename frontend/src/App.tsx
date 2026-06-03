@@ -12,12 +12,15 @@ import NotFound from "./pages/NotFound";
 // Admin pages
 import SuperAdminDashboard from "./pages/admin/SuperAdminDashboard";
 import TenantsList from "./pages/admin/TenantsList";
+import TenantCreate from "./pages/admin/TenantCreate";
+import TenantDetail from "./pages/admin/TenantDetail";
 
 // Tenant pages
 import TenantDashboard from "./pages/tenant/TenantDashboard";
 import BookingsList from "./pages/tenant/BookingsList";
 import BookingDetail from "./pages/tenant/BookingDetail";
 import OwnersList from "./pages/tenant/OwnersList";
+import OwnerCreate from "./pages/tenant/OwnerCreate";
 import OwnerDetail from "./pages/tenant/OwnerDetail";
 import PropertyContracts from "./pages/tenant/PropertyContracts";
 import PropertiesList from "./pages/tenant/PropertiesList";
@@ -61,6 +64,8 @@ function AppRoutes() {
       <Route path="/admin" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
         <Route index element={<SuperAdminDashboard />} />
         <Route path="tenants" element={<TenantsList />} />
+        <Route path="tenants/new" element={<TenantCreate />} />
+        <Route path="tenants/:id" element={<TenantDetail />} />
         <Route path="audit" element={<AuditLog />} />
       </Route>
 
@@ -71,6 +76,7 @@ function AppRoutes() {
         <Route path="bookings" element={<BookingsList />} />
         <Route path="bookings/:id" element={<BookingDetail />} />
         <Route path="owners" element={<OwnersList />} />
+        <Route path="owners/new" element={<OwnerCreate />} />
         <Route path="owners/:id" element={<OwnerDetail />} />
         <Route path="properties" element={<PropertiesList />} />
         <Route path="properties/new" element={<PropertyCreate />} />

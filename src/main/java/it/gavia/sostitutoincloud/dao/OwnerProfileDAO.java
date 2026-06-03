@@ -4,8 +4,12 @@ import it.gavia.sostitutoincloud.dao.mapper.OwnerProfileRowMapper;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
+import java.sql.Types;
 import java.util.List;
 import java.util.Optional;
 
@@ -68,5 +72,73 @@ public class OwnerProfileDAO {
                 ownerProfileRowMapper, tenantId, attivo);
         log.debug("OwnerProfileDAO.findByTenantIdAndAttivo() - trovati {} record", result.size());
         return result;
+    }
+
+    public OwnerProfile insert(OwnerProfile owner) {
+        String sql = "INSERT INTO owner_profile " +
+                     "(fk_tenant_id, owner_type, first_name, last_name, legal_name, " +
+                     "tax_code, vat_number, fk_regime_fiscale_id, email, phone, iban, attivo) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
+            ps.setObject(1, owner.getFkTenantId());
+            ps.setObject(2, owner.getOwnerType(), Types.OTHER);
+            ps.setObject(3, owner.getFirstName());
+            ps.setObject(4, owner.getLastName());
+            ps.setObject(5, owner.getLegalName());
+            ps.setString(6, owner.getTaxCode());
+            ps.setObject(7, owner.getVatNumber());
+            ps.setObject(8, owner.getFkRegimeFiscaleId());
+            ps.setObject(9, owner.getEmail());
+            ps.setObject(10, owner.getPhone());
+            ps.setObject(11, owner.getIban());
+            ps.setBoolean(12, Boolean.TRUE.equals(owner.getAttivo()));
+            return ps;
+        }, keyHolder);
+        Integer id = keyHolder.getKey().intValue();
+        log.info("OwnerProfileDAO.insert() - id={}", id);
+        return findById(id).orElseThrow();
+    }
+
+    public OwnerProfile updateStatus(Integer id, Boolean attivo) {
+        log.info("OwnerProfileDAO.updateStatus() - id={} attivo={}", id, attivo);
+        jdbcTemplate.update(
+                "UPDATE owner_profile SET attivo = ?, updated_at = NOW() WHERE id = ?",
+                attivo, id);
+        return findById(id).orElseThrow();
+    }
+
+    public OwnerProfile updateFkRegimeFiscale(Integer id, Integer fkRegimeFiscaleId) {
+        log.info("OwnerProfileDAO.updateFkRegimeFiscale() - id={} fkRegimeFiscaleId={}", id, fkRegimeFiscaleId);
+        jdbcTemplate.update(
+                "UPDATE owner_profile SET fk_regime_fiscale_id = ?, updated_at = NOW() WHERE id = ?",
+                fkRegimeFiscaleId, id);
+        return findById(id).orElseThrow();
+    }
+
+    public OwnerProfile updateAnagrafica(OwnerProfile owner) {
+        log.info("OwnerProfileDAO.updateAnagrafica() - id={}", owner.getId());
+        String sql = "UPDATE owner_profile SET " +
+                     "owner_type = ?, first_name = ?, last_name = ?, legal_name = ?, " +
+                     "tax_code = ?, vat_number = ?, fk_regime_fiscale_id = ?, " +
+                     "email = ?, phone = ?, iban = ?, updated_at = NOW() " +
+                     "WHERE id = ?";
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(sql);
+            ps.setObject(1, owner.getOwnerType(), Types.OTHER);
+            ps.setObject(2, owner.getFirstName());
+            ps.setObject(3, owner.getLastName());
+            ps.setObject(4, owner.getLegalName());
+            ps.setString(5, owner.getTaxCode());
+            ps.setObject(6, owner.getVatNumber());
+            ps.setObject(7, owner.getFkRegimeFiscaleId());
+            ps.setObject(8, owner.getEmail());
+            ps.setObject(9, owner.getPhone());
+            ps.setObject(10, owner.getIban());
+            ps.setObject(11, owner.getId());
+            return ps;
+        });
+        return findById(owner.getId()).orElseThrow();
     }
 }

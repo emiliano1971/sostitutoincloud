@@ -66,9 +66,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(mapToUserContext(response.user));
     } catch (err) {
       clearToken();
-      const message = err instanceof Error && err.message === 'UNAUTHORIZED'
-        ? 'Credenziali non valide'
-        : 'Errore di connessione al server';
+      // Propaga il messaggio reale dal server
+      const message = err instanceof Error ? err.message : 'Errore durante il login';
       throw new Error(message);
     } finally {
       setIsLoading(false);

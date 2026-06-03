@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,14 +6,20 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Building2, Hash, Globe, Save } from 'lucide-react';
-import { mockOwners } from '@/data/mock-data';
+import { ArrowLeft, Building2, Hash, Globe, Save, Loader2 } from 'lucide-react';
+import { getOwners, type OwnerListItem } from '@/api/ownerApi';
+import { createProperty } from '@/api/propertyApi';
 import { useToast } from '@/hooks/use-toast';
 
 const PropertyCreate = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const tenantOwners = mockOwners.filter(o => o.tenant_id === 't1' && o.status === 'active');
+  const [tenantOwners, setTenantOwners] = useState<OwnerListItem[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    getOwners(true).then(setTenantOwners).catch(() => {});
+  }, []);
 
   const [form, setForm] = useState({
     display_name: '',
@@ -33,13 +39,38 @@ const PropertyCreate = () => {
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.display_name || !form.internal_code || !form.city) {
       toast({ title: 'Errore', description: 'Compila almeno nome, codice interno e città.', variant: 'destructive' });
       return;
     }
-    toast({ title: 'Immobile creato', description: `${form.display_name} è stato creato con successo.` });
-    navigate('/properties');
+    const otaCodes = [
+      { canaleCodiceName: 'airbnb',       externalId: form.airbnb_id },
+      { canaleCodiceName: 'booking',      externalId: form.booking_id },
+      { canaleCodiceName: 'vrbo',         externalId: form.vrbo_id },
+      { canaleCodiceName: 'tripadvisor',  externalId: form.tripadvisor_id },
+      { canaleCodiceName: 'expedia',      externalId: form.expedia_id },
+    ].filter(o => o.externalId.trim() !== '');
+    setIsSaving(true);
+    try {
+      await createProperty({
+        displayName:  form.display_name,
+        internalCode: form.internal_code,
+        propertyType: form.property_type,
+        address:      form.address || undefined,
+        city:         form.city,
+        region:       form.region || undefined,
+        cinCode:      form.cin_code || undefined,
+        fkOwnerId:    form.owner_id ? Number(form.owner_id) : undefined,
+        otaCodes:     otaCodes.length > 0 ? otaCodes : undefined,
+      });
+      toast({ title: 'Immobile creato', description: `${form.display_name} è stato creato con successo.` });
+      navigate('/properties');
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -108,8 +139,8 @@ const PropertyCreate = () => {
                   <SelectTrigger><SelectValue placeholder="Seleziona proprietario..." /></SelectTrigger>
                   <SelectContent>
                     {tenantOwners.map(o => (
-                      <SelectItem key={o.owner_id} value={o.owner_id}>
-                        {o.first_name} {o.last_name} — {o.tax_code}
+                      <SelectItem key={o.id} value={String(o.id)}>
+                        {o.firstName} {o.lastName} — {o.taxCode}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -150,8 +181,11 @@ const PropertyCreate = () => {
       </div>
 
       <div className="flex justify-end gap-3">
-        <Button variant="outline" onClick={() => navigate('/properties')}>Annulla</Button>
-        <Button className="gap-2" onClick={handleSave}><Save className="h-4 w-4" /> Crea Immobile</Button>
+        <Button variant="outline" onClick={() => navigate('/properties')} disabled={isSaving}>Annulla</Button>
+        <Button className="gap-2" onClick={handleSave} disabled={isSaving}>
+          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Crea Immobile
+        </Button>
       </div>
     </div>
   );

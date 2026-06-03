@@ -15,6 +15,7 @@ import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.PropertyOtaCode;
 import it.gavia.sostitutoincloud.model.TipoImmobile;
+import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
@@ -78,18 +79,76 @@ public class PropertyService {
     }
 
     public PropertyDetailDTO create(Integer tenantId, PropertyCreateDTO dto) {
-        log.warn("PropertyService.create() - tenantId={}, displayName={}", tenantId, dto.getDisplayName());
-        throw new UnsupportedOperationException(
-                "Creazione property non ancora implementata - richiede insert nel DAO");
+        log.info("PropertyService.create() - tenantId={}, internalCode={}", tenantId, dto.getInternalCode());
+        boolean codeExists = propertyDAO.findByTenantId(tenantId).stream()
+                .anyMatch(p -> dto.getInternalCode().equals(p.getInternalCode()));
+        if (codeExists) {
+            throw new IllegalArgumentException("Codice immobile già esistente");
+        }
+        Integer tipoId = dto.getFkTipoImmobileId();
+        if (tipoId == null && dto.getPropertyType() != null) {
+            tipoId = tipoImmobileDAO.findByCodice(dto.getPropertyType())
+                    .map(TipoImmobile::getId)
+                    .orElse(null);
+        }
+        if (tipoId == null) {
+            tipoId = tipoImmobileDAO.findAll().stream()
+                    .findFirst()
+                    .map(TipoImmobile::getId)
+                    .orElse(null);
+        }
+        final Integer resolvedTipoId = tipoId;
+        Property property = Property.builder()
+                .fkTenantId(tenantId)
+                .fkOwnerId(dto.getFkOwnerId())
+                .fkPmUserId(SecurityUtils.getCurrentUtenteId())
+                .fkTipoImmobileId(resolvedTipoId)
+                .internalCode(dto.getInternalCode())
+                .displayName(dto.getDisplayName())
+                .address(dto.getAddress() != null ? dto.getAddress() : "")
+                .city(dto.getCity())
+                .region(dto.getRegion() != null ? dto.getRegion() : "")
+                .cinCode(dto.getCinCode())
+                .attivo(true)
+                .build();
+        Property saved = propertyDAO.insert(property);
+        if (dto.getOtaCodes() != null && !dto.getOtaCodes().isEmpty()) {
+            for (OtaCodeDTO ota : dto.getOtaCodes()) {
+                canaleOtaDAO.findByCodice(ota.getCanaleCodiceName()).ifPresent(canale -> {
+                    PropertyOtaCode otaCode = PropertyOtaCode.builder()
+                            .fkPropertyId(saved.getId())
+                            .fkCanaleOtaId(canale.getId())
+                            .externalId(ota.getExternalId())
+                            .build();
+                    propertyOtaCodeDAO.insert(otaCode);
+                });
+            }
+        }
+        LookupMaps maps = buildLookupMaps(tenantId);
+        return toDetailDTO(saved, maps);
     }
 
     public PropertyDetailDTO updateStatus(Integer tenantId, Integer propertyId, Boolean attivo) {
-        log.warn("PropertyService.updateStatus() - tenantId={}, propertyId={}, attivo={}", tenantId, propertyId, attivo);
+        log.info("PropertyService.updateStatus() - tenantId={}, propertyId={}, attivo={}", tenantId, propertyId, attivo);
         propertyDAO.findById(propertyId)
                 .filter(p -> tenantId.equals(p.getFkTenantId()))
                 .orElseThrow(() -> new RuntimeException("Property non trovata: id=" + propertyId));
-        throw new UnsupportedOperationException(
-                "Update stato non ancora implementato - richiede update nel DAO");
+        Property updated = propertyDAO.updateStatus(propertyId, attivo);
+        LookupMaps maps = buildLookupMaps(tenantId);
+        return toDetailDTO(updated, maps);
+    }
+
+    public PropertyDetailDTO updateOwner(Integer tenantId, Integer propertyId, Integer fkOwnerId) {
+        log.info("PropertyService.updateOwner() - tenantId={}, propertyId={}, fkOwnerId={}", tenantId, propertyId, fkOwnerId);
+        propertyDAO.findById(propertyId)
+                .filter(p -> tenantId.equals(p.getFkTenantId()))
+                .orElseThrow(() -> new RuntimeException("Property non trovata: id=" + propertyId));
+        ownerProfileDAO.findById(fkOwnerId)
+                .filter(o -> tenantId.equals(o.getFkTenantId()))
+                .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + fkOwnerId));
+        Property updated = propertyDAO.updateOwner(propertyId, fkOwnerId);
+        LookupMaps maps = buildLookupMaps(tenantId);
+        return toDetailDTO(updated, maps);
     }
 
     // ── lookup helpers ──────────────────────────────────────────────────────
