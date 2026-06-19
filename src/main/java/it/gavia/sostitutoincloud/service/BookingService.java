@@ -2,22 +2,29 @@ package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.ScenarioFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
+import it.gavia.sostitutoincloud.dao.TenantDAO;
+import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
+import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.CanaleOta;
+import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.ScenarioFiscale;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
+import it.gavia.sostitutoincloud.model.Tenant;
+import it.gavia.sostitutoincloud.model.TipoDocumento;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +51,9 @@ public class BookingService {
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
     private final ScenarioFiscaleDAO scenarioFiscaleDAO;
+    private final TenantDAO tenantDAO;
+    private final TipoDocumentoDAO tipoDocumentoDAO;
+    private final FiscalDocumentDAO fiscalDocumentDAO;
 
     public BookingService(BookingDAO bookingDAO,
                           PropertyDAO propertyDAO,
@@ -51,7 +61,10 @@ public class BookingService {
                           CanaleOtaDAO canaleOtaDAO,
                           StatoPrenotazioneDAO statoPrenotazioneDAO,
                           StatoDocumentoDAO statoDocumentoDAO,
-                          ScenarioFiscaleDAO scenarioFiscaleDAO) {
+                          ScenarioFiscaleDAO scenarioFiscaleDAO,
+                          TenantDAO tenantDAO,
+                          TipoDocumentoDAO tipoDocumentoDAO,
+                          FiscalDocumentDAO fiscalDocumentDAO) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -59,6 +72,9 @@ public class BookingService {
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
         this.statoDocumentoDAO = statoDocumentoDAO;
         this.scenarioFiscaleDAO = scenarioFiscaleDAO;
+        this.tenantDAO = tenantDAO;
+        this.tipoDocumentoDAO = tipoDocumentoDAO;
+        this.fiscalDocumentDAO = fiscalDocumentDAO;
     }
 
     public List<BookingListDTO> findByTenantId(Integer tenantId, BookingFilterDTO filter) {
@@ -137,8 +153,11 @@ public class BookingService {
                 .collect(Collectors.toMap(StatoDocumento::getId, s -> s));
         Map<Integer, ScenarioFiscale> scenariById = scenarioFiscaleDAO.findAll().stream()
                 .collect(Collectors.toMap(ScenarioFiscale::getId, s -> s));
+        Map<Integer, TipoDocumento> tipiDocumentoById = tipoDocumentoDAO.findAll().stream()
+                .collect(Collectors.toMap(TipoDocumento::getId, t -> t));
+        Tenant tenant = tenantDAO.findById(tenantId).orElse(null);
         return new LookupMaps(propertiesById, ownersById, canaliById,
-                statiPrenotazioneById, statiDocumentoById, scenariById);
+                statiPrenotazioneById, statiDocumentoById, scenariById, tipiDocumentoById, tenant);
     }
 
     private String statoCodiceDa(Integer id, Map<Integer, StatoPrenotazione> map) {
@@ -193,6 +212,9 @@ public class BookingService {
         Property prop = maps.propertiesById.get(b.getFkPropertyId());
         CanaleOta canale = maps.canaliById.get(b.getFkCanaleOtaId());
         ScenarioFiscale scenario = maps.scenariById.get(b.getFkScenarioFiscaleId());
+        OwnerProfile owner = prop != null && prop.getFkOwnerId() != null
+                ? maps.ownersById.get(prop.getFkOwnerId()) : null;
+        Tenant tenant = maps.tenant;
 
         BigDecimal ownerNet = safeVal(b.getOwnerNetAmount());
         BigDecimal withholding = safeVal(b.getWithholdingAmount());
@@ -240,6 +262,45 @@ public class BookingService {
                 .createdAt(b.getCreatedAt())
                 .updatedAt(b.getUpdatedAt())
                 .splitEconomico(split)
+                // dati immobile (per dialog)
+                .propertyAddress(prop != null ? prop.getAddress() : null)
+                .propertyCity(prop != null ? prop.getCity() : null)
+                .propertyInternalCode(prop != null ? prop.getInternalCode() : null)
+                // dati proprietario (per dialog)
+                .ownerTaxCode(owner != null ? owner.getTaxCode() : null)
+                .ownerIban(owner != null ? owner.getIban() : null)
+                .ownerEmail(owner != null ? owner.getEmail() : null)
+                // dati tenant (per dialog fattura PM)
+                .tenantLegalName(tenant != null ? tenant.getLegalName() : null)
+                .tenantVatNumber(tenant != null ? tenant.getVatNumber() : null)
+                .tenantTaxCode(tenant != null ? tenant.getTaxCode() : null)
+                .tenantLegalAddress(tenant != null ? tenant.getLegalAddress() : null)
+                .tenantPec(tenant != null ? tenant.getPec() : null)
+                // documenti fiscali associati alla prenotazione
+                .documenti(mapDocumenti(b.getId(), maps))
+                .build();
+    }
+
+    private List<FiscalDocumentSummaryDTO> mapDocumenti(Integer bookingId, LookupMaps maps) {
+        return fiscalDocumentDAO.findByBookingId(bookingId).stream()
+                .map(d -> toDocumentSummaryDTO(d, maps))
+                .toList();
+    }
+
+    private FiscalDocumentSummaryDTO toDocumentSummaryDTO(FiscalDocument d, LookupMaps maps) {
+        TipoDocumento tipo = d.getFkTipoDocumentoId() != null
+                ? maps.tipiDocumentoById.get(d.getFkTipoDocumentoId()) : null;
+        return FiscalDocumentSummaryDTO.builder()
+                .id(d.getId())
+                .documentNumber(d.getDocumentNumber())
+                .tipoDocumento(tipo != null ? tipo.getCodice() : null)
+                .statoDocumento(statoDocCodiceDa(d.getFkStatoDocumentoId(), maps.statiDocumentoById))
+                .dataEmissione(d.getIssueDate())
+                .importoTotale(d.getTotalAmount())
+                .imponibile(d.getImponibile())
+                .ritenutaAmount(d.getRitenutaAmount())
+                .bolloAmount(d.getBolloAmount())
+                .ivaAmount(d.getIvaAmount())
                 .build();
     }
 
@@ -249,6 +310,8 @@ public class BookingService {
             Map<Integer, CanaleOta> canaliById,
             Map<Integer, StatoPrenotazione> statiPrenotazioneById,
             Map<Integer, StatoDocumento> statiDocumentoById,
-            Map<Integer, ScenarioFiscale> scenariById) {
+            Map<Integer, ScenarioFiscale> scenariById,
+            Map<Integer, TipoDocumento> tipiDocumentoById,
+            Tenant tenant) {
     }
 }

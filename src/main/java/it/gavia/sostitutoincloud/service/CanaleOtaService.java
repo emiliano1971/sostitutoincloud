@@ -16,9 +16,11 @@ import java.util.List;
 public class CanaleOtaService {
 
     private final CanaleOtaDAO canaleOtaDAO;
+    private final AuditService auditService;
 
-    public CanaleOtaService(CanaleOtaDAO canaleOtaDAO) {
+    public CanaleOtaService(CanaleOtaDAO canaleOtaDAO, AuditService auditService) {
         this.canaleOtaDAO = canaleOtaDAO;
+        this.auditService = auditService;
     }
 
     public List<CanaleOtaDTO> findAll() {
@@ -47,7 +49,10 @@ public class CanaleOtaService {
                         ? dto.getTouristTaxCollection() : "contanti")
                 .attivo(true)
                 .build();
-        return toDTO(canaleOtaDAO.insert(canale));
+        CanaleOta saved = canaleOtaDAO.insert(canale);
+        auditService.log("ota.create", "CanaleOta", saved.getId(),
+                "Creato canale OTA " + saved.getNome());
+        return toDTO(saved);
     }
 
     public CanaleOtaDTO update(Integer id, CanaleOtaUpdateDTO dto) {
@@ -66,7 +71,10 @@ public class CanaleOtaService {
                         ? dto.getTouristTaxCollection() : existing.getTouristTaxCollection())
                 .attivo(dto.getAttivo() != null ? dto.getAttivo() : existing.getAttivo())
                 .build();
-        return toDTO(canaleOtaDAO.update(toUpdate));
+        CanaleOta updated = canaleOtaDAO.update(toUpdate);
+        auditService.log("ota.update", "CanaleOta", updated.getId(),
+                "Aggiornato canale OTA " + updated.getNome());
+        return toDTO(updated);
     }
 
     public CanaleOtaDTO updateStatus(Integer id, Boolean attivo) {

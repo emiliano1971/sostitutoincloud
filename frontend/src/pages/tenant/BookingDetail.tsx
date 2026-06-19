@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, FileText, Receipt, User, Home, Calendar, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { getBookingById, type BookingDetail as BookingDetailType } from '@/api/bookingApi';
-import type { Booking } from '@/types';
+import { generateDocument, type DocumentGenerateResponse } from '@/api/documentApi';
+import type { Booking, OwnerProfile, Property } from '@/types';
+import { toast } from '@/hooks/use-toast';
 import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
 
@@ -44,14 +46,6 @@ function toDialogBooking(b: BookingDetailType): Booking {
   };
 }
 
-const tenantData = {
-  legal_name: 'Casa Vacanze Italia SRL',
-  vat_number: 'IT12345678901',
-  tax_code: 'CVITRL80A01H501Z',
-  address: 'Via Roma 1, 00100 Roma RM',
-  pec: 'casavacanze@pec.it',
-};
-
 const BookingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -60,6 +54,34 @@ const BookingDetail = () => {
   const [booking, setBooking] = useState<BookingDetailType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [generatedReceipt, setGeneratedReceipt] = useState<DocumentGenerateResponse | null>(null);
+  const [generatedInvoice, setGeneratedInvoice] = useState<DocumentGenerateResponse | null>(null);
+  const [savingReceipt, setSavingReceipt] = useState(false);
+  const [savingInvoice, setSavingInvoice] = useState(false);
+
+  const handleEmetti = async (
+    tipoDocumento: 'ricevuta_owner' | 'fattura_pm',
+    setSaving: (v: boolean) => void,
+    setGenerated: (d: DocumentGenerateResponse) => void,
+  ) => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      const doc = await generateDocument({ bookingId: Number(id), tipoDocumento });
+      setGenerated(doc);
+      toast({ title: 'Documento emesso', description: `Numero ${doc.documentNumber}` });
+      // ricarica il booking per aggiornare i badge di stato
+      const refreshed = await getBookingById(Number(id));
+      setBooking(refreshed);
+    } catch (err) {
+      toast({
+        title: 'Errore generazione documento',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -111,6 +133,31 @@ const BookingDetail = () => {
 
   const fmt = (v: number) => `€${Math.abs(v).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
   const dialogBooking = toDialogBooking(booking);
+
+  // Documento già emesso per tipo (codice lookup tipo_documento: 'ricevuta' / 'fattura')
+  const getDocumento = (tipo: string) =>
+    booking.documenti?.find(d => d.tipoDocumento === tipo);
+  const existingReceipt = getDocumento('ricevuta');
+  const existingInvoice = getDocumento('fattura');
+
+  // Dati reali dal backend per i dialog (sostituiscono i mock hardcoded)
+  const dialogOwner = {
+    tax_code: booking.ownerTaxCode ?? '',
+    iban: booking.ownerIban ?? '',
+    email: booking.ownerEmail ?? '',
+  } as unknown as OwnerProfile;
+  const dialogProperty = {
+    address: booking.propertyAddress ?? '',
+    city: booking.propertyCity ?? '',
+    internal_code: booking.propertyInternalCode ?? '',
+  } as unknown as Property;
+  const tenantData = {
+    legal_name: booking.tenantLegalName ?? '',
+    vat_number: booking.tenantVatNumber ?? '',
+    tax_code: booking.tenantTaxCode ?? '',
+    address: booking.tenantLegalAddress ?? '',
+    pec: booking.tenantPec ?? '',
+  };
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -204,12 +251,24 @@ const BookingDetail = () => {
           open={invoiceOpen}
           onOpenChange={setInvoiceOpen}
           booking={dialogBooking}
+          owner={dialogOwner}
+          property={dialogProperty}
           tenantData={tenantData}
+          generatedDoc={generatedInvoice}
+          existingDoc={existingInvoice}
+          isSaving={savingInvoice}
+          onEmetti={() => handleEmetti('fattura_pm', setSavingInvoice, setGeneratedInvoice)}
         />
         <ReceiptOwnerDialog
           open={receiptOpen}
           onOpenChange={setReceiptOpen}
           booking={dialogBooking}
+          owner={dialogOwner}
+          property={dialogProperty}
+          generatedDoc={generatedReceipt}
+          existingDoc={existingReceipt}
+          isSaving={savingReceipt}
+          onEmetti={() => handleEmetti('ricevuta_owner', setSavingReceipt, setGeneratedReceipt)}
         />
       </div>
     </div>

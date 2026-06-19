@@ -20,7 +20,7 @@ public class AuditLogService {
     }
 
     public List<AuditLogDTO> findByTenantId(Integer tenantId, String q, String action,
-                                              Integer page, Integer size) {
+                                              String entity, Integer page, Integer size) {
         int pageNum = page != null ? page : 0;
         int pageSize = size != null ? size : 20;
 
@@ -39,6 +39,12 @@ public class AuditLogService {
                 .filter(a -> {
                     if (action != null && !action.isBlank()) {
                         return a.getAction() != null && a.getAction().startsWith(action);
+                    }
+                    return true;
+                })
+                .filter(a -> {
+                    if (entity != null && !entity.isBlank()) {
+                        return a.getEntityType() != null && a.getEntityType().equalsIgnoreCase(entity);
                     }
                     return true;
                 })

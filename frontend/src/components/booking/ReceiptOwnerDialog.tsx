@@ -5,6 +5,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Receipt, Printer, Send } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
+import type { DocumentGenerateResponse } from '@/api/documentApi';
+import type { FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface ReceiptOwnerDialogProps {
   open: boolean;
@@ -12,13 +14,30 @@ interface ReceiptOwnerDialogProps {
   booking: Booking;
   owner?: OwnerProfile;
   property?: Property;
+  generatedDoc?: DocumentGenerateResponse | null;
+  existingDoc?: FiscalDocumentSummary;
+  isSaving?: boolean;
+  onEmetti?: () => void;
 }
 
 const fmt = (v: number) => `€${Math.abs(v).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
 
-const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property }: ReceiptOwnerDialogProps) => {
-  const receiptNumber = `RIC-2025-${String(parseInt(booking.booking_id.replace('b', ''))).padStart(4, '0')}`;
-  const receiptDate = new Date().toLocaleDateString('it-IT');
+const statoDocLabels: Record<string, string> = {
+  draft: 'Bozza',
+  ready: 'Pronto',
+  sent_sdi: 'Inviato SDI',
+  accepted: 'Accettato',
+  rejected: 'Rifiutato',
+};
+
+const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, generatedDoc, existingDoc, isSaving, onEmetti }: ReceiptOwnerDialogProps) => {
+  const receiptNumber = existingDoc?.documentNumber
+    ?? generatedDoc?.documentNumber
+    ?? `RIC-${new Date().getFullYear()}-${String(booking.booking_id).padStart(4, '0')}`;
+  const receiptDateSource = existingDoc?.dataEmissione ?? generatedDoc?.dataEmissione;
+  const receiptDate = receiptDateSource
+    ? new Date(receiptDateSource).toLocaleDateString('it-IT')
+    : new Date().toLocaleDateString('it-IT');
 
   // Ricevuta: canone di locazione (gross - commissione OTA) fuori campo IVA
   const canonLocazione = booking.gross_amount;
@@ -144,16 +163,41 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property }: Re
           </div>
         </div>
 
+        {existingDoc ? (
+          <div className="rounded-md bg-success/10 text-success text-xs px-3 py-2 flex items-center gap-2">
+            <span>Documento già emesso — numero <strong>{existingDoc.documentNumber}</strong></span>
+            <Badge variant="outline" className="ml-auto text-xs">{statoDocLabels[existingDoc.statoDocumento] ?? existingDoc.statoDocumento}</Badge>
+          </div>
+        ) : generatedDoc && (
+          <div className="rounded-md bg-success/10 text-success text-xs px-3 py-2">
+            Documento emesso — numero <strong>{generatedDoc.documentNumber}</strong> (stato: {generatedDoc.statoDocumento})
+          </div>
+        )}
+
         <div className="flex gap-3 justify-end pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
-          <Button className="gap-2" onClick={() => window.print()}>
-            <Printer className="h-4 w-4" />
-            Stampa / PDF
-          </Button>
-          <Button className="gap-2 bg-success hover:bg-success/90 text-white" onClick={() => { toast({ title: 'Ricevuta inviata', description: `Ricevuta ${receiptNumber} inviata al proprietario` }); onOpenChange(false); }}>
-            <Send className="h-4 w-4" />
-            Invia
-          </Button>
+          {existingDoc ? (
+            <Button className="gap-2" disabled>
+              <Receipt className="h-4 w-4" />
+              Già emesso il {receiptDate}
+            </Button>
+          ) : !generatedDoc ? (
+            <Button className="gap-2" onClick={onEmetti} disabled={isSaving}>
+              <Receipt className="h-4 w-4" />
+              {isSaving ? 'Emissione…' : 'Emetti Documento'}
+            </Button>
+          ) : (
+            <>
+              <Button className="gap-2" onClick={() => window.print()}>
+                <Printer className="h-4 w-4" />
+                Stampa / PDF
+              </Button>
+              <Button className="gap-2 bg-success hover:bg-success/90 text-white" onClick={() => { toast({ title: 'Ricevuta inviata', description: `Ricevuta ${receiptNumber} inviata al proprietario` }); onOpenChange(false); }}>
+                <Send className="h-4 w-4" />
+                Invia
+              </Button>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>

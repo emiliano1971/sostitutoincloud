@@ -45,8 +45,9 @@ public class SecurityUtils {
     public static boolean hasRole(String role) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null) return false;
-        String roleWithPrefix = role.startsWith("ROLE_") ? role : "ROLE_" + role;
         return auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals(roleWithPrefix));
+                .anyMatch(a ->
+                        a.getAuthority().equalsIgnoreCase(role) ||
+                        a.getAuthority().equalsIgnoreCase("ROLE_" + role));
     }
 }

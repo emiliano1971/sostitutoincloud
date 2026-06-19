@@ -1,4 +1,4 @@
-import { get } from '@/lib/apiClient';
+import { get, post } from '@/lib/apiClient';
 
 export interface DocumentListItem {
   id: number;
@@ -54,4 +54,33 @@ export async function getDocuments(params?: {
 
 export async function getDocumentById(id: number): Promise<DocumentDetail> {
   return get<DocumentDetail>(`/documents/${id}`);
+}
+
+export interface DocumentGenerateRequest {
+  bookingId: number;
+  tipoDocumento: 'ricevuta_owner' | 'fattura_pm';
+  dataEmissione?: string;
+}
+
+export interface DocumentGenerateResponse {
+  documentId: number;
+  documentNumber: string;
+  tipoDocumento: string;
+  dataEmissione: string;
+  importoTotale: number;
+  importoBollo: number;
+  imponibile: number;
+  iva: number;
+  ritenuta: number;
+  statoDocumento: string;
+  bookingExternalId: string;
+  guestName: string;
+  ownerName: string;
+  propertyName: string;
+}
+
+export async function generateDocument(
+  data: DocumentGenerateRequest
+): Promise<DocumentGenerateResponse> {
+  return post<DocumentGenerateResponse>('/documents/generate', data);
 }

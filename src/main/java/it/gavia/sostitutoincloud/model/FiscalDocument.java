@@ -28,6 +28,10 @@ public class FiscalDocument {
     private String recipientTaxCode;
     private BigDecimal totalAmount;
     private BigDecimal vatAmount;
+    private BigDecimal imponibile;
+    private BigDecimal ritenutaAmount;
+    private BigDecimal bolloAmount;
+    private BigDecimal ivaAmount;
     private Integer fkStatoDocumentoId;
     private String sdiIdentifier;
     private LocalDateTime createdAt;

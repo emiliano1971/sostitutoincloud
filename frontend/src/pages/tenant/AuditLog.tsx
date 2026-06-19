@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -6,24 +7,45 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Search, Filter, Loader2, AlertCircle } from 'lucide-react';
 import { getAuditLog, type AuditLogItem } from '@/api/auditApi';
 
+const ENTITA_FILTER = [
+  { value: 'Booking', label: 'Prenotazioni' },
+  { value: 'FiscalDocument', label: 'Documenti' },
+  { value: 'OwnerProfile', label: 'Proprietari' },
+  { value: 'Property', label: 'Immobili' },
+  { value: 'Tenant', label: 'Tenant' },
+  { value: 'Utente', label: 'Utenti' },
+  { value: 'CanaleOta', label: 'OTA' },
+  { value: 'RegolaTassaSoggiorno', label: 'Tassa Soggiorno' },
+];
+
 const AuditLog = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const entityFilter = searchParams.get('entity') ?? 'all';
   const [search, setSearch] = useState('');
-  const [actionFilter, setActionFilter] = useState('all');
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const setEntityFilter = (value: string) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (value === 'all') next.delete('entity');
+      else next.set('entity', value);
+      return next;
+    });
+  };
 
   useEffect(() => {
     setIsLoading(true);
     setError(null);
     getAuditLog({
       q: search || undefined,
-      action: actionFilter !== 'all' ? actionFilter : undefined,
+      entity: entityFilter !== 'all' ? entityFilter : undefined,
     })
       .then(setLogs)
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
-  }, [search, actionFilter]);
+  }, [search, entityFilter]);
 
   return (
     <div className="space-y-6">
@@ -39,16 +61,13 @@ const AuditLog = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Cerca nei log..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
             </div>
-            <Select value={actionFilter} onValueChange={setActionFilter}>
-              <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
+            <Select value={entityFilter} onValueChange={setEntityFilter}>
+              <SelectTrigger className="w-[180px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tutte le azioni</SelectItem>
-                <SelectItem value="booking">Prenotazioni</SelectItem>
-                <SelectItem value="document">Documenti</SelectItem>
-                <SelectItem value="settlement">Liquidazioni</SelectItem>
-                <SelectItem value="tenant">Tenant</SelectItem>
-                <SelectItem value="owner">Proprietari</SelectItem>
-                <SelectItem value="f24">F24</SelectItem>
+                <SelectItem value="all">Tutte le entità</SelectItem>
+                {ENTITA_FILTER.map(e => (
+                  <SelectItem key={e.value} value={e.value}>{e.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

@@ -4,8 +4,12 @@ import it.gavia.sostitutoincloud.dao.mapper.UtenteRowMapper;
 import it.gavia.sostitutoincloud.model.Utente;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
+import java.sql.Types;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,7 +49,9 @@ public class UtenteDAO {
 
     public List<Utente> findByTenantId(Integer tenantId) {
         log.debug("UtenteDAO.findByTenantId() - tenantId={}", tenantId);
-        List<Utente> result = jdbcTemplate.query(SELECT_COLS + " WHERE fk_tenant_id = ? ORDER BY id", utenteRowMapper, tenantId);
+        List<Utente> result = jdbcTemplate.query(
+                SELECT_COLS + " WHERE fk_tenant_id = ? AND ruolo != 'super_admin' ORDER BY created_at DESC",
+                utenteRowMapper, tenantId);
         log.debug("UtenteDAO.findByTenantId() - trovati {} record", result.size());
         return result;
     }
@@ -70,5 +76,38 @@ public class UtenteDAO {
         log.debug("UtenteDAO.existsByEmail() - email={}", email);
         Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM utente WHERE email = ?", Integer.class, email);
         return count != null && count > 0;
+    }
+
+    public Utente insert(Utente utente) {
+        String sql = "INSERT INTO utente " +
+                     "(fk_tenant_id, email, first_name, last_name, password_hash, ruolo, attivo, fk_owner_id) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
+            ps.setObject(1, utente.getFkTenantId());
+            ps.setString(2, utente.getEmail());
+            ps.setString(3, utente.getFirstName());
+            ps.setString(4, utente.getLastName());
+            ps.setString(5, utente.getPasswordHash());
+            ps.setObject(6, utente.getRuolo(), Types.OTHER);
+            ps.setBoolean(7, Boolean.TRUE.equals(utente.getAttivo()));
+            ps.setObject(8, utente.getFkOwnerId());
+            return ps;
+        }, keyHolder);
+        Integer id = keyHolder.getKey().intValue();
+        log.info("UtenteDAO.insert() - email={} ruolo={}", utente.getEmail(), utente.getRuolo());
+        return findById(id).orElseThrow();
+    }
+
+    public Utente updateStatus(Integer id, Boolean attivo) {
+        log.info("UtenteDAO.updateStatus() - id={} attivo={}", id, attivo);
+        jdbcTemplate.update("UPDATE utente SET attivo = ?, updated_at = NOW() WHERE id = ?", attivo, id);
+        return findById(id).orElseThrow();
+    }
+
+    public void delete(Integer id) {
+        log.info("UtenteDAO.delete() - id={}", id);
+        jdbcTemplate.update("DELETE FROM utente WHERE id = ?", id);
     }
 }

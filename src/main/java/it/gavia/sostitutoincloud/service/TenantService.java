@@ -5,6 +5,8 @@ import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
+import it.gavia.sostitutoincloud.dto.admin.SuperAdminDashboardDTO;
+import it.gavia.sostitutoincloud.dto.admin.TenantSummaryDTO;
 import it.gavia.sostitutoincloud.dto.tenant.TenantCreateDTO;
 import it.gavia.sostitutoincloud.dto.tenant.TenantDetailDTO;
 import it.gavia.sostitutoincloud.dto.tenant.TenantListDTO;
@@ -15,6 +17,8 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -30,17 +34,20 @@ public class TenantService {
     private final OwnerProfileDAO ownerProfileDAO;
     private final BookingDAO bookingDAO;
     private final TenantSettingsDAO tenantSettingsDAO;
+    private final AuditService auditService;
 
     public TenantService(TenantDAO tenantDAO,
                          PropertyDAO propertyDAO,
                          OwnerProfileDAO ownerProfileDAO,
                          BookingDAO bookingDAO,
-                         TenantSettingsDAO tenantSettingsDAO) {
+                         TenantSettingsDAO tenantSettingsDAO,
+                         AuditService auditService) {
         this.tenantDAO = tenantDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
         this.bookingDAO = bookingDAO;
         this.tenantSettingsDAO = tenantSettingsDAO;
+        this.auditService = auditService;
     }
 
     public List<TenantListDTO> findAll() {
@@ -55,6 +62,57 @@ public class TenantService {
         log.info("TenantService.findById() - id={}", id);
         return tenantDAO.findById(id)
                 .map(this::toDetailDTO);
+    }
+
+    public SuperAdminDashboardDTO getDashboard() {
+        List<Tenant> tenants = tenantDAO.findAll();
+        log.debug("TenantService.getDashboard() - {} tenant trovati", tenants.size());
+
+        int totalTenant = tenants.size();
+        int tenantAttivi = (int) tenants.stream().filter(t -> "active".equals(t.getStato())).count();
+        int tenantSospesi = (int) tenants.stream().filter(t -> "suspended".equals(t.getStato())).count();
+        int tenantDraft = (int) tenants.stream().filter(t -> "draft".equals(t.getStato())).count();
+
+        int totalProprietari = 0;
+        int totalImmobili = 0;
+        int totalPrenotazioni = 0;
+        for (Tenant t : tenants) {
+            totalProprietari += ownerProfileDAO.findByTenantId(t.getId()).size();
+            totalImmobili += propertyDAO.findByTenantId(t.getId()).size();
+            totalPrenotazioni += bookingDAO.findByTenantId(t.getId()).size();
+        }
+
+        List<TenantSummaryDTO> ultimiTenant = tenants.stream()
+                .sorted(Comparator.comparing(Tenant::getCreatedAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .limit(5)
+                .map(this::toSummaryDTO)
+                .toList();
+
+        return SuperAdminDashboardDTO.builder()
+                .totalTenant(totalTenant)
+                .tenantAttivi(tenantAttivi)
+                .tenantSospesi(tenantSospesi)
+                .tenantDraft(tenantDraft)
+                .totalProprietari(totalProprietari)
+                .totalImmobili(totalImmobili)
+                .totalPrenotazioni(totalPrenotazioni)
+                .ultimiTenant(ultimiTenant)
+                .build();
+    }
+
+    private TenantSummaryDTO toSummaryDTO(Tenant t) {
+        LocalDateTime created = t.getCreatedAt();
+        return TenantSummaryDTO.builder()
+                .id(t.getId())
+                .displayName(t.getDisplayName())
+                .legalName(t.getLegalName())
+                .stato(t.getStato())
+                .propertiesCount(propertyDAO.findByTenantId(t.getId()).size())
+                .ownersCount(ownerProfileDAO.findByTenantId(t.getId()).size())
+                .bookingsCount(bookingDAO.findByTenantId(t.getId()).size())
+                .createdAt(created != null ? created.toLocalDate() : null)
+                .build();
     }
 
     public TenantDetailDTO create(TenantCreateDTO dto) {
@@ -75,6 +133,8 @@ public class TenantService {
                 .build();
         Tenant saved = tenantDAO.insert(tenant);
         tenantSettingsDAO.save(defaultSettings(saved.getId()));
+        auditService.log("tenant.create", "Tenant", saved.getId(),
+                "Creato tenant " + saved.getDisplayName());
         return toDetailDTO(saved);
     }
 
@@ -99,6 +159,8 @@ public class TenantService {
                 .legalAddress(dto.getLegalAddress() != null ? dto.getLegalAddress() : existing.getLegalAddress())
                 .build();
         Tenant updated = tenantDAO.update(toUpdate);
+        auditService.log("tenant.update", "Tenant", updated.getId(),
+                "Aggiornato tenant " + updated.getDisplayName());
         return toDetailDTO(updated);
     }
 
@@ -112,6 +174,13 @@ public class TenantService {
                     "Stato non valido: '" + nuovoStato + "'. Valori ammessi: " + STATI_VALIDI);
         }
         Tenant updated = tenantDAO.updateStatus(id, nuovoStato);
+        if ("active".equals(nuovoStato)) {
+            auditService.log("tenant.activate", "Tenant", updated.getId(),
+                    "Tenant " + updated.getDisplayName() + " riattivato");
+        } else if ("suspended".equals(nuovoStato)) {
+            auditService.log("tenant.suspend", "Tenant", updated.getId(),
+                    "Tenant " + updated.getDisplayName() + " sospeso");
+        }
         return toDetailDTO(updated);
     }
 

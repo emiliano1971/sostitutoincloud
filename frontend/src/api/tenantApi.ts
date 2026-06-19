@@ -63,3 +63,29 @@ export interface TenantUpdateRequest {
 export async function updateTenant(id: number, data: TenantUpdateRequest): Promise<TenantDetail> {
   return put<TenantDetail>(`/admin/tenants/${id}`, data);
 }
+
+export interface TenantSummary {
+  id: number;
+  displayName: string;
+  legalName: string;
+  stato: string;
+  propertiesCount: number;
+  ownersCount: number;
+  bookingsCount: number;
+  createdAt: string;
+}
+
+export interface SuperAdminDashboard {
+  totalTenant: number;
+  tenantAttivi: number;
+  tenantSospesi: number;
+  tenantDraft: number;
+  totalProprietari: number;
+  totalImmobili: number;
+  totalPrenotazioni: number;
+  ultimiTenant: TenantSummary[];
+}
+
+export async function getSuperAdminDashboard(): Promise<SuperAdminDashboard> {
+  return get<SuperAdminDashboard>('/admin/dashboard');
+}

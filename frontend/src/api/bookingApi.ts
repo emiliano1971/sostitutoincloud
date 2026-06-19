@@ -12,6 +12,19 @@ export interface SplitEconomico {
   touristTaxIncludedInGross: boolean;
 }
 
+export interface FiscalDocumentSummary {
+  id: number;
+  documentNumber: string;
+  tipoDocumento: string;
+  statoDocumento: string;
+  dataEmissione: string;
+  importoTotale: number;
+  imponibile: number;
+  ritenutaAmount: number;
+  bolloAmount: number;
+  ivaAmount: number;
+}
+
 export interface BookingListItem {
   id: number;
   fkPropertyId?: number;
@@ -48,6 +61,22 @@ export interface BookingDetail extends BookingListItem {
   touristTaxCollection?: string;
   updatedAt: string;
   splitEconomico: SplitEconomico;
+  // Dati immobile per dialog
+  propertyAddress?: string;
+  propertyCity?: string;
+  propertyInternalCode?: string;
+  // Dati proprietario per dialog
+  ownerTaxCode?: string;
+  ownerIban?: string;
+  ownerEmail?: string;
+  // Dati tenant per dialog fattura PM
+  tenantLegalName?: string;
+  tenantVatNumber?: string;
+  tenantTaxCode?: string;
+  tenantLegalAddress?: string;
+  tenantPec?: string;
+  // Documenti fiscali associati alla prenotazione
+  documenti: FiscalDocumentSummary[];
 }
 
 export async function getBookings(params?: {

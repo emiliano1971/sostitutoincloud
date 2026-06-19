@@ -30,17 +30,20 @@ public class OwnerService {
     private final BookingDAO bookingDAO;
     private final SettlementDAO settlementDAO;
     private final RegimeFiscaleDAO regimeFiscaleDAO;
+    private final AuditService auditService;
 
     public OwnerService(OwnerProfileDAO ownerProfileDAO,
                         PropertyDAO propertyDAO,
                         BookingDAO bookingDAO,
                         SettlementDAO settlementDAO,
-                        RegimeFiscaleDAO regimeFiscaleDAO) {
+                        RegimeFiscaleDAO regimeFiscaleDAO,
+                        AuditService auditService) {
         this.ownerProfileDAO = ownerProfileDAO;
         this.propertyDAO = propertyDAO;
         this.bookingDAO = bookingDAO;
         this.settlementDAO = settlementDAO;
         this.regimeFiscaleDAO = regimeFiscaleDAO;
+        this.auditService = auditService;
     }
 
     public List<OwnerListDTO> findByTenantId(Integer tenantId) {
@@ -112,6 +115,8 @@ public class OwnerService {
                 .attivo(true)
                 .build();
         OwnerProfile saved = ownerProfileDAO.insert(owner);
+        auditService.log("owner.create", "OwnerProfile", saved.getId(),
+                "Creato proprietario " + saved.getFirstName() + " " + saved.getLastName());
         Map<Integer, String> regimeMap = buildRegimeMap();
         return toDetailDTO(saved, regimeMap, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO, 0);
     }
@@ -141,6 +146,8 @@ public class OwnerService {
                 .iban(dto.getIban() != null ? dto.getIban() : existing.getIban())
                 .build();
         OwnerProfile updated = ownerProfileDAO.updateAnagrafica(toUpdate);
+        auditService.log("owner.update", "OwnerProfile", updated.getId(),
+                "Aggiornato proprietario " + updated.getFirstName() + " " + updated.getLastName());
         Map<Integer, String> regimeMap = buildRegimeMap();
         List<Booking> bookings = bookingDAO.findByOwnerId(updated.getId());
         BigDecimal totalGross = bookings.stream()
@@ -161,6 +168,13 @@ public class OwnerService {
                 .filter(o -> tenantId.equals(o.getFkTenantId()))
                 .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + ownerId));
         OwnerProfile updated = ownerProfileDAO.updateStatus(ownerId, attivo);
+        if (Boolean.TRUE.equals(attivo)) {
+            auditService.log("owner.activate", "OwnerProfile", updated.getId(),
+                    "Proprietario " + updated.getFirstName() + " " + updated.getLastName() + " riattivato");
+        } else {
+            auditService.log("owner.suspend", "OwnerProfile", updated.getId(),
+                    "Proprietario " + updated.getFirstName() + " " + updated.getLastName() + " disattivato");
+        }
         Map<Integer, String> regimeMap = buildRegimeMap();
         List<Booking> bookings = bookingDAO.findByOwnerId(updated.getId());
         BigDecimal totalGross = bookings.stream()

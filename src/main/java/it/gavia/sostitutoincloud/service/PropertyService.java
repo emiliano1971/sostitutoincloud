@@ -34,19 +34,22 @@ public class PropertyService {
     private final BookingDAO bookingDAO;
     private final CanaleOtaDAO canaleOtaDAO;
     private final TipoImmobileDAO tipoImmobileDAO;
+    private final AuditService auditService;
 
     public PropertyService(PropertyDAO propertyDAO,
                            PropertyOtaCodeDAO propertyOtaCodeDAO,
                            OwnerProfileDAO ownerProfileDAO,
                            BookingDAO bookingDAO,
                            CanaleOtaDAO canaleOtaDAO,
-                           TipoImmobileDAO tipoImmobileDAO) {
+                           TipoImmobileDAO tipoImmobileDAO,
+                           AuditService auditService) {
         this.propertyDAO = propertyDAO;
         this.propertyOtaCodeDAO = propertyOtaCodeDAO;
         this.ownerProfileDAO = ownerProfileDAO;
         this.bookingDAO = bookingDAO;
         this.canaleOtaDAO = canaleOtaDAO;
         this.tipoImmobileDAO = tipoImmobileDAO;
+        this.auditService = auditService;
     }
 
     public List<PropertyListDTO> findByTenantId(Integer tenantId) {
@@ -124,6 +127,8 @@ public class PropertyService {
                 });
             }
         }
+        auditService.log("property.create", "Property", saved.getId(),
+                "Creato immobile " + saved.getDisplayName() + " (" + saved.getInternalCode() + ")");
         LookupMaps maps = buildLookupMaps(tenantId);
         return toDetailDTO(saved, maps);
     }
@@ -134,6 +139,13 @@ public class PropertyService {
                 .filter(p -> tenantId.equals(p.getFkTenantId()))
                 .orElseThrow(() -> new RuntimeException("Property non trovata: id=" + propertyId));
         Property updated = propertyDAO.updateStatus(propertyId, attivo);
+        if (Boolean.TRUE.equals(attivo)) {
+            auditService.log("property.activate", "Property", updated.getId(),
+                    "Immobile " + updated.getDisplayName() + " riattivato");
+        } else {
+            auditService.log("property.suspend", "Property", updated.getId(),
+                    "Immobile " + updated.getDisplayName() + " disattivato");
+        }
         LookupMaps maps = buildLookupMaps(tenantId);
         return toDetailDTO(updated, maps);
     }
@@ -147,6 +159,8 @@ public class PropertyService {
                 .filter(o -> tenantId.equals(o.getFkTenantId()))
                 .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + fkOwnerId));
         Property updated = propertyDAO.updateOwner(propertyId, fkOwnerId);
+        auditService.log("property.assign_owner", "Property", updated.getId(),
+                "Immobile " + updated.getDisplayName() + " assegnato a owner id=" + fkOwnerId);
         LookupMaps maps = buildLookupMaps(tenantId);
         return toDetailDTO(updated, maps);
     }

@@ -7,7 +7,7 @@ let _config: AppConfig | null = null;
 
 export async function loadConfig(): Promise<AppConfig> {
   if (_config) return _config;
-  const res = await fetch('/config.json');
+  const res = await fetch(`${import.meta.env.BASE_URL}config.json`);
   if (!res.ok) throw new Error('Impossibile caricare config.json');
   _config = await res.json();
   return _config!;

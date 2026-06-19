@@ -24,9 +24,10 @@ public class AuditLogController {
     public ResponseEntity<List<AuditLogDTO>> findAll(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String action,
+            @RequestParam(required = false) String entity,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        return ResponseEntity.ok(auditLogService.findByTenantId(tenantId, q, action, page, size));
+        return ResponseEntity.ok(auditLogService.findByTenantId(tenantId, q, action, entity, page, size));
     }
 }

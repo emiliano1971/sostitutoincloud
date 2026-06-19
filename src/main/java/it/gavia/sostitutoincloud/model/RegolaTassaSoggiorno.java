@@ -26,6 +26,11 @@ public class RegolaTassaSoggiorno {
     private LocalDate validaDal;
     private LocalDate validaAl;
     private Boolean attivo;
+    private String region;
+    private BigDecimal maxAmountPerPerson;
+    private String exemptions;
+    private String notes;
+    private Integer fkTenantId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

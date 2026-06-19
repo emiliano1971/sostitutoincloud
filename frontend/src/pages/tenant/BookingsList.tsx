@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Card, CardContent } from '@/components/ui/card';
 import { Search, Filter, Eye, Upload, AlertTriangle } from 'lucide-react';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLookup } from '@/contexts/LookupContext';
 
 const statusColors: Record<string, string> = {
@@ -34,9 +34,10 @@ const BookingsList = () => {
 
   const getStatusLabel = (codice: string) =>
     getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('da_completare');
-  const [channelFilter, setChannelFilter] = useState<string>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.get('q') ?? '';
+  const statusFilter = searchParams.get('status') ?? 'da_completare';
+  const channelFilter = searchParams.get('channel') ?? 'all';
   const [allBookings, setAllBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +81,9 @@ const BookingsList = () => {
           <div className="flex flex-wrap gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Cerca ospite, immobile, ID..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+              <Input placeholder="Cerca ospite, immobile, ID..." value={search} onChange={e => setSearchParams(prev => { if (e.target.value) prev.set('q', e.target.value); else prev.delete('q'); return prev; })} className="pl-9" />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => setSearchParams(prev => { prev.set('status', value); return prev; })}>
               <SelectTrigger className="w-[180px]">
                 <Filter className="h-3.5 w-3.5 mr-2" />
                 <SelectValue placeholder="Stato" />
@@ -95,7 +96,7 @@ const BookingsList = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={channelFilter} onValueChange={setChannelFilter}>
+            <Select value={channelFilter} onValueChange={(value) => setSearchParams(prev => { prev.set('channel', value); return prev; })}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Canale" />
               </SelectTrigger>

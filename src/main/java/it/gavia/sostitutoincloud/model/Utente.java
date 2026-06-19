@@ -20,6 +20,7 @@ public class Utente {
     private String email;
     private String firstName;
     private String lastName;
+    private String passwordHash;
     private String ruolo;
     private Boolean attivo;
     private LocalDateTime lastLogin;

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,29 +8,81 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Calculator, MapPin, Info, Users, Calendar, Shield } from 'lucide-react';
-import { mockTouristTaxRules, calculateTouristTax, type TouristTaxRule } from '@/data/tourist-tax';
+import { Calculator, MapPin, Users, Calendar, Shield, Loader2, AlertCircle } from 'lucide-react';
+import {
+  getTouristTaxRules,
+  getTouristTaxRule,
+  calculateTouristTax,
+  type TouristTaxRuleListItem,
+  type TouristTaxRuleDetail,
+  type TouristTaxCalculation,
+} from '@/api/touristTaxApi';
 
 const TouristTaxSettings = () => {
-  const [rules] = useState<TouristTaxRule[]>(mockTouristTaxRules);
-  const [selectedRule, setSelectedRule] = useState<TouristTaxRule | null>(null);
+  const [rules, setRules] = useState<TouristTaxRuleListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedRule, setSelectedRule] = useState<TouristTaxRuleDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // Simulator
   const [simNights, setSimNights] = useState('3');
   const [simGuests, setSimGuests] = useState<{ age: string }[]>([{ age: '35' }, { age: '33' }]);
   const [simZone, setSimZone] = useState('');
   const [simMonth, setSimMonth] = useState('7');
+  const [simulation, setSimulation] = useState<TouristTaxCalculation | null>(null);
 
   const addGuest = () => setSimGuests(prev => [...prev, { age: '30' }]);
   const removeGuest = (i: number) => setSimGuests(prev => prev.filter((_, idx) => idx !== i));
 
-  const simulation = selectedRule ? calculateTouristTax({
-    rule: selectedRule,
-    nights: parseInt(simNights) || 1,
-    guests: simGuests.map(g => ({ age: parseInt(g.age) || 30 })),
-    checkinDate: new Date(2025, (parseInt(simMonth) || 1) - 1, 15),
-    zone: simZone || undefined,
-  }) : null;
+  // Load list
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    getTouristTaxRules()
+      .then(data => { if (active) setRules(data); })
+      .catch(err => { if (active) setError(err instanceof Error ? err.message : 'Errore di caricamento'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  // Open detail by id
+  const openDetail = (id: number) => {
+    setDetailLoading(true);
+    setSelectedRule(null);
+    setSimulation(null);
+    getTouristTaxRule(id)
+      .then(detail => {
+        setSelectedRule(detail);
+        setSimZone(detail.zone[0]?.label || '');
+      })
+      .catch(err => setError(err instanceof Error ? err.message : 'Errore di caricamento dettaglio'))
+      .finally(() => setDetailLoading(false));
+  };
+
+  // Recalculate simulation via backend whenever inputs change
+  useEffect(() => {
+    if (!selectedRule) return;
+    let active = true;
+    const month = parseInt(simMonth) || 1;
+    const checkinDate = `2025-${String(month).padStart(2, '0')}-15`;
+    calculateTouristTax(selectedRule.id, {
+      nights: parseInt(simNights) || 1,
+      checkinDate,
+      zona: simZone || null,
+      guestAges: simGuests.map(g => parseInt(g.age) || 30),
+    })
+      .then(res => { if (active) setSimulation(res); })
+      .catch(() => { if (active) setSimulation(null); });
+    return () => { active = false; };
+  }, [selectedRule, simNights, simGuests, simZone, simMonth]);
+
+  const exemptionsList = (selectedRule?.exemptions ?? '')
+    .split('\n')
+    .map(e => e.trim())
+    .filter(Boolean);
 
   return (
     <div className="space-y-6">
@@ -45,54 +97,70 @@ const TouristTaxSettings = () => {
           <CardTitle className="text-base flex items-center gap-2"><MapPin className="h-4 w-4" /> Comuni Configurati</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Comune</TableHead>
-                <TableHead>Provincia</TableHead>
-                <TableHead className="text-center">Tariffa Base</TableHead>
-                <TableHead className="text-center">Max Notti</TableHead>
-                <TableHead className="text-center">Cap per Persona</TableHead>
-                <TableHead className="text-center">Fasce Età</TableHead>
-                <TableHead className="text-center">Stato</TableHead>
-                <TableHead className="w-20"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rules.map(rule => (
-                <TableRow key={rule.rule_id} className="cursor-pointer hover:bg-muted/50" onClick={() => { setSelectedRule(rule); setSimZone(rule.zones[0]?.label || ''); }}>
-                  <TableCell className="font-medium">{rule.municipality}</TableCell>
-                  <TableCell><Badge variant="outline" className="text-xs">{rule.province}</Badge></TableCell>
-                  <TableCell className="text-center font-mono">€{rule.base_rate_per_person_per_night.toFixed(2)}</TableCell>
-                  <TableCell className="text-center">{rule.max_nights_per_stay ?? '∞'}</TableCell>
-                  <TableCell className="text-center">{rule.max_amount_per_person ? `€${rule.max_amount_per_person}` : '—'}</TableCell>
-                  <TableCell className="text-center">{rule.age_bands.length}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant={rule.status === 'active' ? 'default' : 'secondary'}>
-                      {rule.status === 'active' ? 'Attivo' : 'Inattivo'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="sm" className="text-xs" onClick={(e) => { e.stopPropagation(); setSelectedRule(rule); setSimZone(rule.zones[0]?.label || ''); }}>
-                      Dettaglio
-                    </Button>
-                  </TableCell>
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Caricamento regole…
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" /> {error}
+            </div>
+          ) : rules.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">Nessuna regola configurata.</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Comune</TableHead>
+                  <TableHead>Provincia</TableHead>
+                  <TableHead className="text-center">Tariffa Base</TableHead>
+                  <TableHead className="text-center">Max Notti</TableHead>
+                  <TableHead className="text-center">Cap per Persona</TableHead>
+                  <TableHead className="text-center">Fasce Età</TableHead>
+                  <TableHead className="text-center">Stato</TableHead>
+                  <TableHead className="w-20"></TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {rules.map(rule => (
+                  <TableRow key={rule.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openDetail(rule.id)}>
+                    <TableCell className="font-medium">{rule.comune}</TableCell>
+                    <TableCell><Badge variant="outline" className="text-xs">{rule.provincia}</Badge></TableCell>
+                    <TableCell className="text-center font-mono">€{Number(rule.importoPerNotte).toFixed(2)}</TableCell>
+                    <TableCell className="text-center">{rule.maxNotti ?? '∞'}</TableCell>
+                    <TableCell className="text-center">{rule.maxAmountPerPerson ? `€${rule.maxAmountPerPerson}` : '—'}</TableCell>
+                    <TableCell className="text-center">{rule.fascieEtaCount}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant={rule.attivo ? 'default' : 'secondary'}>
+                        {rule.attivo ? 'Attivo' : 'Inattivo'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" className="text-xs" onClick={(e) => { e.stopPropagation(); openDetail(rule.id); }}>
+                        Dettaglio
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
       {/* Detail dialog */}
-      <Dialog open={!!selectedRule} onOpenChange={(open) => !open && setSelectedRule(null)}>
+      <Dialog open={!!selectedRule || detailLoading} onOpenChange={(open) => { if (!open) { setSelectedRule(null); setSimulation(null); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {selectedRule && (
+          {detailLoading && !selectedRule ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Caricamento dettaglio…
+            </div>
+          ) : selectedRule && (
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <MapPin className="h-5 w-5" />
-                  Tassa di Soggiorno — {selectedRule.municipality} ({selectedRule.province})
+                  Tassa di Soggiorno — {selectedRule.comune} ({selectedRule.provincia})
                 </DialogTitle>
                 <DialogDescription>{selectedRule.notes}</DialogDescription>
               </DialogHeader>
@@ -103,21 +171,21 @@ const TouristTaxSettings = () => {
                   <Card>
                     <CardContent className="p-3 text-center">
                       <p className="text-xs text-muted-foreground">Tariffa Base</p>
-                      <p className="text-lg font-bold font-mono">€{selectedRule.base_rate_per_person_per_night.toFixed(2)}</p>
+                      <p className="text-lg font-bold font-mono">€{Number(selectedRule.importoPerNotte).toFixed(2)}</p>
                       <p className="text-[10px] text-muted-foreground">per persona / notte</p>
                     </CardContent>
                   </Card>
                   <Card>
                     <CardContent className="p-3 text-center">
                       <p className="text-xs text-muted-foreground">Max Notti</p>
-                      <p className="text-lg font-bold">{selectedRule.max_nights_per_stay ?? '∞'}</p>
+                      <p className="text-lg font-bold">{selectedRule.maxNotti ?? '∞'}</p>
                       <p className="text-[10px] text-muted-foreground">consecutive</p>
                     </CardContent>
                   </Card>
                   <Card>
                     <CardContent className="p-3 text-center">
                       <p className="text-xs text-muted-foreground">Cap / Persona</p>
-                      <p className="text-lg font-bold">{selectedRule.max_amount_per_person ? `€${selectedRule.max_amount_per_person}` : '—'}</p>
+                      <p className="text-lg font-bold">{selectedRule.maxAmountPerPerson ? `€${selectedRule.maxAmountPerPerson}` : '—'}</p>
                     </CardContent>
                   </Card>
                 </div>
@@ -128,11 +196,11 @@ const TouristTaxSettings = () => {
                     <CardTitle className="text-sm flex items-center gap-2"><Users className="h-3.5 w-3.5" /> Fasce di Età</CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-3 space-y-1">
-                    {selectedRule.age_bands.map((band, i) => (
+                    {selectedRule.fascieEta.map((band, i) => (
                       <div key={i} className="flex justify-between text-sm py-1">
-                        <span>{band.label} <span className="text-muted-foreground text-xs">({band.min_age}-{band.max_age > 900 ? '∞' : band.max_age} anni)</span></span>
-                        <Badge variant={band.reduction_pct >= 100 ? 'destructive' : band.reduction_pct > 0 ? 'secondary' : 'outline'}>
-                          {band.reduction_pct >= 100 ? 'Esente' : band.reduction_pct > 0 ? `-${band.reduction_pct}%` : 'Piena'}
+                        <span>{band.label} <span className="text-muted-foreground text-xs">({band.minAge}-{band.maxAge > 900 ? '∞' : band.maxAge} anni)</span></span>
+                        <Badge variant={band.reductionPct >= 100 ? 'destructive' : band.reductionPct > 0 ? 'secondary' : 'outline'}>
+                          {band.reductionPct >= 100 ? 'Esente' : band.reductionPct > 0 ? `-${band.reductionPct}%` : 'Piena'}
                         </Badge>
                       </div>
                     ))}
@@ -145,11 +213,11 @@ const TouristTaxSettings = () => {
                     <CardTitle className="text-sm flex items-center gap-2"><Calendar className="h-3.5 w-3.5" /> Stagioni</CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-3 space-y-1">
-                    {selectedRule.seasons.map((s, i) => (
+                    {selectedRule.stagioni.map((s, i) => (
                       <div key={i} className="flex justify-between text-sm py-1">
-                        <span>{s.label} <span className="text-muted-foreground text-xs">({s.start_day}/{s.start_month} — {s.end_day}/{s.end_month})</span></span>
-                        <Badge variant={s.reduction_pct > 0 ? 'secondary' : 'outline'}>
-                          {s.reduction_pct > 0 ? `-${s.reduction_pct}%` : 'Piena'}
+                        <span>{s.label} <span className="text-muted-foreground text-xs">({s.startDay}/{s.startMonth} — {s.endDay}/{s.endMonth})</span></span>
+                        <Badge variant={s.reductionPct > 0 ? 'secondary' : 'outline'}>
+                          {s.reductionPct > 0 ? `-${s.reductionPct}%` : 'Piena'}
                         </Badge>
                       </div>
                     ))}
@@ -157,17 +225,17 @@ const TouristTaxSettings = () => {
                 </Card>
 
                 {/* Zones */}
-                {selectedRule.zones.length > 1 && (
+                {selectedRule.zone.length > 1 && (
                   <Card>
                     <CardHeader className="py-2 px-4">
                       <CardTitle className="text-sm flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /> Zone</CardTitle>
                     </CardHeader>
                     <CardContent className="px-4 pb-3 space-y-1">
-                      {selectedRule.zones.map((z, i) => (
+                      {selectedRule.zone.map((z, i) => (
                         <div key={i} className="flex justify-between text-sm py-1">
                           <span>{z.label}</span>
-                          <Badge variant={z.reduction_pct > 0 ? 'secondary' : 'outline'}>
-                            {z.reduction_pct > 0 ? `-${z.reduction_pct}%` : 'Piena'}
+                          <Badge variant={z.reductionPct > 0 ? 'secondary' : 'outline'}>
+                            {z.reductionPct > 0 ? `-${z.reductionPct}%` : 'Piena'}
                           </Badge>
                         </div>
                       ))}
@@ -182,7 +250,7 @@ const TouristTaxSettings = () => {
                   </CardHeader>
                   <CardContent className="px-4 pb-3">
                     <ul className="text-sm space-y-1">
-                      {selectedRule.exemptions.map((e, i) => (
+                      {exemptionsList.map((e, i) => (
                         <li key={i} className="flex items-center gap-2 text-muted-foreground">
                           <span className="h-1 w-1 rounded-full bg-muted-foreground shrink-0" />
                           {e}
@@ -218,13 +286,13 @@ const TouristTaxSettings = () => {
                       </div>
                     </div>
 
-                    {selectedRule.zones.length > 1 && (
+                    {selectedRule.zone.length > 1 && (
                       <div className="space-y-1">
                         <Label className="text-xs">Zona</Label>
                         <Select value={simZone} onValueChange={setSimZone}>
                           <SelectTrigger><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {selectedRule.zones.map(z => (
+                            {selectedRule.zone.map(z => (
                               <SelectItem key={z.label} value={z.label}>{z.label}</SelectItem>
                             ))}
                           </SelectContent>
@@ -267,7 +335,7 @@ const TouristTaxSettings = () => {
                               </span>
                               <span className="font-mono">
                                 {p.nightsCharged > 0
-                                  ? `€${p.ratePerNight.toFixed(2)} × ${p.nightsCharged}n = €${p.total.toFixed(2)}`
+                                  ? `€${Number(p.ratePerNight).toFixed(2)} × ${p.nightsCharged}n = €${Number(p.total).toFixed(2)}`
                                   : '€0.00'
                                 }
                               </span>
@@ -276,7 +344,7 @@ const TouristTaxSettings = () => {
                           <Separator />
                           <div className="flex justify-between text-sm font-bold">
                             <span>Totale Tassa di Soggiorno</span>
-                            <span className="font-mono text-primary">€{simulation.total.toFixed(2)}</span>
+                            <span className="font-mono text-primary">€{Number(simulation.total).toFixed(2)}</span>
                           </div>
                         </div>
                       </>

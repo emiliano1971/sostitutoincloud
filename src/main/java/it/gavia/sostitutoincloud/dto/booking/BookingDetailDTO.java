@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.dto.booking;
 
+import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -8,6 +9,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
@@ -46,4 +48,24 @@ public class BookingDetailDTO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private SplitEconomicoDTO splitEconomico;
+
+    // Dati immobile (per dialog generazione documenti)
+    private String propertyAddress;
+    private String propertyCity;
+    private String propertyInternalCode;
+
+    // Dati proprietario (per dialog generazione documenti)
+    private String ownerTaxCode;
+    private String ownerIban;
+    private String ownerEmail;
+
+    // Dati tenant (per dialog fattura PM)
+    private String tenantLegalName;
+    private String tenantVatNumber;
+    private String tenantTaxCode;
+    private String tenantLegalAddress;
+    private String tenantPec;
+
+    // Documenti fiscali associati alla prenotazione
+    private List<FiscalDocumentSummaryDTO> documenti;
 }

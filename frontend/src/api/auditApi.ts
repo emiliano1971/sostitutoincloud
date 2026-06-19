@@ -16,6 +16,7 @@ export interface AuditLogItem {
 export async function getAuditLog(params?: {
   q?: string;
   action?: string;
+  entity?: string;
   page?: number;
   size?: number;
 }): Promise<AuditLogItem[]> {
@@ -25,6 +26,7 @@ export async function getAuditLog(params?: {
   const qs = new URLSearchParams();
   if (params.q) qs.set('q', params.q);
   if (params.action) qs.set('action', params.action);
+  if (params.entity) qs.set('entity', params.entity);
   if (params.page !== undefined) qs.set('page', String(params.page));
   if (params.size !== undefined) qs.set('size', String(params.size));
   return get<AuditLogItem[]>(`/audit-log?${qs.toString()}`);

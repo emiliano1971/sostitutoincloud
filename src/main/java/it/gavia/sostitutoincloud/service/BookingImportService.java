@@ -43,17 +43,20 @@ public class BookingImportService {
     private final CanaleOtaDAO canaleOtaDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final ImportSessionCache importSessionCache;
+    private final AuditService auditService;
 
     public BookingImportService(BookingDAO bookingDAO,
                                 PropertyDAO propertyDAO,
                                 CanaleOtaDAO canaleOtaDAO,
                                 StatoPrenotazioneDAO statoPrenotazioneDAO,
-                                ImportSessionCache importSessionCache) {
+                                ImportSessionCache importSessionCache,
+                                AuditService auditService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.canaleOtaDAO = canaleOtaDAO;
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
         this.importSessionCache = importSessionCache;
+        this.auditService = auditService;
     }
 
     public BookingImportPreviewDTO preview(Integer tenantId, MultipartFile file) throws IOException, CsvException {
@@ -167,6 +170,8 @@ public class BookingImportService {
 
         importSessionCache.remove(dto.getImportSessionId());
         log.info("BookingImportService.confirm() - tenantId={} imported={} errors={}", tenantId, imported, errors);
+        auditService.log("booking.import", "Booking", null,
+                "Importate " + imported + " prenotazioni da CSV");
 
         return BookingImportResultDTO.builder()
                 .imported(imported)

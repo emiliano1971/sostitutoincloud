@@ -4,8 +4,11 @@ import it.gavia.sostitutoincloud.dao.mapper.AuditLogRowMapper;
 import it.gavia.sostitutoincloud.model.AuditLog;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
 import java.util.List;
 
 @Log4j2
@@ -49,5 +52,28 @@ public class AuditLogDAO {
         log.debug("AuditLogDAO.findByTenantIdOrderByCreatedAtDesc() - tenantId={}, limit={}", tenantId, limit);
         String sql = SELECT_ALL + " WHERE fk_tenant_id = ? ORDER BY created_at DESC LIMIT ?";
         return jdbcTemplate.query(sql, auditLogRowMapper, tenantId, limit);
+    }
+
+    public AuditLog insert(AuditLog entry) {
+        String sql = "INSERT INTO audit_log " +
+                     "(fk_tenant_id, fk_utente_id, user_email, action, entity_type, entity_id, details, ip_address) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
+            ps.setObject(1, entry.getFkTenantId());
+            ps.setObject(2, entry.getFkUtenteId());
+            ps.setString(3, entry.getUserEmail());
+            ps.setString(4, entry.getAction());
+            ps.setString(5, entry.getEntityType());
+            ps.setObject(6, entry.getEntityId());
+            ps.setString(7, entry.getDetails());
+            ps.setString(8, entry.getIpAddress());
+            return ps;
+        }, keyHolder);
+        Integer id = keyHolder.getKey().intValue();
+        entry.setId(id);
+        log.debug("AuditLogDAO.insert() - azione={} tenantId={}", entry.getAction(), entry.getFkTenantId());
+        return entry;
     }
 }

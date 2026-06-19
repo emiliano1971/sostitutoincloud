@@ -211,3 +211,59 @@ INSERT INTO tenant_settings (
     TRUE, TRUE, FALSE, TRUE, TRUE, TRUE, TRUE
 );
 SELECT setval('tenant_settings_id_seq', 1);
+
+
+-- ============================================================
+-- REGOLE TASSA DI SOGGIORNO (dal mock frontend) — tenant 1
+--   importo_per_notte è la tariffa per persona/notte.
+--   exemptions: una esenzione per riga (TEXT).
+-- ============================================================
+INSERT INTO regola_tassa_soggiorno
+    (id, comune, provincia, importo_per_notte, max_notti, eta_esenzione,
+     valida_dal, valida_al, attivo, region, max_amount_per_person,
+     exemptions, notes, fk_tenant_id)
+VALUES
+    (1, 'Venezia', 'VE', 5.00, 5, 10,
+     '2025-04-01', NULL, TRUE, 'Veneto', NULL,
+     E'Minori sotto i 10 anni\nResidenti nel Comune di Venezia\nMalati e accompagnatori in strutture sanitarie\nForze armate e forze dell''ordine in servizio\nPersone con disabilità\nVolontari in servizio civile\nAutisti pullman e accompagnatori turistici (gruppi ≥25)',
+     'Le riduzioni sono cumulabili. Calcolo successivo: es. base 5€, riduzione 20% + 50% = 5€ × 0.80 × 0.50 = 2€. Vigente dal 01/04/2025 (DCC 77/2024).',
+     1),
+    (2, 'Roma', 'RM', 3.50, 10, 10,
+     '2025-01-01', NULL, TRUE, 'Lazio', 35.00,
+     E'Minori sotto i 10 anni\nResidenti nel Comune di Roma',
+     'Tariffa per locazioni turistiche (extra-alberghiero). Max 10 notti, cap €35 per persona.',
+     1);
+SELECT setval('regola_tassa_soggiorno_id_seq', 2);
+
+-- Fasce di età
+INSERT INTO tassa_fascia_eta (id, fk_regola_id, label, min_age, max_age, reduction_pct)
+VALUES
+    -- Venezia
+    (1, 1, 'Sotto i 10 anni', 0,  9,   100),
+    (2, 1, '10-16 anni',      10, 16,  50),
+    (3, 1, 'Adulti (17+)',    17, 999, 0),
+    -- Roma
+    (4, 2, 'Sotto i 10 anni', 0,  9,   100),
+    (5, 2, 'Adulti (10+)',    10, 999, 0);
+SELECT setval('tassa_fascia_eta_id_seq', 5);
+
+-- Stagioni
+INSERT INTO tassa_stagione (id, fk_regola_id, label, start_month, start_day, end_month, end_day, reduction_pct)
+VALUES
+    -- Venezia
+    (1, 1, 'Alta stagione',             2, 1,  12, 31, 0),
+    (2, 1, 'Bassa stagione (Gennaio)',  1, 1,  1,  31, 30),
+    -- Roma
+    (3, 2, 'Tutto l''anno',             1, 1,  12, 31, 0);
+SELECT setval('tassa_stagione_id_seq', 3);
+
+-- Zone
+INSERT INTO tassa_zona (id, fk_regola_id, label, reduction_pct)
+VALUES
+    -- Venezia
+    (1, 1, 'Centro Storico / Giudecca', 0),
+    (2, 1, 'Isole della laguna',        20),
+    (3, 1, 'Terraferma (Mestre)',       30),
+    -- Roma
+    (4, 2, 'Tutto il territorio',       0);
+SELECT setval('tassa_zona_id_seq', 4);

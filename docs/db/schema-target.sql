@@ -193,6 +193,11 @@ CREATE TABLE regola_tassa_soggiorno (
     valida_dal              DATE            NOT NULL,
     valida_al               DATE,                       -- NULL = ancora in vigore
     attivo                  BOOLEAN         NOT NULL DEFAULT TRUE,
+    region                  VARCHAR(100),
+    max_amount_per_person   DECIMAL(5,2),
+    exemptions              TEXT,
+    notes                   TEXT,
+    fk_tenant_id            INTEGER         REFERENCES tenant(id) ON DELETE CASCADE,
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP       NOT NULL DEFAULT NOW()
 );
@@ -204,6 +209,48 @@ COMMENT ON TABLE regola_tassa_soggiorno IS
 CREATE TRIGGER trg_regola_tassa_soggiorno_updated_at
     BEFORE UPDATE ON regola_tassa_soggiorno
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- Fasce di età della tassa di soggiorno (figlia di regola_tassa_soggiorno)
+CREATE TABLE tassa_fascia_eta (
+    id              SERIAL          PRIMARY KEY,
+    fk_regola_id    INTEGER         NOT NULL REFERENCES regola_tassa_soggiorno(id) ON DELETE CASCADE,
+    label           VARCHAR(50)     NOT NULL,
+    min_age         SMALLINT        NOT NULL,
+    max_age         SMALLINT        NOT NULL,
+    reduction_pct   SMALLINT        NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP       NOT NULL DEFAULT NOW()
+);
+
+-- Stagioni della tassa di soggiorno (figlia di regola_tassa_soggiorno)
+CREATE TABLE tassa_stagione (
+    id              SERIAL          PRIMARY KEY,
+    fk_regola_id    INTEGER         NOT NULL REFERENCES regola_tassa_soggiorno(id) ON DELETE CASCADE,
+    label           VARCHAR(50)     NOT NULL,
+    start_month     SMALLINT        NOT NULL,
+    start_day       SMALLINT        NOT NULL,
+    end_month       SMALLINT        NOT NULL,
+    end_day         SMALLINT        NOT NULL,
+    reduction_pct   SMALLINT        NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP       NOT NULL DEFAULT NOW()
+);
+
+-- Zone della tassa di soggiorno (figlia di regola_tassa_soggiorno)
+CREATE TABLE tassa_zona (
+    id              SERIAL          PRIMARY KEY,
+    fk_regola_id    INTEGER         NOT NULL REFERENCES regola_tassa_soggiorno(id) ON DELETE CASCADE,
+    label           VARCHAR(100)    NOT NULL,
+    reduction_pct   SMALLINT        NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP       NOT NULL DEFAULT NOW()
+);
+
+-- Indici sulle tabelle figlie
+CREATE INDEX IF NOT EXISTS idx_fascia_eta_regola
+    ON tassa_fascia_eta(fk_regola_id);
+CREATE INDEX IF NOT EXISTS idx_stagione_regola
+    ON tassa_stagione(fk_regola_id);
+CREATE INDEX IF NOT EXISTS idx_zona_regola
+    ON tassa_zona(fk_regola_id);
 
 
 -- Scenari fiscali applicabili alle prenotazioni
@@ -481,6 +528,10 @@ CREATE TABLE fiscal_document (
     recipient_tax_code      VARCHAR(20),                        -- CF destinatario, opzionale per stranieri
     total_amount            DECIMAL(10,2)   NOT NULL,
     vat_amount              DECIMAL(10,2)   NOT NULL DEFAULT 0, -- 0 per ricevute fuori campo IVA
+    imponibile              DECIMAL(10,2),                      -- base imponibile (canone per ricevuta, riaddebiti+provvigione per fattura)
+    ritenuta_amount         DECIMAL(10,2),                      -- ritenuta d'acconto 21% (cedolare/sostituto d'imposta)
+    bollo_amount            DECIMAL(10,2),                      -- imposta di bollo €2,00 se importo > €77,47
+    iva_amount              DECIMAL(10,2),                      -- IVA del documento (0 per ricevute fuori campo IVA)
     fk_stato_documento_id   INTEGER         NOT NULL REFERENCES stato_documento(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'draft'
     sdi_identifier          VARCHAR(50),                        -- identificativo assegnato da SDI
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),

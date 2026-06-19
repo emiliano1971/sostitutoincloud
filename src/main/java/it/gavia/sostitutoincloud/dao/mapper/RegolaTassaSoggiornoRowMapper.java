@@ -24,6 +24,11 @@ public class RegolaTassaSoggiornoRowMapper implements RowMapper<RegolaTassaSoggi
                 .validaDal(rs.getObject("valida_dal", LocalDate.class))
                 .validaAl(rs.getObject("valida_al", LocalDate.class))
                 .attivo(rs.getBoolean("attivo"))
+                .region(rs.getString("region"))
+                .maxAmountPerPerson((java.math.BigDecimal) rs.getObject("max_amount_per_person"))
+                .exemptions(rs.getString("exemptions"))
+                .notes(rs.getString("notes"))
+                .fkTenantId((Integer) rs.getObject("fk_tenant_id"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();
