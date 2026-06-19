@@ -45,3 +45,13 @@ logs/
 
 # Config runtime frontend (contiene URL ambiente specifici)
 frontend/public/config.json
+
+# Frontend build artifacts in root webapp
+/index.html
+/assets/
+/favicon.ico
+/favicon.png
+/placeholder.svg
+/robots.txt
+/config.json
+/config*.json

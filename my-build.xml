@@ -17,17 +17,10 @@
 
         <!-- ── Condizioni ambiente ──
              is.local.env = true solo quando deploy.env=local.
-             In test/prod la copia di config.json e del frontend nella root
-             della webapp NON deve avvenire: il WAR è l'unico artefatto. -->
+             In test/prod la copia di config.json nella root della webapp
+             NON deve avvenire: il WAR è l'unico artefatto. -->
         <condition property="is.local.env">
             <equals arg1="${deploy.env}" arg2="local"/>
-        </condition>
-        <!-- copy.frontend.local = local AND frontend/dist presente -->
-        <condition property="copy.frontend.local">
-            <and>
-                <equals arg1="${deploy.env}" arg2="local"/>
-                <available file="${project.basedir}/frontend/dist" type="dir"/>
-            </and>
         </condition>
 
         <echo message="[my-build] Deploy ambiente: ${deploy.env}"/>
@@ -90,18 +83,11 @@
 
         <!-- ── 8. Copia config.{env}.json → WEB-INF/classes/static/config.json ──
              SOLO in local. In test/prod il config.json viene gestito dal pom.xml
-             (copia + rinomina di config.{env}.json in target/classes/static/). -->
+             (copia + rinomina di config.{env}.json in target/classes/static/).
+             NB: in local il frontend è servito dal Vite dev server (localhost:5173),
+             quindi NON si copia frontend/dist nella root della webapp. In test/prod
+             il frontend è già incluso nel WAR via maven-resources-plugin. -->
         <antcall target="copy-config"/>
-
-        <!--
-            ── 9. Copia frontend buildato (frontend/dist/) → root webapp Tomcat ──
-            SOLO in local. Il frontend React viene copiato nella stessa webapp del
-            backend (project.basedir = webapps/sostitutoincloud/), servito da Tomcat.
-            In test/prod il frontend è già dentro il WAR (target/classes/static/) —
-            NON va copiato nella root, che è il sorgente locale.
-        -->
-        <antcall target="copy-frontend"/>
-        <antcall target="warn-no-frontend"/>
 
         <echo message="[my-build] Deploy completato in WEB-INF/"/>
 
@@ -114,24 +100,6 @@
               file="${project.basedir}/frontend/public/config.${deploy.env}.json"
               overwrite="true"
               failonerror="false"/>
-    </target>
-
-    <!-- Copia il frontend buildato nella root della webapp (escluso WEB-INF/) — solo local -->
-    <target name="copy-frontend" if="copy.frontend.local">
-        <echo message="[my-build] Copia frontend da frontend/dist/ → ${project.basedir}/"/>
-        <copy todir="${project.basedir}" overwrite="true">
-            <fileset dir="${project.basedir}/frontend/dist">
-                <exclude name="WEB-INF/**"/>
-                <exclude name="config*.json"/>
-            </fileset>
-        </copy>
-        <echo message="[my-build] Frontend copiato nella root della webapp."/>
-    </target>
-
-    <!-- Avviso quando, in local, il frontend non è stato buildato -->
-    <target name="warn-no-frontend" if="is.local.env" unless="copy.frontend.local">
-        <echo level="warning"
-              message="[my-build] WARNING: frontend/dist/ non trovato — frontend non buildato. Salto la copia del frontend (esegui 'cd frontend &amp;&amp; npm run build')."/>
     </target>
 
 </project>
