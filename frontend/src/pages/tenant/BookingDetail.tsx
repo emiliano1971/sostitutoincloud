@@ -9,8 +9,23 @@ import { getBookingById, type BookingDetail as BookingDetailType } from '@/api/b
 import { generateDocument, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { toast } from '@/hooks/use-toast';
+import { useLookup } from '@/contexts/LookupContext';
 import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
+
+const paymentLabels: Record<string, string> = {
+  pending: 'In attesa',
+  paid: 'Pagato',
+  failed: 'Fallito',
+  refunded: 'Rimborsato',
+};
+
+const settlementLabels: Record<string, string> = {
+  pending: 'In attesa',
+  calculated: 'Calcolato',
+  paid: 'Liquidato',
+  cancelled: 'Annullato',
+};
 
 function toDialogBooking(b: BookingDetailType): Booking {
   const s = b.splitEconomico;
@@ -43,12 +58,14 @@ function toDialogBooking(b: BookingDetailType): Booking {
     settlement_status: b.settlementStatus as Booking['settlement_status'],
     fiscal_scenario_code: b.fiscalScenarioCode ?? '',
     created_at: b.createdAt,
+    documenti: b.documenti,
   };
 }
 
 const BookingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { lookups, getLabelByCodice } = useLookup();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [booking, setBooking] = useState<BookingDetailType | null>(null);
@@ -58,6 +75,12 @@ const BookingDetail = () => {
   const [generatedInvoice, setGeneratedInvoice] = useState<DocumentGenerateResponse | null>(null);
   const [savingReceipt, setSavingReceipt] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
+
+  const reloadBooking = async () => {
+    if (!id) return;
+    const refreshed = await getBookingById(Number(id));
+    setBooking(refreshed);
+  };
 
   const handleEmetti = async (
     tipoDocumento: 'ricevuta_owner' | 'fattura_pm',
@@ -120,13 +143,27 @@ const BookingDetail = () => {
   }
 
   const { splitEconomico: split } = booking;
+  const aliquotaRitenuta =
+    booking.splitEconomico?.aliquotaRitenuta != null
+      ? Math.round(booking.splitEconomico.aliquotaRitenuta)
+      : booking.splitEconomico?.ownerNetAmount &&
+        booking.splitEconomico?.withholdingAmount
+        ? Math.round(
+            (booking.splitEconomico.withholdingAmount /
+              booking.splitEconomico.ownerNetAmount)
+            * 100
+          )
+        : 21;
   const splitRows = [
     { label: 'Lordo ospite', value: split.grossAmount },
     { label: 'Commissione OTA', value: -split.otaCommissionAmount },
     { label: 'Pulizie', value: -split.cleaningAmount },
     { label: 'Provvigione PM', value: -split.pmFeeAmount },
+    ...(split.ivaScorporataPm && split.ivaScorporataPm > 0
+      ? [{ label: 'di cui IVA 22% (scorporata sui servizi PM)', value: split.ivaScorporataPm, note: true }]
+      : []),
     { label: 'Netto proprietario', value: split.ownerNetAmount, bold: true },
-    { label: 'Ritenuta 21%', value: -split.withholdingAmount },
+    { label: `Ritenuta ${aliquotaRitenuta}%`, value: -split.withholdingAmount },
     { label: 'Liquidazione proprietario', value: split.liquidazioneOwner, bold: true },
     { label: `Tassa di Soggiorno ${split.touristTaxIncludedInGross ? '(incl. nel lordo)' : '(extra)'}`, value: split.touristTaxAmount, highlight: true },
   ];
@@ -159,6 +196,10 @@ const BookingDetail = () => {
     pec: booking.tenantPec ?? '',
   };
 
+  const datiFatturazioneMancanti =
+    !booking.guestTaxCode ||
+    booking.guestTaxCode.trim() === '';
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center gap-3">
@@ -190,7 +231,11 @@ const BookingDetail = () => {
             <CardHeader><CardTitle className="text-sm flex items-center gap-2"><User className="h-4 w-4" /> Ospite</CardTitle></CardHeader>
             <CardContent>
               <p className="font-medium">{booking.guestName}</p>
-              <Badge variant="outline" className="mt-2 text-xs">Dati fatturazione: incompleti</Badge>
+              {datiFatturazioneMancanti && (
+                <Badge variant="outline" className="mt-2 text-xs text-orange-600 border-orange-300">
+                  Dati fatturazione: incompleti
+                </Badge>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -207,12 +252,22 @@ const BookingDetail = () => {
       <Card>
         <CardHeader><CardTitle className="text-sm flex items-center gap-2"><CreditCard className="h-4 w-4" /> Split Economico</CardTitle></CardHeader>
         <CardContent>
+          {split.warnings && split.warnings.length > 0 && (
+            <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300">
+              <div className="flex items-center gap-2 font-medium mb-1">
+                <AlertCircle className="h-4 w-4" /> Attenzione
+              </div>
+              <ul className="list-disc pl-5 space-y-0.5">
+                {split.warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+          )}
           <div className="space-y-2">
             {splitRows.map((row, i) => (
               <div key={i} className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
-                <span className={row.bold ? 'text-sm' : 'text-sm text-muted-foreground'}>{row.label}</span>
-                <span className={`text-sm ${row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
-                  {row.value < 0 ? '-' : ''}{fmt(row.value)}
+                <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
+                <span className={`text-sm ${'note' in row && row.note ? 'text-muted-foreground' : row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
+                  {'note' in row && row.note ? '' : row.value < 0 ? '-' : ''}{fmt(row.value)}
                 </span>
               </div>
             ))}
@@ -226,21 +281,21 @@ const BookingDetail = () => {
           <CardContent className="p-4 text-center">
             <FileText className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
             <p className="text-xs text-muted-foreground">Documento</p>
-            <Badge variant="outline" className="mt-1">{booking.documentStatus}</Badge>
+            <Badge variant="outline" className="mt-1">{getLabelByCodice(lookups?.statiDocumento ?? [], booking.documentStatus)}</Badge>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <CreditCard className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
             <p className="text-xs text-muted-foreground">Pagamento</p>
-            <Badge variant="outline" className="mt-1">{booking.paymentStatus}</Badge>
+            <Badge variant="outline" className="mt-1">{paymentLabels[booking.paymentStatus] ?? booking.paymentStatus}</Badge>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Receipt className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
             <p className="text-xs text-muted-foreground">Liquidazione</p>
-            <Badge variant="outline" className="mt-1">{booking.settlementStatus}</Badge>
+            <Badge variant="outline" className="mt-1">{settlementLabels[booking.settlementStatus] ?? booking.settlementStatus}</Badge>
           </CardContent>
         </Card>
       </div>
@@ -258,6 +313,7 @@ const BookingDetail = () => {
           existingDoc={existingInvoice}
           isSaving={savingInvoice}
           onEmetti={() => handleEmetti('fattura_pm', setSavingInvoice, setGeneratedInvoice)}
+          onSent={reloadBooking}
         />
         <ReceiptOwnerDialog
           open={receiptOpen}

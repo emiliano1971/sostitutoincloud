@@ -23,5 +23,7 @@ public class FiscalDocumentSummaryDTO {
     private BigDecimal imponibile;
     private BigDecimal ritenutaAmount;
     private BigDecimal bolloAmount;
-    private BigDecimal ivaAmount;
+    private BigDecimal aliquotaIva;
+    private BigDecimal canoneLocazione;
+    private Integer fkDocumentoCollegatoId;
 }

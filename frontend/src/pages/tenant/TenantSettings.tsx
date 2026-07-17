@@ -6,10 +6,12 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { getSettings, updateSettings, type TenantSettingsDTO } from '@/api/settingsApi';
+import { useLookup } from '@/contexts/LookupContext';
 
 type SaveStatus = { type: 'success' | 'error'; message: string } | null;
 
 const TenantSettings = () => {
+  const { lookups, isLoading } = useLookup();
   const [settings, setSettings] = useState<TenantSettingsDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +169,67 @@ const TenantSettings = () => {
                 </div>
                 <Switch id="cedolareSeccaEnabled" defaultChecked={settings.cedolareSeccaEnabled} />
               </div>
+
+              {/* Sezione Bollo */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold mb-3">Bollo</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Importo bollo (€)</Label>
+                    <Input type="number" step="0.01" defaultValue={settings.bolloImporto} id="bolloImporto" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Soglia applicazione bollo (€)</Label>
+                    <Input type="number" step="0.01" defaultValue={settings.bolloSoglia} id="bolloSoglia" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-2 mt-2">
+                  <div>
+                    <Label>Addebita bollo al cliente</Label>
+                    <p className="text-xs text-muted-foreground">Se disattivo il bollo è registrato ma non sommato al totale ricevuta</p>
+                  </div>
+                  <Switch id="bolloAddebitatoCliente" defaultChecked={settings.bolloAddebitatoCliente} />
+                </div>
+              </div>
+
+              {/* Sezione Regime PM */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold mb-3">Regime PM</h3>
+                <div className="space-y-2">
+                  <Label>Regime fiscale PM</Label>
+                  <select id="regimeFiscalePm" defaultValue={settings.regimeFiscalePm}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                    {isLoading ? (
+                      <option disabled>Caricamento...</option>
+                    ) : (
+                      lookups?.regimiFiscaliPm.map(r => (
+                        <option key={r.codice} value={r.codice}>{r.descrizione}</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              {/* Sezione IVA e Ritenuta */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold mb-3">IVA e Ritenuta</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Natura IVA esente</Label>
+                    <select id="naturaIvaEsente" defaultValue={settings.naturaIvaEsente}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                      {isLoading ? (
+                        <option disabled>Caricamento...</option>
+                      ) : (
+                        lookups?.naturaIva.map(r => (
+                          <option key={r.codice} value={r.codice}>{r.descrizione}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex justify-end">
                 <Button disabled={saving} onClick={() => {
                   handleSave({
@@ -175,6 +238,11 @@ const TenantSettings = () => {
                     codiceTributoF24: (document.getElementById('codiceTributoF24') as HTMLInputElement).value,
                     documentWindowDays: parseInt((document.getElementById('documentWindowDays') as HTMLInputElement).value),
                     cedolareSeccaEnabled: (document.getElementById('cedolareSeccaEnabled') as HTMLButtonElement).getAttribute('data-state') === 'checked',
+                    bolloImporto: parseFloat((document.getElementById('bolloImporto') as HTMLInputElement).value),
+                    bolloSoglia: parseFloat((document.getElementById('bolloSoglia') as HTMLInputElement).value),
+                    bolloAddebitatoCliente: (document.getElementById('bolloAddebitatoCliente') as HTMLButtonElement).getAttribute('data-state') === 'checked',
+                    regimeFiscalePm: (document.getElementById('regimeFiscalePm') as HTMLSelectElement).value,
+                    naturaIvaEsente: (document.getElementById('naturaIvaEsente') as HTMLSelectElement).value,
                   });
                 }}>
                   {saving ? 'Salvataggio...' : 'Salva Parametri'}

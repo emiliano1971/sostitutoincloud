@@ -1,7 +1,11 @@
 -- SEED DATA — solo per test, NON eseguire in prod
 -- ============================================================
 -- Dipendenze FK (lookup già presenti in schema-target.sql):
---   regime_fiscale:      1=cedolare_secca
+--   regime_fiscale:      tabella di transcodifica multi-purpose (campo metadata)
+--                          metadata=REGIME_FISCALE:    1=cedolare_secca 2=iva_10 3=ordinario
+--                          metadata=NATURA_IVA:        N1 N2.1 N2.2 N3.5 N4 N6.1
+--                          metadata=ALIQUOTA_IVA:      0 10 22
+--                          metadata=REGIME_FISCALE_PM: RF01 RF19
 --   stato_prenotazione:  1=imported  2=enriched  3=ready  4=doc_issued  5=settled  6=cancelled
 --   stato_documento:     1=draft     2=ready     3=sent_sdi  4=accepted
 --   canale_ota:          1=airbnb    2=booking   3=vrbo

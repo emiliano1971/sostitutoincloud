@@ -14,6 +14,9 @@ import java.util.List;
 public class LookupCollectionDTO {
 
     private List<LookupItemDTO> regimiFiscali;
+    private List<LookupItemDTO> regimiFiscaliPm;
+    private List<LookupItemDTO> naturaIva;
+    private List<LookupItemDTO> aliquoteIva;
     private List<LookupItemDTO> tipiImmobile;
     private List<LookupItemDTO> canaliOta;
     private List<LookupItemDTO> tipiDocumento;

@@ -19,6 +19,7 @@ public class RegimeFiscale {
     private String codice;
     private String descrizione;
     private Boolean attivo;
+    private String metadata;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -1,4 +1,4 @@
-import { get } from '@/lib/apiClient';
+import { get, del } from '@/lib/apiClient';
 
 export interface SplitEconomico {
   grossAmount: number;
@@ -7,9 +7,15 @@ export interface SplitEconomico {
   pmFeeAmount: number;
   ownerNetAmount: number;
   withholdingAmount: number;
+  aliquotaRitenuta?: number;
   liquidazioneOwner: number;
   touristTaxAmount: number;
   touristTaxIncludedInGross: boolean;
+  imponibileFatturaPm?: number;
+  ivaScorporataPm?: number;
+  fatturaPmTotale?: number;
+  warnings?: string[];
+  calcoloCompleto?: boolean;
 }
 
 export interface FiscalDocumentSummary {
@@ -22,7 +28,9 @@ export interface FiscalDocumentSummary {
   imponibile: number;
   ritenutaAmount: number;
   bolloAmount: number;
-  ivaAmount: number;
+  aliquotaIva?: number;
+  canoneLocazione?: number;
+  fkDocumentoCollegatoId?: number;
 }
 
 export interface BookingListItem {
@@ -31,6 +39,7 @@ export interface BookingListItem {
   externalBookingId: string;
   guestName: string;
   propertyName: string;
+  fkOwnerId?: number;
   ownerName: string;
   channelName: string;
   checkinDate: string;
@@ -100,4 +109,9 @@ export async function getBookings(params?: {
 
 export async function getBookingById(id: number): Promise<BookingDetail> {
   return get<BookingDetail>(`/bookings/${id}`);
+}
+
+// Disponibile solo nei profili local e test (endpoint backend @Profile).
+export async function deleteBooking(id: number): Promise<void> {
+  await del<unknown>(`/bookings/${id}`);
 }

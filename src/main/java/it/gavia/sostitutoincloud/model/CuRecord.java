@@ -22,9 +22,11 @@ public class CuRecord {
     private Integer taxYear;
     private BigDecimal totalCompensi;
     private BigDecimal totalRitenute;
+    private BigDecimal totalImponibile;
     /** Enum PostgreSQL cu_status → String */
     private String stato;
     private LocalDateTime generatedAt;
+    private LocalDateTime sentAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

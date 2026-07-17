@@ -1,4 +1,4 @@
-import { get } from '@/lib/apiClient';
+import { get, post, patch } from '@/lib/apiClient';
 
 export interface CuListItem {
   id: number;
@@ -34,4 +34,19 @@ export async function getCuList(params?: {
 
 export async function getCuById(id: number): Promise<CuDetail> {
   return get<CuDetail>(`/cu/${id}`);
+}
+
+export interface CuGeneraBatchResponse {
+  generated: number;
+  skipped: number;
+  records: CuListItem[];
+}
+
+/** Genera tutte le CU dei proprietari con ritenute nell'anno (ownerId omesso → batch). */
+export async function generaCuBatch(taxYear: number): Promise<CuGeneraBatchResponse> {
+  return post<CuGeneraBatchResponse>('/cu/genera', { taxYear });
+}
+
+export async function updateCuStatus(id: number, stato: string): Promise<CuListItem> {
+  return patch<CuListItem>(`/cu/${id}/status`, { stato });
 }

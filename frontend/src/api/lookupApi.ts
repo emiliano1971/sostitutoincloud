@@ -9,6 +9,9 @@ export interface LookupItem {
 
 export interface LookupCollection {
   regimiFiscali: LookupItem[];
+  regimiFiscaliPm: LookupItem[];
+  naturaIva: LookupItem[];
+  aliquoteIva: LookupItem[];
   tipiImmobile: LookupItem[];
   canaliOta: LookupItem[];
   tipiDocumento: LookupItem[];

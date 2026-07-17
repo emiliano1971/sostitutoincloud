@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 @Builder
@@ -19,6 +20,7 @@ public class BookingImportPreviewRowDTO {
     private String guestName;
     private String propertyCode;
     private String propertyName;
+    private Integer fkPropertyId;   // id immobile risolto (per dialog contratto inline in preview)
     private String channelCode;
     private String channelName;
     private LocalDate checkinDate;
@@ -26,5 +28,6 @@ public class BookingImportPreviewRowDTO {
     private BigDecimal grossAmount;
     private String status;       // "nuova" | "duplicata" | "errore"
     private String errorMessage;
+    private List<String> splitWarnings;  // avvisi calcolo split economico
     private BookingImportRowDTO rawData;
 }

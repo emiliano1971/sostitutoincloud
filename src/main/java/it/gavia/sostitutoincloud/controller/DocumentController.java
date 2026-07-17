@@ -4,6 +4,7 @@ import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
 import it.gavia.sostitutoincloud.service.DocumentGenerationService;
 import it.gavia.sostitutoincloud.service.FiscalDocumentService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
@@ -32,10 +33,11 @@ public class DocumentController {
     public ResponseEntity<List<DocumentListDTO>> findAll(
             @RequestParam(required = false) String stato,
             @RequestParam(required = false) String q,
+            @RequestParam(required = false) Integer ownerId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        return ResponseEntity.ok(fiscalDocumentService.findByTenantId(tenantId, stato, q, page, size));
+        return ResponseEntity.ok(fiscalDocumentService.findByTenantId(tenantId, stato, q, ownerId, page, size));
     }
 
     @GetMapping("/{id}")
@@ -52,5 +54,14 @@ public class DocumentController {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         DocumentGenerateResponseDTO result = documentGenerationService.generate(tenantId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(result);
+    }
+
+    @PatchMapping("/{id}/stato")
+    public ResponseEntity<DocumentDetailDTO> aggiornaStato(@PathVariable Integer id,
+                                                           @RequestBody DocumentStatoUpdateDTO request) {
+        // IllegalArgumentException (documento/stato non validi) → 400 via GlobalExceptionHandler
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        DocumentDetailDTO result = fiscalDocumentService.aggiornaStato(tenantId, id, request.getStato());
+        return ResponseEntity.ok(result);
     }
 }

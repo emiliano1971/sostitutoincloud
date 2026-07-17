@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { FileText, Printer, Send } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
-import type { DocumentGenerateResponse } from '@/api/documentApi';
+import { aggiornaStatoDocumento, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface InvoicePMDialogProps {
@@ -19,6 +19,7 @@ interface InvoicePMDialogProps {
   existingDoc?: FiscalDocumentSummary;
   isSaving?: boolean;
   onEmetti?: () => void;
+  onSent?: () => void;
 }
 
 const fmt = (v: number) => `€${Math.abs(v).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
@@ -31,7 +32,21 @@ const statoDocLabels: Record<string, string> = {
   rejected: 'Rifiutato',
 };
 
-const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, generatedDoc, existingDoc, isSaving, onEmetti }: InvoicePMDialogProps) => {
+const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, generatedDoc, existingDoc, isSaving, onEmetti, onSent }: InvoicePMDialogProps) => {
+  const handleInvia = async (documentId: number) => {
+    try {
+      await aggiornaStatoDocumento(documentId, 'sent_sdi');
+      toast({ title: 'Fattura inviata', description: `Fattura ${invoiceNumber} inviata allo SDI` });
+      onOpenChange(false);
+      onSent?.();
+    } catch (err) {
+      toast({
+        title: 'Errore invio',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+      });
+    }
+  };
+
   const invoiceNumber = existingDoc?.documentNumber
     ?? generatedDoc?.documentNumber
     ?? `FT-${new Date().getFullYear()}-${String(booking.booking_id).padStart(4, '0')}`;
@@ -40,14 +55,34 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
     ? new Date(invoiceDateSource).toLocaleDateString('it-IT')
     : new Date().toLocaleDateString('it-IT');
 
-  // Scenario A: imponibile = riaddebito commissione OTA + riaddebito pulizie + provvigione PM
-  const riaddebitoOta = booking.ota_commission_amount;
-  const riaddebitoPulizie = booking.cleaning_amount;
-  const provvigionePm = booking.pm_fee_amount;
-  const imponibile = riaddebitoOta + riaddebitoPulizie + provvigionePm;
-  const vatRate = 0.22;
-  const vatAmount = Math.round(imponibile * vatRate * 100) / 100;
-  const totaleFattura = Math.round((imponibile + vatAmount) * 100) / 100;
+  // Scenario A: i valori OTA / pulizie / provvigione PM sono LORDI (IVA inclusa).
+  // L'IVA va SCORPORATA dal lordo, non aggiunta sopra.
+  // RF01 ordinario → divisore 1.22; RF19 forfettario → nessuno scorporo (divisore 1, IVA 0).
+  const regimeFiscalePm = (tenantData as { regimeFiscalePm?: string })?.regimeFiscalePm ?? 'RF01';
+  const divisore = regimeFiscalePm === 'RF19' ? 1 : 1.22;
+
+  const otaLordo = booking.ota_commission_amount ?? 0;
+  const otaImponibile = Math.round(otaLordo / divisore * 100) / 100;
+  const otaIva = Math.round((otaLordo - otaImponibile) * 100) / 100;
+
+  const cleaningLordo = booking.cleaning_amount ?? 0;
+  const cleaningImponibile = Math.round(cleaningLordo / divisore * 100) / 100;
+  const cleaningIva = Math.round((cleaningLordo - cleaningImponibile) * 100) / 100;
+
+  const pmLordo = booking.pm_fee_amount ?? 0;
+  const pmImponibile = Math.round(pmLordo / divisore * 100) / 100;
+  const pmIva = Math.round((pmLordo - pmImponibile) * 100) / 100;
+
+  // Totali: dal documento generato (DB, già corretti) se disponibile, altrimenti calcolati.
+  const totaleImponibile = generatedDoc
+    ? generatedDoc.imponibile
+    : Math.round((otaImponibile + cleaningImponibile + pmImponibile) * 100) / 100;
+  const totaleIva = generatedDoc
+    ? generatedDoc.iva
+    : Math.round((otaIva + cleaningIva + pmIva) * 100) / 100;
+  const totaleFattura = generatedDoc
+    ? generatedDoc.importoTotale
+    : otaLordo + cleaningLordo + pmLordo;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -105,29 +140,33 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             <div className="border rounded-md overflow-hidden">
               <div className="grid grid-cols-12 gap-2 bg-muted/50 p-2 text-xs font-semibold text-muted-foreground">
                 <div className="col-span-6">Descrizione</div>
-                <div className="col-span-3 text-right">Imponibile</div>
-                <div className="col-span-3 text-right">IVA 22%</div>
+                <div className="col-span-2 text-right">Imponibile</div>
+                <div className="col-span-2 text-right">IVA 22%</div>
+                <div className="col-span-2 text-right">Totale</div>
               </div>
               <div className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
                 <div className="col-span-6">
                   Riaddebito commissione OTA<br />
                   <span className="text-muted-foreground">Canale: {booking.channel_name}</span>
                 </div>
-                <div className="col-span-3 text-right">{fmt(riaddebitoOta)}</div>
-                <div className="col-span-3 text-right">{fmt(Math.round(riaddebitoOta * vatRate * 100) / 100)}</div>
+                <div className="col-span-2 text-right">{fmt(otaImponibile)}</div>
+                <div className="col-span-2 text-right">{fmt(otaIva)}</div>
+                <div className="col-span-2 text-right">{fmt(Math.round((otaImponibile + otaIva) * 100) / 100)}</div>
               </div>
               <div className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
                 <div className="col-span-6">Riaddebito pulizia finale</div>
-                <div className="col-span-3 text-right">{fmt(riaddebitoPulizie)}</div>
-                <div className="col-span-3 text-right">{fmt(Math.round(riaddebitoPulizie * vatRate * 100) / 100)}</div>
+                <div className="col-span-2 text-right">{fmt(cleaningImponibile)}</div>
+                <div className="col-span-2 text-right">{fmt(cleaningIva)}</div>
+                <div className="col-span-2 text-right">{fmt(Math.round((cleaningImponibile + cleaningIva) * 100) / 100)}</div>
               </div>
               <div className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
                 <div className="col-span-6">
                   Provvigione gestione immobiliare<br />
                   <span className="text-muted-foreground">Periodo: {booking.checkin_date} → {booking.checkout_date}</span>
                 </div>
-                <div className="col-span-3 text-right">{fmt(provvigionePm)}</div>
-                <div className="col-span-3 text-right">{fmt(Math.round(provvigionePm * vatRate * 100) / 100)}</div>
+                <div className="col-span-2 text-right">{fmt(pmImponibile)}</div>
+                <div className="col-span-2 text-right">{fmt(pmIva)}</div>
+                <div className="col-span-2 text-right">{fmt(Math.round((pmImponibile + pmIva) * 100) / 100)}</div>
               </div>
             </div>
           </div>
@@ -138,11 +177,11 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             <div className="w-64 space-y-2">
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Imponibile</span>
-                <span>{fmt(imponibile)}</span>
+                <span>{fmt(totaleImponibile)}</span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">IVA (22%)</span>
-                <span>{fmt(vatAmount)}</span>
+                <span>{fmt(totaleIva)}</span>
               </div>
               <Separator />
               <div className="flex justify-between font-bold text-sm">
@@ -178,10 +217,18 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
         <div className="flex gap-3 justify-end pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
           {existingDoc ? (
-            <Button className="gap-2" disabled>
-              <FileText className="h-4 w-4" />
-              Già emesso il {invoiceDate}
-            </Button>
+            <>
+              <Button className="gap-2" disabled>
+                <FileText className="h-4 w-4" />
+                Già emesso il {invoiceDate}
+              </Button>
+              {existingDoc.statoDocumento === 'ready' && (
+                <Button className="gap-2 bg-success hover:bg-success/90 text-white" onClick={() => handleInvia(existingDoc.id)}>
+                  <Send className="h-4 w-4" />
+                  Invia
+                </Button>
+              )}
+            </>
           ) : !generatedDoc ? (
             <Button className="gap-2" onClick={onEmetti} disabled={isSaving}>
               <FileText className="h-4 w-4" />
@@ -193,7 +240,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
                 <Printer className="h-4 w-4" />
                 Stampa / PDF
               </Button>
-              <Button className="gap-2 bg-success hover:bg-success/90 text-white" onClick={() => { toast({ title: 'Fattura inviata', description: `Fattura ${invoiceNumber} inviata allo SDI` }); onOpenChange(false); }}>
+              <Button className="gap-2 bg-success hover:bg-success/90 text-white" onClick={() => handleInvia(generatedDoc.documentId)}>
                 <Send className="h-4 w-4" />
                 Invia
               </Button>

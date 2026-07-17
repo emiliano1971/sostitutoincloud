@@ -1,3 +1,5 @@
+import type { FiscalDocumentSummary } from '@/api/bookingApi';
+
 // ---- Enums ----
 export type UserRole = 'super_admin' | 'tenant_admin' | 'pm_user' | 'owner_user';
 export type TenantStatus = 'draft' | 'active' | 'suspended' | 'closed';
@@ -100,6 +102,7 @@ export interface Booking {
   settlement_status: SettlementStatus;
   fiscal_scenario_code: string;
   created_at: string;
+  documenti?: FiscalDocumentSummary[];
 }
 
 export interface FiscalDocument {

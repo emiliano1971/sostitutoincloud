@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -9,22 +9,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Plus, Trash2, CheckCircle2, Pencil, Calculator } from 'lucide-react';
-import { mockProperties } from '@/data/mock-data';
-import { mockOTARegistry } from '@/data/ota-registry';
+import { ArrowLeft, Plus, Trash2, CheckCircle2, Pencil, Calculator, Loader2, AlertCircle } from 'lucide-react';
+import { get } from '@/lib/apiClient';
+import { getPropertyById, type PropertyDetail } from '@/api/propertyApi';
+import {
+  getContractRules,
+  createContractRule,
+  updateContractRule,
+  deleteContractRule,
+  type ContractRule,
+  type ContractRuleCreate,
+} from '@/api/contractApi';
 import { useToast } from '@/hooks/use-toast';
 
 type CostRuleType = 'pulizie' | 'commissione_ota' | 'cambio_biancheria' | 'commissione_pm' | 'provvigione_proprietario';
-type CalcMode = 'fisso' | 'percentuale' | 'fisso_per_notte' | 'fisso_per_persona' | 'percentuale_lordo' | 'fisso_per_notte_prenotazione' | 'rimanenza';
+type CalcMode = 'fisso' | 'percentuale' | 'fisso_per_notte' | 'fisso_per_persona' | 'percentuale_lordo' | 'rimanenza';
 
-interface CostRule {
-  id: string;
-  type: CostRuleType;
-  label: string;
-  calc_mode: CalcMode;
-  value: number;
-  ota_channel?: string;
-  is_remainder?: boolean;
+interface CanaleOtaDTO {
+  id: number;
+  codice: string;
+  nome: string;
+  commissioneDefaultPct: number;
+  touristTaxIncluded: boolean;
+  touristTaxCollection: string;
+  attivo: boolean;
 }
 
 const ruleTypeLabels: Record<CostRuleType, string> = {
@@ -37,11 +45,10 @@ const ruleTypeLabels: Record<CostRuleType, string> = {
 
 const calcModeLabels: Record<CalcMode, string> = {
   fisso: 'Importo Fisso (€)',
-  percentuale: 'Percentuale (%)',
+  percentuale: 'Percentuale sul Lordo (%)',
   fisso_per_notte: 'Fisso per Notte (€)',
   fisso_per_persona: 'Fisso per Persona (€)',
   percentuale_lordo: 'Percentuale sul Lordo (%)',
-  fisso_per_notte_prenotazione: 'Fisso per Notte (€)',
   rimanenza: '⇒ Rimanenza automatica',
 };
 
@@ -59,32 +66,26 @@ const allowedCalcModes: Record<CostRuleType, { value: CalcMode; label: string }[
   ],
   provvigione_proprietario: [
     { value: 'percentuale_lordo', label: 'Percentuale sul Lordo (%)' },
-    { value: 'fisso_per_notte_prenotazione', label: 'Fisso per Notte (€)' },
+    { value: 'fisso_per_notte', label: 'Fisso per Notte (€)' },
     { value: 'rimanenza', label: '⇒ Rimanenza (assorbe il resto)' },
   ],
 };
 
-const otaChannels = mockOTARegistry.filter(o => o.status === 'active').map(o => o.name);
-
-const createMockRules = (): CostRule[] => [
-  { id: 'r1', type: 'pulizie', label: 'Pulizie Abitazione', calc_mode: 'fisso', value: 60 },
-  { id: 'r2', type: 'commissione_ota', label: 'Commissione Airbnb', calc_mode: 'percentuale', value: 15, ota_channel: 'Airbnb' },
-  { id: 'r3', type: 'commissione_ota', label: 'Commissione Booking.com', calc_mode: 'percentuale', value: 18, ota_channel: 'Booking.com' },
-  { id: 'r4', type: 'commissione_ota', label: 'Commissione Vrbo', calc_mode: 'percentuale', value: 12, ota_channel: 'Vrbo' },
-  { id: 'r5', type: 'cambio_biancheria', label: 'Cambio Biancheria', calc_mode: 'fisso_per_persona', value: 8 },
-  { id: 'r6', type: 'commissione_pm', label: 'Commissione PM', calc_mode: 'percentuale_lordo', value: 20 },
-  { id: 'r7', type: 'provvigione_proprietario', label: 'Provvigione Proprietario', calc_mode: 'rimanenza', value: 0, is_remainder: true },
-];
-
 const PropertyContracts = () => {
   const { id } = useParams();
+  const propertyId = Number(id);
   const navigate = useNavigate();
   const { toast } = useToast();
-  const property = mockProperties.find(p => p.property_id === id);
 
-  const [rules, setRules] = useState<CostRule[]>(createMockRules);
+  const [property, setProperty] = useState<PropertyDetail | null>(null);
+  const [rules, setRules] = useState<ContractRule[]>([]);
+  const [otaChannels, setOtaChannels] = useState<CanaleOtaDTO[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [showAddRule, setShowAddRule] = useState(false);
-  const [editingRule, setEditingRule] = useState<CostRule | null>(null);
+  const [editingRule, setEditingRule] = useState<ContractRule | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Simulation params
   const [simGross, setSimGross] = useState('1000');
@@ -95,12 +96,41 @@ const PropertyContracts = () => {
   const [newType, setNewType] = useState<CostRuleType>('pulizie');
   const [newCalcMode, setNewCalcMode] = useState<CalcMode>('fisso');
   const [newValue, setNewValue] = useState('');
-  const [newOtaChannel, setNewOtaChannel] = useState('');
+  const [newOtaChannelId, setNewOtaChannelId] = useState<string>('');
 
-  if (!property) {
+  useEffect(() => {
+    if (!propertyId) return;
+    setIsLoading(true);
+    setLoadError(null);
+    Promise.all([
+      getPropertyById(propertyId),
+      getContractRules(propertyId),
+      get<CanaleOtaDTO[]>('/canali-ota'),
+    ])
+      .then(([prop, contractRules, channels]) => {
+        setProperty(prop);
+        setRules(contractRules);
+        setOtaChannels(channels.filter(c => c.attivo));
+      })
+      .catch(err => setLoadError(err.message))
+      .finally(() => setIsLoading(false));
+  }, [propertyId]);
+
+  const reloadRules = () => getContractRules(propertyId).then(setRules);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (loadError || !property) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <p className="text-muted-foreground">Immobile non trovato</p>
+        <AlertCircle className="h-8 w-8 text-destructive" />
+        <p className="text-muted-foreground">{loadError || 'Immobile non trovato'}</p>
         <Button variant="outline" onClick={() => navigate('/properties')}>Torna agli immobili</Button>
       </div>
     );
@@ -110,54 +140,49 @@ const PropertyContracts = () => {
   const sampleNights = parseInt(simNights) || 3;
   const sampleGuests = parseInt(simGuests) || 2;
 
-  const hasRemainder = rules.some(r => r.is_remainder);
+  const hasRemainder = rules.some(r => r.isRemainder);
+  const remainderRuleType = rules.find(r => r.isRemainder)?.tipo;
 
   // Calculate non-remainder rule amount
-  const calculateRuleAmount = (rule: CostRule, gross: number, nights: number, guests: number): number => {
-    if (rule.is_remainder) return 0; // calculated separately
-    switch (rule.calc_mode) {
-      case 'fisso': return rule.value;
+  const calculateRuleAmount = (rule: ContractRule, gross: number, nights: number, guests: number): number => {
+    if (rule.isRemainder) return 0; // calculated separately
+    switch (rule.calcMode) {
+      case 'fisso': return rule.valore;
       case 'percentuale':
-      case 'percentuale_lordo': return Math.round(gross * rule.value / 100 * 100) / 100;
-      case 'fisso_per_notte':
-      case 'fisso_per_notte_prenotazione': return rule.value * nights;
-      case 'fisso_per_persona': return rule.value * guests;
-      default: return rule.value;
+      case 'percentuale_lordo': return Math.round(gross * rule.valore / 100 * 100) / 100;
+      case 'fisso_per_notte': return rule.valore * nights;
+      case 'fisso_per_persona': return rule.valore * guests;
+      default: return rule.valore;
     }
   };
 
-  // Build per-OTA simulation tables
-  const otaRulesInContract = rules.filter(r => r.type === 'commissione_ota');
-  const nonOtaRules = rules.filter(r => r.type !== 'commissione_ota');
+  // Build per-OTA simulation tables (client-side, from backend rules)
+  const otaRulesInContract = rules.filter(r => r.tipo === 'commissione_ota');
+  const nonOtaRules = rules.filter(r => r.tipo !== 'commissione_ota');
   const simulationChannels = otaRulesInContract.length > 0
-    ? otaRulesInContract.map(r => r.ota_channel || 'N/D')
+    ? otaRulesInContract.map(r => r.canaleName || 'N/D')
     : ['Diretto'];
 
-  const buildSimulation = (otaChannel: string) => {
-    const otaRule = otaRulesInContract.find(r => r.ota_channel === otaChannel);
+  const buildSimulation = (channelName: string) => {
+    const otaRule = otaRulesInContract.find(r => (r.canaleName || 'N/D') === channelName);
     const activeRules = otaRule ? [...nonOtaRules, otaRule] : [...nonOtaRules];
 
-    const items = activeRules.filter(r => !r.is_remainder).map(r => ({
+    const items = activeRules.filter(r => !r.isRemainder).map(r => ({
       rule: r,
       amount: calculateRuleAmount(r, sampleGross, sampleNights, sampleGuests),
     }));
 
     const totalNonRemainder = items.reduce((s, i) => s + i.amount, 0);
-    const remainderRule = activeRules.find(r => r.is_remainder);
+    const remainderRule = activeRules.find(r => r.isRemainder);
     const remainderAmount = remainderRule ? Math.round((sampleGross - totalNonRemainder) * 100) / 100 : 0;
 
-    const allItems = items.map(i => ({
-      ...i,
-      isRemainder: false,
-    }));
-
+    const allItems = items.map(i => ({ ...i, isRemainder: false }));
     if (remainderRule) {
       allItems.push({ rule: remainderRule, amount: remainderAmount, isRemainder: true });
     }
 
     const total = totalNonRemainder + remainderAmount;
-
-    return { otaChannel, items: allItems, total, remainderAmount };
+    return { channelName, items: allItems, total, remainderAmount };
   };
 
   const simulations = simulationChannels.map(ch => buildSimulation(ch));
@@ -166,67 +191,67 @@ const PropertyContracts = () => {
     setNewType('pulizie');
     setNewCalcMode('fisso');
     setNewValue('');
-    setNewOtaChannel('');
+    setNewOtaChannelId('');
     setEditingRule(null);
   };
 
-  const handleAddRule = () => {
+  const handleSaveRule = async () => {
     const isRemainder = newCalcMode === 'rimanenza';
     const val = isRemainder ? 0 : parseFloat(newValue);
     if (!isRemainder && (isNaN(val) || val <= 0)) {
       toast({ title: 'Errore', description: 'Inserire un valore numerico valido.', variant: 'destructive' });
       return;
     }
+    if (newType === 'commissione_ota' && !newOtaChannelId) {
+      toast({ title: 'Errore', description: 'Seleziona un canale OTA.', variant: 'destructive' });
+      return;
+    }
 
-    // Only one remainder allowed
-    if (isRemainder && !editingRule) {
-      const existingRemainder = rules.find(r => r.is_remainder);
-      if (existingRemainder) {
-        toast({ title: 'Errore', description: 'Esiste già una voce con rimanenza. Rimuovila prima di crearne una nuova.', variant: 'destructive' });
-        return;
+    const payload: ContractRuleCreate = {
+      fkPropertyId: propertyId,
+      fkCanaleOtaId: newType === 'commissione_ota' ? Number(newOtaChannelId) : undefined,
+      tipo: newType,
+      calcMode: newCalcMode,
+      valore: isRemainder ? 0 : val,
+      isRemainder,
+      ordine: editingRule ? editingRule.ordine : rules.length,
+    };
+
+    setIsSaving(true);
+    try {
+      if (editingRule) {
+        await updateContractRule(propertyId, editingRule.id, payload);
+        toast({ title: 'Regola aggiornata' });
+      } else {
+        await createContractRule(propertyId, payload);
+        toast({ title: 'Regola aggiunta' });
       }
+      await reloadRules();
+      setShowAddRule(false);
+      resetForm();
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
     }
-
-    if (editingRule) {
-      setRules(prev => prev.map(r => r.id === editingRule.id ? {
-        ...r,
-        type: newType,
-        label: newType === 'commissione_ota' ? `Commissione ${newOtaChannel}` : ruleTypeLabels[newType],
-        calc_mode: newCalcMode,
-        value: isRemainder ? 0 : val,
-        ota_channel: newType === 'commissione_ota' ? newOtaChannel : undefined,
-        is_remainder: isRemainder,
-      } : r));
-      toast({ title: 'Regola aggiornata' });
-    } else {
-      const newRule: CostRule = {
-        id: `r${Date.now()}`,
-        type: newType,
-        label: newType === 'commissione_ota' ? `Commissione ${newOtaChannel}` : ruleTypeLabels[newType],
-        calc_mode: newCalcMode,
-        value: isRemainder ? 0 : val,
-        ota_channel: newType === 'commissione_ota' ? newOtaChannel : undefined,
-        is_remainder: isRemainder,
-      };
-      setRules(prev => [...prev, newRule]);
-      toast({ title: 'Regola aggiunta' });
-    }
-
-    setShowAddRule(false);
-    resetForm();
   };
 
-  const handleDeleteRule = (ruleId: string) => {
-    setRules(prev => prev.filter(r => r.id !== ruleId));
-    toast({ title: 'Regola rimossa' });
+  const handleDeleteRule = async (ruleId: number) => {
+    try {
+      await deleteContractRule(propertyId, ruleId);
+      await reloadRules();
+      toast({ title: 'Regola rimossa' });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    }
   };
 
-  const openEditDialog = (rule: CostRule) => {
+  const openEditDialog = (rule: ContractRule) => {
     setEditingRule(rule);
-    setNewType(rule.type);
-    setNewCalcMode(rule.calc_mode);
-    setNewValue(rule.is_remainder ? '' : rule.value.toString());
-    setNewOtaChannel(rule.ota_channel || '');
+    setNewType(rule.tipo as CostRuleType);
+    setNewCalcMode(rule.calcMode as CalcMode);
+    setNewValue(rule.isRemainder ? '' : rule.valore.toString());
+    setNewOtaChannelId(rule.fkCanaleOtaId ? rule.fkCanaleOtaId.toString() : '');
     setShowAddRule(true);
   };
 
@@ -242,8 +267,8 @@ const PropertyContracts = () => {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold">Contratto — {property.display_name}</h1>
-          <p className="text-sm text-muted-foreground">{property.internal_code} · Regole di imputazione costi</p>
+          <h1 className="text-2xl font-bold">Contratto — {property.displayName}</h1>
+          <p className="text-sm text-muted-foreground">{property.internalCode} · Regole di imputazione costi</p>
         </div>
         <Button size="sm" className="gap-2" onClick={openAddDialog}>
           <Plus className="h-4 w-4" /> Aggiungi Regola
@@ -258,7 +283,7 @@ const PropertyContracts = () => {
             <div>
               <p className="text-sm font-medium">
                 {hasRemainder
-                  ? <>La voce <span className="font-bold">{rules.find(r => r.is_remainder)?.type === 'commissione_pm' ? 'Commissione PM' : 'Provvigione Proprietario'}</span> è impostata come <span className="font-bold">rimanenza</span>: assorbe automaticamente la differenza per garantire copertura 100%.</>
+                  ? <>La voce <span className="font-bold">{remainderRuleType === 'commissione_pm' ? 'Commissione PM' : 'Provvigione Proprietario'}</span> è impostata come <span className="font-bold">rimanenza</span>: assorbe automaticamente la differenza per garantire copertura 100%.</>
                   : <>⚠️ Nessuna voce è impostata come "rimanenza". Imposta la Commissione PM o la Provvigione Proprietario come rimanenza per assorbire automaticamente il residuo.</>
                 }
               </p>
@@ -286,19 +311,19 @@ const PropertyContracts = () => {
             </TableHeader>
             <TableBody>
               {rules.map(rule => (
-                <TableRow key={rule.id} className={rule.is_remainder ? 'bg-primary/5' : ''}>
+                <TableRow key={rule.id} className={rule.isRemainder ? 'bg-primary/5' : ''}>
                   <TableCell>
-                    <span className="font-medium text-sm">{ruleTypeLabels[rule.type]}</span>
-                    {rule.is_remainder && <Badge variant="default" className="ml-2 text-[10px]">RIMANENZA</Badge>}
+                    <span className="font-medium text-sm">{rule.tipoLabel}</span>
+                    {rule.isRemainder && <Badge variant="default" className="ml-2 text-[10px]">RIMANENZA</Badge>}
                   </TableCell>
                   <TableCell>
-                    {rule.ota_channel ? <Badge variant="outline" className="text-xs">{rule.ota_channel}</Badge> : <span className="text-muted-foreground text-xs">—</span>}
+                    {rule.canaleName ? <Badge variant="outline" className="text-xs">{rule.canaleName}</Badge> : <span className="text-muted-foreground text-xs">—</span>}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary" className="text-xs">{calcModeLabels[rule.calc_mode]}</Badge>
+                    <Badge variant="secondary" className="text-xs">{rule.calcModeLabel}</Badge>
                   </TableCell>
                   <TableCell className="text-right font-mono">
-                    {rule.is_remainder ? <span className="text-muted-foreground italic text-xs">auto</span> : rule.calc_mode.includes('percentuale') ? `${rule.value}%` : `€${rule.value.toFixed(2)}`}
+                    {rule.isRemainder ? <span className="text-muted-foreground italic text-xs">auto</span> : rule.calcMode.includes('percentuale') ? `${rule.valore}%` : `€${rule.valore.toFixed(2)}`}
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
@@ -354,10 +379,10 @@ const PropertyContracts = () => {
             {simulations.map(sim => {
               const isExact = Math.abs(sim.total - sampleGross) < 0.02;
               return (
-                <Card key={sim.otaChannel} className={`border ${isExact ? 'border-green-500/50' : 'border-destructive/50'}`}>
+                <Card key={sim.channelName} className={`border ${isExact ? 'border-green-500/50' : 'border-destructive/50'}`}>
                   <CardHeader className="py-3 px-4">
                     <CardTitle className="text-sm flex items-center justify-between">
-                      <Badge variant="outline">{sim.otaChannel}</Badge>
+                      <Badge variant="outline">{sim.channelName}</Badge>
                       <span className={`font-mono text-xs ${isExact ? 'text-green-600' : 'text-destructive'}`}>
                         {isExact ? '✓ 100%' : `${Math.round(sim.total / sampleGross * 100)}%`}
                       </span>
@@ -367,7 +392,7 @@ const PropertyContracts = () => {
                     {sim.items.map((item, idx) => (
                       <div key={idx} className={`flex justify-between text-xs ${item.isRemainder ? 'font-semibold text-primary' : ''}`}>
                         <span className="text-muted-foreground">
-                          {ruleTypeLabels[item.rule.type]}
+                          {item.rule.tipoLabel}
                           {item.isRemainder && ' ⇐'}
                         </span>
                         <span className="font-mono">€{item.amount.toFixed(2)}</span>
@@ -435,33 +460,30 @@ const PropertyContracts = () => {
             {newType === 'commissione_ota' && (
               <div className="space-y-2">
                 <Label>Canale OTA</Label>
-                <Select value={newOtaChannel} onValueChange={(ch) => {
-                  setNewOtaChannel(ch);
-                  // Auto-fill default commission from OTA registry
-                  const otaReg = mockOTARegistry.find(o => o.name === ch);
+                <Select value={newOtaChannelId} onValueChange={(chId) => {
+                  setNewOtaChannelId(chId);
+                  // Auto-fill default commission from OTA channel
+                  const otaReg = otaChannels.find(o => o.id.toString() === chId);
                   if (otaReg && !editingRule) {
-                    setNewValue(otaReg.default_commission_pct.toString());
+                    setNewValue(otaReg.commissioneDefaultPct.toString());
                   }
                 }}>
                   <SelectTrigger><SelectValue placeholder="Seleziona canale..." /></SelectTrigger>
                   <SelectContent>
-                    {otaChannels.map(ch => {
-                      const reg = mockOTARegistry.find(o => o.name === ch);
-                      return (
-                        <SelectItem key={ch} value={ch}>
-                          {ch} {reg ? `(default: ${reg.default_commission_pct}%)` : ''}
-                        </SelectItem>
-                      );
-                    })}
+                    {otaChannels.map(ch => (
+                      <SelectItem key={ch.id} value={ch.id.toString()}>
+                        {ch.nome} (default: {ch.commissioneDefaultPct}%)
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {newOtaChannel && (() => {
-                  const reg = mockOTARegistry.find(o => o.name === newOtaChannel);
+                {newOtaChannelId && (() => {
+                  const reg = otaChannels.find(o => o.id.toString() === newOtaChannelId);
                   if (!reg) return null;
                   return (
                     <div className="rounded-md bg-muted p-2 text-xs text-muted-foreground space-y-1">
-                      <p>Tassa soggiorno: <strong>{reg.tourist_tax_included ? 'Inclusa nel totale' : 'Esclusa (si somma al lordo)'}</strong></p>
-                      <p>Riscossione: <strong className="capitalize">{reg.tourist_tax_collection === 'payment_link' ? 'Payment Link' : reg.tourist_tax_collection}</strong></p>
+                      <p>Tassa soggiorno: <strong>{reg.touristTaxIncluded ? 'Inclusa nel totale' : 'Esclusa (si somma al lordo)'}</strong></p>
+                      <p>Riscossione: <strong className="capitalize">{reg.touristTaxCollection === 'payment_link' ? 'Payment Link' : reg.touristTaxCollection}</strong></p>
                     </div>
                   );
                 })()}
@@ -505,7 +527,8 @@ const PropertyContracts = () => {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowAddRule(false); resetForm(); }}>Annulla</Button>
-            <Button onClick={handleAddRule} disabled={newCalcMode !== 'rimanenza' && !newValue || (newType === 'commissione_ota' && !newOtaChannel)}>
+            <Button onClick={handleSaveRule} disabled={isSaving || (newCalcMode !== 'rimanenza' && !newValue) || (newType === 'commissione_ota' && !newOtaChannelId)}>
+              {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {editingRule ? 'Salva Modifiche' : 'Aggiungi'}
             </Button>
           </DialogFooter>

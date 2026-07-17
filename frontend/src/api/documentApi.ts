@@ -1,4 +1,4 @@
-import { get, post } from '@/lib/apiClient';
+import { get, post, patch } from '@/lib/apiClient';
 
 export interface DocumentListItem {
   id: number;
@@ -15,6 +15,8 @@ export interface DocumentListItem {
   propertyName?: string;
   channelName?: string;
   fkBookingId?: number;
+  fkOwnerId?: number;
+  ownerName?: string;
   createdAt: string;
 }
 
@@ -31,13 +33,29 @@ export interface DocumentDetail extends DocumentListItem {
   fkTipoDocumentoId: number;
   fkStatoDocumentoId: number;
   richiedeIva: boolean;
+  aliquotaIva?: number;
+  imponibile?: number;
+  ritenutaAmount?: number;
+  bolloAmount?: number;
+  canoneLocazione?: number;
+  fkDocumentoCollegatoId?: number;
+  externalBookingId?: string;
+  checkinDate?: string;
+  checkoutDate?: string;
   updatedAt: string;
   righe: DocumentRow[];
+  // Emittente (tenant)
+  tenantLegalName?: string;
+  tenantVatNumber?: string;
+  tenantTaxCode?: string;
+  tenantLegalAddress?: string;
+  tenantPec?: string;
 }
 
 export async function getDocuments(params?: {
   stato?: string;
   q?: string;
+  ownerId?: number;
   page?: number;
   size?: number;
 }): Promise<DocumentListItem[]> {
@@ -47,6 +65,7 @@ export async function getDocuments(params?: {
   const qs = new URLSearchParams();
   if (params.stato) qs.set('stato', params.stato);
   if (params.q) qs.set('q', params.q);
+  if (params.ownerId !== undefined) qs.set('ownerId', String(params.ownerId));
   if (params.page !== undefined) qs.set('page', String(params.page));
   if (params.size !== undefined) qs.set('size', String(params.size));
   return get<DocumentListItem[]>(`/documents?${qs.toString()}`);
@@ -83,4 +102,8 @@ export async function generateDocument(
   data: DocumentGenerateRequest
 ): Promise<DocumentGenerateResponse> {
   return post<DocumentGenerateResponse>('/documents/generate', data);
+}
+
+export async function aggiornaStatoDocumento(id: number, stato: string): Promise<void> {
+  await patch<void>(`/documents/${id}/stato`, { stato });
 }

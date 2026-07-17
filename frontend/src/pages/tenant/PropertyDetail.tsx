@@ -4,11 +4,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Building2, MapPin, User, Hash, Globe, Link2, Power, PowerOff, FileText, Loader2, AlertCircle } from 'lucide-react';
-import { getPropertyById, updatePropertyStatus, updatePropertyOwner, type PropertyDetail as PropertyDetailType } from '@/api/propertyApi';
+import { ArrowLeft, Building2, MapPin, User, Hash, Globe, Link2, Power, PowerOff, FileText, Loader2, AlertCircle, Edit } from 'lucide-react';
+import { getPropertyById, updatePropertyStatus, updatePropertyOwner, updatePropertyPrimoImmobile, type PropertyDetail as PropertyDetailType } from '@/api/propertyApi';
 import { getOwnerById, getOwners, type OwnerListItem } from '@/api/ownerApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
@@ -108,6 +109,21 @@ const PropertyDetail = () => {
     }
   };
 
+  const handlePrimoImmobile = async (value: boolean) => {
+    try {
+      const updated = await updatePropertyPrimoImmobile(property.id, value);
+      setProperty(updated);
+      toast({
+        title: 'Classificazione aggiornata',
+        description: value
+          ? 'Immobile marcato come primo immobile (ritenuta 21%).'
+          : 'Immobile marcato come secondo+ immobile (ritenuta 26%).',
+      });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -135,6 +151,21 @@ const PropertyDetail = () => {
             <div className="flex justify-between"><span className="text-muted-foreground">Città</span><span>{property.city}</span></div>
             <Separator />
             <div className="flex justify-between"><span className="text-muted-foreground">Regione</span><span>{property.region}</span></div>
+            <Separator />
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-muted-foreground">Classificazione ritenuta</span>
+                <p className="text-xs text-muted-foreground">
+                  {property.primoImmobile ? 'Primo immobile (21%)' : 'Secondo+ immobile (26%)'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={property.primoImmobile ? 'default' : 'secondary'} className="text-xs">
+                  {property.primoImmobile ? 'Primo immobile (21%)' : 'Secondo+ (26%)'}
+                </Badge>
+                <Switch checked={property.primoImmobile} onCheckedChange={handlePrimoImmobile} />
+              </div>
+            </div>
             <Separator />
             <div className="flex justify-between"><span className="text-muted-foreground">Creato il</span><span>{property.createdAt}</span></div>
           </CardContent>
@@ -237,6 +268,9 @@ const PropertyDetail = () => {
         <CardContent className="p-4 flex gap-3">
           <Button variant="default" size="sm" className="gap-2" onClick={() => navigate(`/properties/${property.id}/contracts`)}>
             <FileText className="h-4 w-4" /> Contratto & Regole Costi
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate(`/properties/${property.id}/edit`)}>
+            <Edit className="h-4 w-4" /> Modifica
           </Button>
           <Button variant={property.attivo ? 'destructive' : 'default'} size="sm" className="gap-2" onClick={() => setShowDeactivate(true)}>
             {property.attivo ? <><PowerOff className="h-4 w-4" /> Disattiva Immobile</> : <><Power className="h-4 w-4" /> Riattiva Immobile</>}

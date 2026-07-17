@@ -39,12 +39,18 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
     ? new Date(receiptDateSource).toLocaleDateString('it-IT')
     : new Date().toLocaleDateString('it-IT');
 
-  // Ricevuta: canone di locazione (gross - commissione OTA) fuori campo IVA
-  const canonLocazione = booking.gross_amount;
-  const totaleRicevuta = canonLocazione;
-  // Bollo €2,00 se importo > €77,47
-  const bolloApplicabile = totaleRicevuta > 77.47;
+  // Ricevuta: canone di locazione fuori campo IVA.
+  // Di norma emessa DOPO la fattura PM: canone = lordo ospite - totale fattura PM.
+  // Se la fattura PM non esiste ancora: fallback su owner_net_amount.
+  const fatturaPM = booking.documenti?.find(d => d.tipoDocumento === 'fattura');
+  const canone = fatturaPM
+    ? booking.gross_amount - fatturaPM.importoTotale
+    : (booking.owner_net_amount ?? 0);
+  // Bollo €2,00 se canone > €77,47
+  const bolloApplicabile = canone > 77.47;
   const importoBollo = bolloApplicabile ? 2.00 : 0;
+  const totaleRicevuta = canone + importoBollo;
+  const ritenuta = canone * 0.21;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -88,7 +94,8 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Ospite (Conduttore)</p>
               <p className="font-medium">{booking.guest_name}</p>
-              <p className="text-xs text-muted-foreground mt-1">Prenotazione: {booking.external_booking_id}</p>
+              {booking.guest_tax_code && <p className="text-xs text-muted-foreground mt-1">C.F.: {booking.guest_tax_code}</p>}
+              <p className="text-xs text-muted-foreground">Prenotazione: {booking.external_booking_id}</p>
               <p className="text-xs text-muted-foreground">Canale: {booking.channel_name}</p>
             </div>
             <div>
@@ -117,8 +124,8 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
                   <span className="text-muted-foreground">Dal {booking.checkin_date} al {booking.checkout_date}</span>
                 </div>
                 <div className="col-span-2 text-right">{booking.nights} notti</div>
-                <div className="col-span-2 text-right">{fmt(canonLocazione / booking.nights)}</div>
-                <div className="col-span-2 text-right font-medium">{fmt(canonLocazione)}</div>
+                <div className="col-span-2 text-right">{fmt(canone / booking.nights)}</div>
+                <div className="col-span-2 text-right font-medium">{fmt(canone)}</div>
               </div>
             </div>
           </div>
@@ -128,17 +135,13 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
           {/* Totale */}
           <div className="flex justify-end">
             <div className="w-64 space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Canone di locazione</span>
-                <span>{fmt(canonLocazione)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">IVA</span>
-                <span className="italic">Fuori campo IVA</span>
+              <div className="flex justify-between text-xs gap-3">
+                <span className="text-muted-foreground">Canone di locazione (fuori campo IVA art. 4 D.L. 50/2017 – cedolare secca)</span>
+                <span className="whitespace-nowrap">{fmt(canone)}</span>
               </div>
               {bolloApplicabile && (
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Imposta di bollo</span>
+                  <span className="text-muted-foreground">Marca da bollo</span>
                   <span>{fmt(importoBollo)}</span>
                 </div>
               )}
@@ -155,11 +158,13 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
           {/* Note */}
           <div className="text-xs text-muted-foreground space-y-1">
             <p><strong>Operazione fuori campo IVA</strong> – Canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017, soggetto a cedolare secca</p>
-            {bolloApplicabile && <p><strong>Imposta di bollo:</strong> €2,00 assolta in modo virtuale (importo ricevuta &gt; €77,47)</p>}
+            <p>Imposta assolta in forma di cedolare secca ai sensi dell'art. 3 D.Lgs. 23/2011</p>
+            {bolloApplicabile && <p><strong>Imposta di bollo:</strong> €2,00 assolta in modo virtuale (canone &gt; €77,47)</p>}
+            <p><strong>Ritenuta d'acconto 21%:</strong> {fmt(ritenuta)} (trattenuta dal sostituto d'imposta)</p>
             <p><strong>Locatore:</strong> {booking.owner_name} {owner ? `(C.F. ${owner.tax_code})` : ''}</p>
             <p><strong>Conduttore:</strong> {booking.guest_name}</p>
             <p><strong>Periodo di locazione:</strong> {booking.checkin_date} – {booking.checkout_date} ({booking.nights} notti)</p>
-            <p><strong>Pagamento ricevuto tramite:</strong> {booking.channel_name}</p>
+            <p><strong>Rif. contratto:</strong> prenotazione {booking.external_booking_id}</p>
           </div>
         </div>
 

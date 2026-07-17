@@ -18,9 +18,10 @@ import java.util.Optional;
 public class FiscalDocumentDAO {
 
     private static final String SELECT_ALL =
-            "SELECT id, fk_tenant_id, fk_booking_id, fk_tipo_documento_id, fk_sdi_esito_id, " +
+            "SELECT id, fk_tenant_id, fk_booking_id, fk_owner_id, fk_tipo_documento_id, fk_sdi_esito_id, " +
             "document_number, issue_date, recipient_name, recipient_tax_code, " +
-            "total_amount, vat_amount, imponibile, ritenuta_amount, bollo_amount, iva_amount, " +
+            "total_amount, vat_amount, aliquota_iva, imponibile, ritenuta_amount, bollo_amount, " +
+            "canone_locazione, fk_documento_collegato_id, " +
             "fk_stato_documento_id, sdi_identifier, " +
             "created_at, updated_at FROM fiscal_document";
 
@@ -48,9 +49,20 @@ public class FiscalDocumentDAO {
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_tenant_id = ? ORDER BY id", fiscalDocumentRowMapper, tenantId);
     }
 
+    public List<FiscalDocument> findByOwnerAndTenant(Integer tenantId, Integer ownerId) {
+        log.debug("FiscalDocumentDAO.findByOwnerAndTenant() - tenantId={}, ownerId={}", tenantId, ownerId);
+        String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? ORDER BY issue_date DESC";
+        return jdbcTemplate.query(sql, fiscalDocumentRowMapper, tenantId, ownerId);
+    }
+
     public List<FiscalDocument> findByBookingId(Integer bookingId) {
         log.debug("FiscalDocumentDAO.findByBookingId() - bookingId={}", bookingId);
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_booking_id = ? ORDER BY created_at DESC", fiscalDocumentRowMapper, bookingId);
+    }
+
+    public void deleteByBookingId(Integer bookingId) {
+        log.debug("FiscalDocumentDAO.deleteByBookingId() - bookingId={}", bookingId);
+        jdbcTemplate.update("DELETE FROM fiscal_document WHERE fk_booking_id = ?", bookingId);
     }
 
     public Optional<FiscalDocument> findByDocumentNumber(String documentNumber) {
@@ -84,7 +96,11 @@ public class FiscalDocumentDAO {
     public Integer getNextProgressiveNumber(Integer tenantId, Integer tipoDocumentoId, Integer anno) {
         log.debug("FiscalDocumentDAO.getNextProgressiveNumber() - tenantId={}, tipoDocumentoId={}, anno={}",
                 tenantId, tipoDocumentoId, anno);
-        String sql = "SELECT COUNT(*) + 1 FROM fiscal_document " +
+        // Usa MAX(progressivo)+1 anziché COUNT(*)+1: il count genera duplicati quando ci sono
+        // documenti eliminati o numerazioni non contigue. Il progressivo è la terza parte del
+        // document_number (es. 'FT-2026-0003' -> 3). COALESCE gestisce l'assenza di documenti -> 1.
+        String sql = "SELECT COALESCE(MAX(CAST(SPLIT_PART(document_number, '-', 3) AS INTEGER)), 0) + 1 " +
+                "FROM fiscal_document " +
                 "WHERE fk_tenant_id = ? AND fk_tipo_documento_id = ? " +
                 "AND EXTRACT(YEAR FROM issue_date) = ?";
         Integer next = jdbcTemplate.queryForObject(sql, Integer.class, tenantId, tipoDocumentoId, anno);
@@ -105,34 +121,56 @@ public class FiscalDocumentDAO {
 
     public FiscalDocument insert(FiscalDocument doc) {
         String sql = "INSERT INTO fiscal_document (" +
-                "fk_tenant_id, fk_booking_id, fk_tipo_documento_id, fk_sdi_esito_id, " +
+                "fk_tenant_id, fk_booking_id, fk_owner_id, fk_tipo_documento_id, fk_sdi_esito_id, " +
                 "document_number, issue_date, recipient_name, recipient_tax_code, " +
-                "total_amount, vat_amount, imponibile, ritenuta_amount, bollo_amount, iva_amount, " +
+                "total_amount, vat_amount, aliquota_iva, imponibile, ritenuta_amount, bollo_amount, " +
+                "canone_locazione, fk_documento_collegato_id, " +
                 "fk_stato_documento_id, sdi_identifier" +
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
             ps.setObject(1, doc.getFkTenantId());
             ps.setObject(2, doc.getFkBookingId());
-            ps.setObject(3, doc.getFkTipoDocumentoId());
-            ps.setObject(4, doc.getFkSdiEsitoId());
-            ps.setString(5, doc.getDocumentNumber());
-            ps.setObject(6, doc.getIssueDate());
-            ps.setString(7, doc.getRecipientName());
-            ps.setString(8, doc.getRecipientTaxCode());
-            ps.setObject(9, doc.getTotalAmount());
-            ps.setObject(10, doc.getVatAmount());
-            ps.setObject(11, doc.getImponibile());
-            ps.setObject(12, doc.getRitenutaAmount());
-            ps.setObject(13, doc.getBolloAmount());
-            ps.setObject(14, doc.getIvaAmount());
-            ps.setObject(15, doc.getFkStatoDocumentoId());
-            ps.setString(16, doc.getSdiIdentifier());
+            ps.setObject(3, doc.getFkOwnerId());
+            ps.setObject(4, doc.getFkTipoDocumentoId());
+            ps.setObject(5, doc.getFkSdiEsitoId());
+            ps.setString(6, doc.getDocumentNumber());
+            ps.setObject(7, doc.getIssueDate());
+            ps.setString(8, doc.getRecipientName());
+            ps.setString(9, doc.getRecipientTaxCode());
+            ps.setObject(10, doc.getTotalAmount());
+            ps.setObject(11, doc.getVatAmount());
+            ps.setObject(12, doc.getAliquotaIva());
+            ps.setObject(13, doc.getImponibile());
+            ps.setObject(14, doc.getRitenutaAmount());
+            ps.setObject(15, doc.getBolloAmount());
+            ps.setObject(16, doc.getCanoneLocazione());
+            ps.setObject(17, doc.getFkDocumentoCollegatoId());
+            ps.setObject(18, doc.getFkStatoDocumentoId());
+            ps.setString(19, doc.getSdiIdentifier());
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
         log.info("FiscalDocumentDAO.insert() - number={} tenantId={}", doc.getDocumentNumber(), doc.getFkTenantId());
         return findById(id).orElseThrow();
+    }
+
+    /**
+     * Aggiorna il collegamento tra documenti dello stesso booking (ricevuta <-> fattura PM).
+     */
+    public void updateDocumentoCollegato(Integer id, Integer fkDocumentoCollegatoId) {
+        log.debug("FiscalDocumentDAO.updateDocumentoCollegato() - id={}, collegatoId={}", id, fkDocumentoCollegatoId);
+        jdbcTemplate.update("UPDATE fiscal_document SET fk_documento_collegato_id = ? WHERE id = ?",
+                fkDocumentoCollegatoId, id);
+    }
+
+    /**
+     * Aggiorna lo stato (lookup stato_documento) di un documento fiscale.
+     */
+    public void updateStato(Integer id, Integer fkStatoDocumentoId) {
+        log.debug("FiscalDocumentDAO.updateStato() - id={}, statoId={}", id, fkStatoDocumentoId);
+        jdbcTemplate.update("UPDATE fiscal_document SET fk_stato_documento_id = ?, updated_at = NOW() WHERE id = ?",
+                fkStatoDocumentoId, id);
     }
 }

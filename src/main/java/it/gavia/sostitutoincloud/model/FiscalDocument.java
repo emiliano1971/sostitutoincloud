@@ -20,6 +20,7 @@ public class FiscalDocument {
     private Integer id;
     private Integer fkTenantId;
     private Integer fkBookingId;
+    private Integer fkOwnerId;
     private Integer fkTipoDocumentoId;
     private Integer fkSdiEsitoId;
     private String documentNumber;
@@ -28,10 +29,12 @@ public class FiscalDocument {
     private String recipientTaxCode;
     private BigDecimal totalAmount;
     private BigDecimal vatAmount;
+    private BigDecimal aliquotaIva;
     private BigDecimal imponibile;
     private BigDecimal ritenutaAmount;
     private BigDecimal bolloAmount;
-    private BigDecimal ivaAmount;
+    private BigDecimal canoneLocazione;
+    private Integer fkDocumentoCollegatoId;
     private Integer fkStatoDocumentoId;
     private String sdiIdentifier;
     private LocalDateTime createdAt;

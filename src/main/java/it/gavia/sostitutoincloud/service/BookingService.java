@@ -6,13 +6,16 @@ import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.ScenarioFiscaleDAO;
+import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
+import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
+import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.model.Booking;
@@ -27,11 +30,13 @@ import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -54,6 +59,10 @@ public class BookingService {
     private final TenantDAO tenantDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final FiscalDocumentDAO fiscalDocumentDAO;
+    private final SettlementBookingDAO settlementBookingDAO;
+    private final WithholdingLedgerDAO withholdingLedgerDAO;
+    private final ContrattoCalcolatoreService contrattoCalcolatore;
+    private final AuditService auditService;
 
     public BookingService(BookingDAO bookingDAO,
                           PropertyDAO propertyDAO,
@@ -64,7 +73,11 @@ public class BookingService {
                           ScenarioFiscaleDAO scenarioFiscaleDAO,
                           TenantDAO tenantDAO,
                           TipoDocumentoDAO tipoDocumentoDAO,
-                          FiscalDocumentDAO fiscalDocumentDAO) {
+                          FiscalDocumentDAO fiscalDocumentDAO,
+                          SettlementBookingDAO settlementBookingDAO,
+                          WithholdingLedgerDAO withholdingLedgerDAO,
+                          ContrattoCalcolatoreService contrattoCalcolatore,
+                          AuditService auditService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -75,20 +88,20 @@ public class BookingService {
         this.tenantDAO = tenantDAO;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
+        this.settlementBookingDAO = settlementBookingDAO;
+        this.withholdingLedgerDAO = withholdingLedgerDAO;
+        this.contrattoCalcolatore = contrattoCalcolatore;
+        this.auditService = auditService;
     }
 
     public List<BookingListDTO> findByTenantId(Integer tenantId, BookingFilterDTO filter) {
         LookupMaps maps = buildLookupMaps(tenantId);
         List<Booking> all = bookingDAO.findByTenantId(tenantId);
 
-        int page = filter.getPage() != null ? filter.getPage() : 0;
-        int size = filter.getSize() != null ? filter.getSize() : 20;
-
         Stream<Booking> stream = all.stream();
         stream = applyStatusFilter(stream, filter.getStatus(), maps);
         stream = applyChannelFilter(stream, filter.getChannel(), maps);
         stream = applySearchFilter(stream, filter.getQ());
-        stream = stream.skip((long) page * size).limit(size);
 
         List<BookingListDTO> result = stream.map(b -> toListDTO(b, maps)).toList();
         log.info("BookingService.findByTenantId() - tenantId={}, filtro=[status={}, channel={}, q={}], {} booking trovati",
@@ -104,6 +117,27 @@ public class BookingService {
                     LookupMaps maps = buildLookupMaps(tenantId);
                     return toDetailDTO(b, maps);
                 });
+    }
+
+    /**
+     * Cancella un booking e, a cascata, tutti i dati collegati (liquidazioni,
+     * ritenute, documenti fiscali). Le DELETE seguono un ordine preciso per
+     * rispettare i vincoli FK. Disponibile solo in local/test (vedi controller).
+     */
+    @Transactional
+    public void deleteWithCascade(Integer tenantId, Integer bookingId) {
+        Booking booking = bookingDAO.findById(bookingId)
+                .filter(b -> tenantId.equals(b.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+
+        settlementBookingDAO.deleteByBookingId(booking.getId());
+        withholdingLedgerDAO.deleteByBookingId(booking.getId());
+        fiscalDocumentDAO.deleteByBookingId(booking.getId());
+        bookingDAO.deleteById(booking.getId());
+
+        auditService.log("booking.delete", "Booking", bookingId,
+                "Cancellazione cascata booking id=" + bookingId);
+        log.info("BookingService.deleteWithCascade() - id={}", bookingId);
     }
 
     // ── filtri ──────────────────────────────────────────────────────────────
@@ -172,9 +206,35 @@ public class BookingService {
         return s != null ? s.getCodice() : null;
     }
 
-    private String resolveOwnerName(Property property, Map<Integer, OwnerProfile> ownersById) {
-        if (property == null || property.getFkOwnerId() == null) return null;
-        OwnerProfile o = ownersById.get(property.getFkOwnerId());
+    /**
+     * Calcola dinamicamente lo stato documento della prenotazione a partire dai fiscal_document
+     * associati: lo stato NON è più persistito sul booking.
+     * Priorità: accepted > sent_sdi > ready > draft. Nessun documento → "nessuno".
+     */
+    private String computeDocumentStatus(Integer bookingId, LookupMaps maps) {
+        List<FiscalDocument> docs = fiscalDocumentDAO.findByBookingId(bookingId);
+        if (docs.isEmpty()) {
+            return "nessuno";
+        }
+        boolean hasAccepted = docs.stream()
+                .anyMatch(d -> "accepted".equals(statoDocCodiceDa(d.getFkStatoDocumentoId(), maps.statiDocumentoById)));
+        boolean hasSentSdi = docs.stream()
+                .anyMatch(d -> "sent_sdi".equals(statoDocCodiceDa(d.getFkStatoDocumentoId(), maps.statiDocumentoById)));
+        boolean hasReady = docs.stream()
+                .anyMatch(d -> "ready".equals(statoDocCodiceDa(d.getFkStatoDocumentoId(), maps.statiDocumentoById)));
+        if (hasAccepted) return "accepted";
+        if (hasSentSdi) return "sent_sdi";
+        if (hasReady) return "ready";
+        return "draft";
+    }
+
+    /**
+     * Risolve il nome del proprietario direttamente dal fk_owner_id denormalizzato sul booking,
+     * senza risalire la catena booking→property→owner (stesso pattern di FiscalDocumentService).
+     */
+    private String resolveOwnerName(Integer fkOwnerId, Map<Integer, OwnerProfile> ownersById) {
+        if (fkOwnerId == null) return null;
+        OwnerProfile o = ownersById.get(fkOwnerId);
         return o != null ? o.getFirstName() + " " + o.getLastName() : null;
     }
 
@@ -192,7 +252,8 @@ public class BookingService {
                 .externalBookingId(b.getExternalBookingId())
                 .guestName(b.getGuestName())
                 .propertyName(prop != null ? prop.getDisplayName() : null)
-                .ownerName(resolveOwnerName(prop, maps.ownersById))
+                .fkOwnerId(b.getFkOwnerId())
+                .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)
                 .checkinDate(b.getCheckinDate())
                 .checkoutDate(b.getCheckoutDate())
@@ -202,7 +263,7 @@ public class BookingService {
                 .ownerNetAmount(b.getOwnerNetAmount())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))
                 .paymentStatus(b.getPaymentStatus())
-                .documentStatus(statoDocCodiceDa(b.getFkStatoDocumentoId(), maps.statiDocumentoById))
+                .documentStatus(computeDocumentStatus(b.getId(), maps))
                 .settlementStatus(b.getSettlementStatus())
                 .createdAt(b.getCreatedAt())
                 .build();
@@ -212,20 +273,35 @@ public class BookingService {
         Property prop = maps.propertiesById.get(b.getFkPropertyId());
         CanaleOta canale = maps.canaliById.get(b.getFkCanaleOtaId());
         ScenarioFiscale scenario = maps.scenariById.get(b.getFkScenarioFiscaleId());
-        OwnerProfile owner = prop != null && prop.getFkOwnerId() != null
-                ? maps.ownersById.get(prop.getFkOwnerId()) : null;
+        OwnerProfile owner = b.getFkOwnerId() != null
+                ? maps.ownersById.get(b.getFkOwnerId()) : null;
         Tenant tenant = maps.tenant;
 
-        BigDecimal ownerNet = safeVal(b.getOwnerNetAmount());
-        BigDecimal withholding = safeVal(b.getWithholdingAmount());
+        // Ricalcolo dello split economico tramite le regole del contratto immobile.
+        // L'otaCommission già presente nel DB è usato come override (il valore importato dal CSV).
+        ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
+                b.getFkTenantId(),
+                b.getFkPropertyId(),
+                b.getFkCanaleOtaId(),
+                b.getGrossAmount(),
+                b.getOtaCommissionAmount(),
+                b.getNights(),
+                b.getGuests());
+
         SplitEconomicoDTO split = SplitEconomicoDTO.builder()
                 .grossAmount(b.getGrossAmount())
-                .otaCommissionAmount(b.getOtaCommissionAmount())
-                .cleaningAmount(b.getCleaningAmount())
-                .pmFeeAmount(b.getPmFeeAmount())
-                .ownerNetAmount(b.getOwnerNetAmount())
-                .withholdingAmount(b.getWithholdingAmount())
-                .liquidazioneOwner(ownerNet.subtract(withholding))
+                .otaCommissionAmount(calcolo.getOtaCommissionAmount())
+                .cleaningAmount(calcolo.getCleaningAmount())
+                .pmFeeAmount(calcolo.getPmFeeAmount())
+                .ownerNetAmount(calcolo.getOwnerNetAmount())
+                .withholdingAmount(b.getWithholdingAmount())   // mantieni il valore del DB
+                .aliquotaRitenuta(b.getAliquotaRitenuta())     // % storicizzata sul booking
+                .liquidazioneOwner(calcolo.getLiquidazioneOwner())
+                .imponibileFatturaPm(calcolo.getImponibileFatturaPm())
+                .ivaScorporataPm(calcolo.getIvaScorporata())
+                .fatturaPmTotale(calcolo.getFatturaPmTotale())
+                .warnings(calcolo.getWarnings())
+                .calcoloCompleto(calcolo.getCalcoloCompleto())
                 .touristTaxAmount(b.getTouristTaxAmount())
                 .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                 .build();
@@ -234,12 +310,12 @@ public class BookingService {
                 .id(b.getId())
                 .fkTenantId(b.getFkTenantId())
                 .fkPropertyId(b.getFkPropertyId())
-                .fkOwnerId(prop != null ? prop.getFkOwnerId() : null)
+                .fkOwnerId(b.getFkOwnerId())
                 .externalBookingId(b.getExternalBookingId())
                 .guestName(b.getGuestName())
                 .guestTaxCode(b.getGuestTaxCode())
                 .propertyName(prop != null ? prop.getDisplayName() : null)
-                .ownerName(resolveOwnerName(prop, maps.ownersById))
+                .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)
                 .fiscalScenarioCode(scenario != null ? scenario.getCodice() : null)
                 .checkinDate(b.getCheckinDate())
@@ -257,7 +333,7 @@ public class BookingService {
                 .touristTaxCollection(b.getTouristTaxCollection())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))
                 .paymentStatus(b.getPaymentStatus())
-                .documentStatus(statoDocCodiceDa(b.getFkStatoDocumentoId(), maps.statiDocumentoById))
+                .documentStatus(computeDocumentStatus(b.getId(), maps))
                 .settlementStatus(b.getSettlementStatus())
                 .createdAt(b.getCreatedAt())
                 .updatedAt(b.getUpdatedAt())
@@ -300,7 +376,9 @@ public class BookingService {
                 .imponibile(d.getImponibile())
                 .ritenutaAmount(d.getRitenutaAmount())
                 .bolloAmount(d.getBolloAmount())
-                .ivaAmount(d.getIvaAmount())
+                .aliquotaIva(d.getAliquotaIva())
+                .canoneLocazione(d.getCanoneLocazione())
+                .fkDocumentoCollegatoId(d.getFkDocumentoCollegatoId())
                 .build();
     }
 

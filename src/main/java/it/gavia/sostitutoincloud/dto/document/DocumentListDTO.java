@@ -29,5 +29,7 @@ public class DocumentListDTO {
     private String propertyName;
     private String channelName;
     private Integer fkBookingId;
+    private Integer fkOwnerId;
+    private String ownerName;     // first_name + ' ' + last_name (o legalName); null se documento non collegato a booking
     private LocalDateTime createdAt;
 }

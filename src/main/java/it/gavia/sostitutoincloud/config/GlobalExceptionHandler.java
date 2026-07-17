@@ -26,6 +26,12 @@ public class GlobalExceptionHandler {
         return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleConflict(IllegalStateException ex) {
+        log.warn("IllegalStateException: {}", ex.getMessage());
+        return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(UnsupportedOperationException.class)
     public ResponseEntity<Map<String, Object>> handleNotImplemented(UnsupportedOperationException ex) {
         log.warn("UnsupportedOperationException: {}", ex.getMessage());

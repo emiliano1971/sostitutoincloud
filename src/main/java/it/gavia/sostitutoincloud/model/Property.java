@@ -27,6 +27,7 @@ public class Property {
     private String region;
     private String cinCode;
     private Boolean attivo;
+    private Boolean primoImmobile;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

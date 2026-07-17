@@ -6,6 +6,8 @@ import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportConfirmDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportResultDTO;
+import it.gavia.sostitutoincloud.dto.importing.ImportPreviewV2RequestDTO;
+import it.gavia.sostitutoincloud.dto.importing.ImportUploadResponseDTO;
 import it.gavia.sostitutoincloud.service.BookingImportService;
 import it.gavia.sostitutoincloud.service.BookingService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
@@ -46,6 +48,36 @@ public class BookingController {
             @RequestBody BookingImportConfirmDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         return ResponseEntity.ok(bookingImportService.confirm(tenantId, dto));
+    }
+
+    // ── Import V2 (doppio file + mapping colonne manuale) ──────────────────
+
+    @PostMapping("/import/upload")
+    public ResponseEntity<?> importUpload(
+            @RequestParam("bookingFile") MultipartFile bookingFile,
+            @RequestParam(value = "guestFile", required = false) MultipartFile guestFile,
+            @RequestParam(value = "headerRow", required = false, defaultValue = "0") Integer headerRow) {
+        try {
+            Integer tenantId = SecurityUtils.getCurrentTenantId();
+            ImportUploadResponseDTO result = bookingImportService.uploadFiles(tenantId, bookingFile, guestFile, headerRow);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.warn("BookingController.importUpload() - errore: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/import/preview-v2")
+    public ResponseEntity<?> importPreviewV2(@RequestBody ImportPreviewV2RequestDTO request) {
+        try {
+            Integer tenantId = SecurityUtils.getCurrentTenantId();
+            BookingImportPreviewDTO preview = bookingImportService.previewWithMapping(
+                    tenantId, request.getBookingSessionId(), request.getGuestSessionId(), request.getMapping());
+            return ResponseEntity.ok(preview);
+        } catch (Exception e) {
+            log.warn("BookingController.importPreviewV2() - errore: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
     }
 
     @GetMapping

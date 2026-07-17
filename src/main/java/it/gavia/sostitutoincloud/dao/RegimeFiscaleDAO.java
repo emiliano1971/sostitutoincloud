@@ -22,7 +22,7 @@ public class RegimeFiscaleDAO {
 
     public List<RegimeFiscale> findAll() {
         log.debug("RegimeFiscaleDAO.findAll()");
-        String sql = "SELECT id, codice, descrizione, attivo, created_at, updated_at " +
+        String sql = "SELECT id, codice, descrizione, attivo, metadata, created_at, updated_at " +
                      "FROM regime_fiscale ORDER BY id";
         List<RegimeFiscale> result = jdbcTemplate.query(sql, regimeFiscaleRowMapper);
         log.debug("RegimeFiscaleDAO.findAll() - trovati {} record", result.size());
@@ -31,7 +31,7 @@ public class RegimeFiscaleDAO {
 
     public Optional<RegimeFiscale> findById(Integer id) {
         log.debug("RegimeFiscaleDAO.findById() - id={}", id);
-        String sql = "SELECT id, codice, descrizione, attivo, created_at, updated_at " +
+        String sql = "SELECT id, codice, descrizione, attivo, metadata, created_at, updated_at " +
                      "FROM regime_fiscale WHERE id = ?";
         List<RegimeFiscale> result = jdbcTemplate.query(sql, regimeFiscaleRowMapper, id);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
@@ -39,7 +39,7 @@ public class RegimeFiscaleDAO {
 
     public Optional<RegimeFiscale> findByCodice(String codice) {
         log.debug("RegimeFiscaleDAO.findByCodice() - codice={}", codice);
-        String sql = "SELECT id, codice, descrizione, attivo, created_at, updated_at " +
+        String sql = "SELECT id, codice, descrizione, attivo, metadata, created_at, updated_at " +
                      "FROM regime_fiscale WHERE codice = ?";
         List<RegimeFiscale> result = jdbcTemplate.query(sql, regimeFiscaleRowMapper, codice);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
@@ -47,10 +47,19 @@ public class RegimeFiscaleDAO {
 
     public List<RegimeFiscale> findByAttivo(Boolean attivo) {
         log.debug("RegimeFiscaleDAO.findByAttivo() - attivo={}", attivo);
-        String sql = "SELECT id, codice, descrizione, attivo, created_at, updated_at " +
+        String sql = "SELECT id, codice, descrizione, attivo, metadata, created_at, updated_at " +
                      "FROM regime_fiscale WHERE attivo = ? ORDER BY id";
         List<RegimeFiscale> result = jdbcTemplate.query(sql, regimeFiscaleRowMapper, attivo);
         log.debug("RegimeFiscaleDAO.findByAttivo() - trovati {} record", result.size());
+        return result;
+    }
+
+    public List<RegimeFiscale> findByMetadata(String metadata) {
+        log.debug("RegimeFiscaleDAO.findByMetadata() - metadata={}", metadata);
+        String sql = "SELECT id, codice, descrizione, attivo, metadata, created_at, updated_at " +
+                     "FROM regime_fiscale WHERE metadata = ? AND attivo = TRUE ORDER BY codice";
+        List<RegimeFiscale> result = jdbcTemplate.query(sql, regimeFiscaleRowMapper, metadata);
+        log.debug("RegimeFiscaleDAO.findByMetadata() - trovati {} record", result.size());
         return result;
     }
 }

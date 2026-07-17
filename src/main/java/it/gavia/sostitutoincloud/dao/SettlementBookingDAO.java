@@ -32,6 +32,22 @@ public class SettlementBookingDAO {
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_booking_id = ? ORDER BY id", rowMapper, bookingId);
     }
 
+    public void insert(Integer settlementId, Integer bookingId) {
+        log.debug("SettlementBookingDAO.insert() - settlementId={}, bookingId={}", settlementId, bookingId);
+        jdbcTemplate.update("INSERT INTO settlement_booking (fk_settlement_id, fk_booking_id) VALUES (?, ?)",
+                settlementId, bookingId);
+    }
+
+    public void deleteBySettlementId(Integer settlementId) {
+        log.debug("SettlementBookingDAO.deleteBySettlementId() - settlementId={}", settlementId);
+        jdbcTemplate.update("DELETE FROM settlement_booking WHERE fk_settlement_id = ?", settlementId);
+    }
+
+    public void deleteByBookingId(Integer bookingId) {
+        log.debug("SettlementBookingDAO.deleteByBookingId() - bookingId={}", bookingId);
+        jdbcTemplate.update("DELETE FROM settlement_booking WHERE fk_booking_id = ?", bookingId);
+    }
+
     public boolean existsBySettlementIdAndBookingId(Integer settlementId, Integer bookingId) {
         log.debug("SettlementBookingDAO.existsBySettlementIdAndBookingId() - settlementId={}, bookingId={}", settlementId, bookingId);
         String sql = "SELECT COUNT(*) FROM settlement_booking WHERE fk_settlement_id = ? AND fk_booking_id = ?";

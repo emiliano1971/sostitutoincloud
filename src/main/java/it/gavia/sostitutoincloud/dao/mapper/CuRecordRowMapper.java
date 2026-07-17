@@ -20,8 +20,10 @@ public class CuRecordRowMapper implements RowMapper<CuRecord> {
                 .taxYear(rs.getInt("tax_year"))
                 .totalCompensi(rs.getBigDecimal("total_compensi"))
                 .totalRitenute(rs.getBigDecimal("total_ritenute"))
+                .totalImponibile(rs.getBigDecimal("total_imponibile"))
                 .stato(rs.getString("stato"))
                 .generatedAt(rs.getObject("generated_at", LocalDateTime.class))
+                .sentAt(rs.getObject("sent_at", LocalDateTime.class))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

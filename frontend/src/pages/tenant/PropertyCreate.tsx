@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,8 @@ const PropertyCreate = () => {
   const { toast } = useToast();
   const [tenantOwners, setTenantOwners] = useState<OwnerListItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [ownerError, setOwnerError] = useState(false);
+  const ownerFieldRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getOwners(true).then(setTenantOwners).catch(() => {});
@@ -42,6 +44,13 @@ const PropertyCreate = () => {
   const handleSave = async () => {
     if (!form.display_name || !form.internal_code || !form.city) {
       toast({ title: 'Errore', description: 'Compila almeno nome, codice interno e città.', variant: 'destructive' });
+      return;
+    }
+    // Proprietario obbligatorio: non chiamare il backend se mancante
+    if (!form.owner_id) {
+      setOwnerError(true);
+      ownerFieldRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      ownerFieldRef.current?.querySelector('button')?.focus();
       return;
     }
     const otaCodes = [
@@ -133,10 +142,12 @@ const PropertyCreate = () => {
                 <p className="text-xs text-muted-foreground">Codice Identificativo Nazionale assegnato dalla BDSR</p>
               </div>
               <Separator />
-              <div className="space-y-2">
-                <Label>Proprietario</Label>
-                <Select value={form.owner_id} onValueChange={v => update('owner_id', v)}>
-                  <SelectTrigger><SelectValue placeholder="Seleziona proprietario..." /></SelectTrigger>
+              <div className="space-y-2" ref={ownerFieldRef}>
+                <Label>Proprietario *</Label>
+                <Select value={form.owner_id} onValueChange={v => { update('owner_id', v); setOwnerError(false); }}>
+                  <SelectTrigger className={ownerError ? 'border-destructive focus:ring-destructive' : ''}>
+                    <SelectValue placeholder="Seleziona proprietario..." />
+                  </SelectTrigger>
                   <SelectContent>
                     {tenantOwners.map(o => (
                       <SelectItem key={o.id} value={String(o.id)}>
@@ -145,6 +156,7 @@ const PropertyCreate = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                {ownerError && <p className="text-sm text-destructive">Seleziona un proprietario</p>}
               </div>
             </CardContent>
           </Card>

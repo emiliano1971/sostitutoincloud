@@ -24,6 +24,8 @@ public class SettlementRowMapper implements RowMapper<Settlement> {
                 .netAmount(rs.getBigDecimal("net_amount"))
                 .stato(rs.getString("stato"))
                 .paymentDate(rs.getObject("payment_date", LocalDate.class))
+                .periodoMese(rs.getObject("periodo_mese", Integer.class))
+                .periodoAnno(rs.getObject("periodo_anno", Integer.class))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

@@ -16,6 +16,8 @@ public class TenantSettingsDAO {
     private static final String SELECT_ALL =
             "SELECT id, fk_tenant_id, withholding_rate_primary, withholding_rate_secondary, " +
             "codice_tributo_f24, document_window_days, cedolare_secca_enabled, " +
+            "bollo_importo, bollo_soglia, bollo_addebitato_cliente, " +
+            "regime_fiscale_pm, natura_iva_esente, " +
             "sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
             "created_at, updated_at FROM tenant_settings";
@@ -40,15 +42,22 @@ public class TenantSettingsDAO {
             "INSERT INTO tenant_settings (" +
             "  fk_tenant_id, withholding_rate_primary, withholding_rate_secondary, " +
             "  codice_tributo_f24, document_window_days, cedolare_secca_enabled, " +
+            "  bollo_importo, bollo_soglia, bollo_addebitato_cliente, " +
+            "  regime_fiscale_pm, natura_iva_esente, " +
             "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email" +
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
             " ON CONFLICT (fk_tenant_id) DO UPDATE SET" +
             "  withholding_rate_primary    = EXCLUDED.withholding_rate_primary," +
             "  withholding_rate_secondary  = EXCLUDED.withholding_rate_secondary," +
             "  codice_tributo_f24          = EXCLUDED.codice_tributo_f24," +
             "  document_window_days        = EXCLUDED.document_window_days," +
             "  cedolare_secca_enabled      = EXCLUDED.cedolare_secca_enabled," +
+            "  bollo_importo               = EXCLUDED.bollo_importo," +
+            "  bollo_soglia                = EXCLUDED.bollo_soglia," +
+            "  bollo_addebitato_cliente    = EXCLUDED.bollo_addebitato_cliente," +
+            "  regime_fiscale_pm           = EXCLUDED.regime_fiscale_pm," +
+            "  natura_iva_esente           = EXCLUDED.natura_iva_esente," +
             "  sdi_auto_send               = EXCLUDED.sdi_auto_send," +
             "  deroga_ricevuta_enabled     = EXCLUDED.deroga_ricevuta_enabled," +
             "  numerazione_automatica      = EXCLUDED.numerazione_automatica," +
@@ -59,6 +68,8 @@ public class TenantSettingsDAO {
             " RETURNING " +
             "  id, fk_tenant_id, withholding_rate_primary, withholding_rate_secondary, " +
             "  codice_tributo_f24, document_window_days, cedolare_secca_enabled, " +
+            "  bollo_importo, bollo_soglia, bollo_addebitato_cliente, " +
+            "  regime_fiscale_pm, natura_iva_esente, " +
             "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
             "  created_at, updated_at";
@@ -67,7 +78,10 @@ public class TenantSettingsDAO {
                 s.getFkTenantId(),
                 s.getWithholdingRatePrimary(), s.getWithholdingRateSecondary(),
                 s.getCodiceTributoF24(), s.getDocumentWindowDays(),
-                s.getCedolareSeccaEnabled(), s.getSdiAutoSend(),
+                s.getCedolareSeccaEnabled(),
+                s.getBolloImporto(), s.getBolloSoglia(), s.getBolloAddebitatoCliente(),
+                s.getRegimeFiscalePm(), s.getNaturaIvaEsente(),
+                s.getSdiAutoSend(),
                 s.getDerogaRicevutaEnabled(), s.getNumerazioneAutomatica(),
                 s.getAlertScadenzeDocumenti(), s.getAlertScadenzeF24(),
                 s.getNotificheEmail());

@@ -19,6 +19,7 @@ public class BookingListDTO {
     private String externalBookingId;
     private String guestName;
     private String propertyName;
+    private Integer fkOwnerId;
     private String ownerName;
     private String channelName;
     private LocalDate checkinDate;

@@ -1,4 +1,4 @@
-import { get } from '@/lib/apiClient';
+import { get, post, patch } from '@/lib/apiClient';
 
 export interface SettlementListItem {
   id: number;
@@ -46,4 +46,29 @@ export async function getSettlements(params?: {
 
 export async function getSettlementById(id: number): Promise<SettlementDetail> {
   return get<SettlementDetail>(`/settlements/${id}`);
+}
+
+export interface SettlementCalcolaRequest {
+  mese: number;
+  anno: number;
+}
+
+export interface SettlementCalcolaResult {
+  generated: number;
+  updated: number;
+  skipped: number;
+  settlements: SettlementListItem[];
+}
+
+export async function calcolaSettlements(
+  req: SettlementCalcolaRequest,
+): Promise<SettlementCalcolaResult> {
+  return post<SettlementCalcolaResult>('/settlements/calcola', req);
+}
+
+export async function updateSettlementStatus(
+  id: number,
+  stato: string,
+): Promise<SettlementListItem> {
+  return patch<SettlementListItem>(`/settlements/${id}/status`, { stato });
 }

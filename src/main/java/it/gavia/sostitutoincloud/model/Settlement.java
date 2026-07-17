@@ -28,6 +28,8 @@ public class Settlement {
     /** Enum PostgreSQL settlement_status → String */
     private String stato;
     private LocalDate paymentDate;
+    private Integer periodoMese;
+    private Integer periodoAnno;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

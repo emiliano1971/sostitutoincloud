@@ -320,12 +320,15 @@ CREATE TABLE regime_fiscale (
     codice      VARCHAR(30)     NOT NULL UNIQUE,
     descrizione VARCHAR(150)    NOT NULL,
     attivo      BOOLEAN         NOT NULL DEFAULT TRUE,
+    metadata    VARCHAR(50)     NOT NULL DEFAULT 'REGIME_FISCALE',  -- tabella di transcodifica multi-purpose: REGIME_FISCALE | NATURA_IVA | ALIQUOTA_IVA | REGIME_FISCALE_PM
     created_at  TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMP       NOT NULL DEFAULT NOW()
 );
 COMMENT ON TABLE regime_fiscale IS
-    'Regimi fiscali applicabili ai proprietari (cedolare secca, IVA 10%, ordinario). '
-    'Lookup per supportare nuovi regimi fiscali senza modificare lo schema.';
+    'Tabella di transcodifica multi-purpose discriminata dal campo metadata: '
+    'REGIME_FISCALE (regimi proprietari), NATURA_IVA (codici natura SDI), '
+    'ALIQUOTA_IVA (aliquote), REGIME_FISCALE_PM (regimi SDI del PM). '
+    'Lookup per supportare nuovi codici senza modificare lo schema.';
 
 CREATE TRIGGER trg_regime_fiscale_updated_at
     BEFORE UPDATE ON regime_fiscale
@@ -438,6 +441,7 @@ CREATE TABLE property (
     region              VARCHAR(80)     NOT NULL,
     cin_code            VARCHAR(25),              -- Codice Identificativo Nazionale (formato IT + 6 + 1 + 9 = 18 char)
     attivo              BOOLEAN         NOT NULL DEFAULT TRUE,
+    primo_immobile      BOOLEAN         NOT NULL DEFAULT FALSE,   -- primo immobile dell'owner: ritenuta 21% (primario) vs 26% (secondario)
     created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_property_code_per_tenant UNIQUE (fk_tenant_id, internal_code)
@@ -470,11 +474,42 @@ CREATE TRIGGER trg_property_ota_code_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
+-- Regole di imputazione costi per immobile (contratto)
+-- Definiscono come il prezzo lordo di una prenotazione viene ripartito tra le voci di costo.
+-- Una sola regola per immobile può essere is_remainder = TRUE: assorbe il residuo per
+-- garantire la copertura al 100% del lordo.
+CREATE TABLE property_contract_rule (
+    id                  SERIAL          PRIMARY KEY,
+    fk_property_id      INTEGER         NOT NULL REFERENCES property(id) ON DELETE CASCADE,
+    fk_tenant_id        INTEGER         NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
+    fk_canale_ota_id    INTEGER         REFERENCES canale_ota(id) ON DELETE SET NULL,  -- solo per tipo = commissione_ota
+    tipo                VARCHAR(30)     NOT NULL,   -- pulizie, commissione_ota, cambio_biancheria, commissione_pm, provvigione_proprietario
+    calc_mode           VARCHAR(30)     NOT NULL,   -- fisso, percentuale, fisso_per_notte, fisso_per_persona, percentuale_lordo, rimanenza
+    valore              DECIMAL(10,2)   NOT NULL DEFAULT 0,
+    is_remainder        BOOLEAN         NOT NULL DEFAULT FALSE,
+    ordine              INTEGER         NOT NULL DEFAULT 0,
+    attivo              BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP       NOT NULL DEFAULT NOW()
+);
+COMMENT ON TABLE property_contract_rule IS
+    'Regole di imputazione costi per immobile. Una sola riga per immobile può essere is_remainder = TRUE '
+    '(ammessa solo per commissione_pm o provvigione_proprietario) e assorbe il residuo del lordo.';
+
+CREATE INDEX idx_contract_rule_property ON property_contract_rule(fk_property_id);
+CREATE INDEX idx_contract_rule_tenant   ON property_contract_rule(fk_tenant_id);
+
+CREATE TRIGGER trg_contract_rule_updated_at
+    BEFORE UPDATE ON property_contract_rule
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
 -- Prenotazioni
 CREATE TABLE booking (
     id                              SERIAL                  PRIMARY KEY,
     fk_tenant_id                    INTEGER                 NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
     fk_property_id                  INTEGER                 NOT NULL REFERENCES property(id) ON DELETE RESTRICT,
+    fk_owner_id                     INTEGER                 REFERENCES owner_profile(id) ON DELETE RESTRICT, -- proprietario, denormalizzato dalla catena booking→property per query dirette
     fk_canale_ota_id                INTEGER                 REFERENCES canale_ota(id) ON DELETE SET NULL,
     fk_scenario_fiscale_id          INTEGER                 REFERENCES scenario_fiscale(id) ON DELETE SET NULL,
     external_booking_id             VARCHAR(100),           -- ID prenotazione sul canale OTA
@@ -489,13 +524,14 @@ CREATE TABLE booking (
     cleaning_amount                 DECIMAL(10,2)           NOT NULL DEFAULT 0,
     pm_fee_amount                   DECIMAL(10,2)           NOT NULL DEFAULT 0,
     owner_net_amount                DECIMAL(10,2)           NOT NULL,
-    withholding_amount              DECIMAL(10,2)           NOT NULL DEFAULT 0,   -- ritenuta 21%
+    withholding_amount              DECIMAL(10,2)           NOT NULL DEFAULT 0,   -- ritenuta calcolata
+    aliquota_ritenuta               DECIMAL(5,2)            NOT NULL DEFAULT 21.00, -- % ritenuta storicizzata (21.00 / 26.00)
     tourist_tax_amount              DECIMAL(10,2)           NOT NULL DEFAULT 0,
     tourist_tax_included_in_gross   BOOLEAN                 NOT NULL DEFAULT FALSE,
     tourist_tax_collection          tourist_tax_collection  NOT NULL DEFAULT 'contanti',
     fk_stato_prenotazione_id        INTEGER                 NOT NULL REFERENCES stato_prenotazione(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'imported'
     payment_status                  payment_status          NOT NULL DEFAULT 'pending',
-    fk_stato_documento_id           INTEGER                 NOT NULL REFERENCES stato_documento(id) ON DELETE RESTRICT DEFAULT 1,          -- 1 = 'draft'
+    -- lo stato documento NON è persistito sulla prenotazione: è calcolato dinamicamente dai fiscal_document associati
     settlement_status               settlement_status       NOT NULL DEFAULT 'pending',
     created_at                      TIMESTAMP               NOT NULL DEFAULT NOW(),
     updated_at                      TIMESTAMP               NOT NULL DEFAULT NOW(),
@@ -507,7 +543,8 @@ CREATE TABLE booking (
 COMMENT ON TABLE booking IS
     'Prenotazioni importate dai canali OTA o inserite manualmente. '
     'Contiene tutti i dati finanziari (lordo, commissioni, netto, ritenute, tassa soggiorno). '
-    'fk_stato_prenotazione_id e fk_stato_documento_id referenziano le tabelle lookup; '
+    'fk_stato_prenotazione_id referenzia la tabella lookup; '
+    'lo stato documento è derivato a runtime dai fiscal_document associati, non persistito qui; '
     'payment_status e settlement_status restano enum.';
 
 CREATE TRIGGER trg_booking_updated_at
@@ -520,6 +557,7 @@ CREATE TABLE fiscal_document (
     id                      SERIAL          PRIMARY KEY,
     fk_tenant_id            INTEGER         NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
     fk_booking_id           INTEGER         NOT NULL REFERENCES booking(id) ON DELETE RESTRICT,
+    fk_owner_id             INTEGER         REFERENCES owner_profile(id) ON DELETE RESTRICT, -- proprietario, denormalizzato dalla catena booking→property per query dirette
     fk_tipo_documento_id    INTEGER         NOT NULL REFERENCES tipo_documento(id) ON DELETE RESTRICT,
     fk_sdi_esito_id         INTEGER         REFERENCES sdi_esito(id) ON DELETE SET NULL,
     document_number         VARCHAR(30)     NOT NULL,           -- es. 'FT-2025-0001', 'RIC-2025-0001'
@@ -528,10 +566,12 @@ CREATE TABLE fiscal_document (
     recipient_tax_code      VARCHAR(20),                        -- CF destinatario, opzionale per stranieri
     total_amount            DECIMAL(10,2)   NOT NULL,
     vat_amount              DECIMAL(10,2)   NOT NULL DEFAULT 0, -- 0 per ricevute fuori campo IVA
+    aliquota_iva            DECIMAL(5,2)    NOT NULL DEFAULT 0.00, -- aliquota IVA % (0 ricevuta, 22 fattura PM)
     imponibile              DECIMAL(10,2),                      -- base imponibile (canone per ricevuta, riaddebiti+provvigione per fattura)
     ritenuta_amount         DECIMAL(10,2),                      -- ritenuta d'acconto 21% (cedolare/sostituto d'imposta)
     bollo_amount            DECIMAL(10,2),                      -- imposta di bollo €2,00 se importo > €77,47
-    iva_amount              DECIMAL(10,2),                      -- IVA del documento (0 per ricevute fuori campo IVA)
+    canone_locazione        DECIMAL(10,2),                      -- canone locazione persistito sulla ricevuta owner
+    fk_documento_collegato_id INTEGER       REFERENCES fiscal_document(id) ON DELETE SET NULL,  -- collegamento ricevuta <-> fattura PM dello stesso booking
     fk_stato_documento_id   INTEGER         NOT NULL REFERENCES stato_documento(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'draft'
     sdi_identifier          VARCHAR(50),                        -- identificativo assegnato da SDI
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
@@ -560,6 +600,8 @@ CREATE TABLE settlement (
     net_amount          DECIMAL(10,2)       NOT NULL,   -- total_amount - withholding_amount
     stato               settlement_status   NOT NULL DEFAULT 'pending',
     payment_date        DATE,                           -- NULL finché non liquidata
+    periodo_mese        SMALLINT,                       -- mese di competenza (1-12), ridondante con period per query veloci
+    periodo_anno        SMALLINT,                       -- anno di competenza
     created_at          TIMESTAMP           NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMP           NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_settlement_owner_period   UNIQUE (fk_owner_id, period),
@@ -600,6 +642,9 @@ CREATE TABLE f24_record (
     stato               f24_status      NOT NULL DEFAULT 'draft',
     deadline_date       DATE            NOT NULL,
     payment_date        DATE,                       -- NULL finché non pagato
+    periodo_mese        SMALLINT,                   -- mese di competenza (1-12), ridondante con period per query veloci
+    periodo_anno        SMALLINT,                   -- anno di competenza
+    reference_year      SMALLINT,                   -- anno di riferimento fiscale del versamento
     created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_f24_tenant_period_tributo UNIQUE (fk_tenant_id, period, fk_codice_tributo_id),
@@ -615,6 +660,39 @@ CREATE TRIGGER trg_f24_record_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
+-- Registro analitico delle ritenute operate (una riga per documento fiscale con ritenuta)
+CREATE TABLE withholding_ledger (
+    id                      SERIAL          PRIMARY KEY,
+    fk_tenant_id            INTEGER         NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
+    fk_owner_id             INTEGER         NOT NULL REFERENCES owner_profile(id) ON DELETE RESTRICT,
+    fk_booking_id           INTEGER         NOT NULL REFERENCES booking(id) ON DELETE RESTRICT,
+    fk_fiscal_document_id   INTEGER         NOT NULL REFERENCES fiscal_document(id) ON DELETE RESTRICT,
+    periodo_mese            SMALLINT        NOT NULL,   -- mese di competenza (1-12)
+    periodo_anno            SMALLINT        NOT NULL,   -- anno di competenza
+    canone_locazione        DECIMAL(10,2)   NOT NULL,   -- base di calcolo della ritenuta
+    aliquota_ritenuta       DECIMAL(5,2)    NOT NULL,   -- % applicata (21.00 / 26.00)
+    ritenuta_amount         DECIMAL(10,2)   NOT NULL,   -- importo della ritenuta operata
+    data_evento             DATE            NOT NULL,   -- data dell'evento che genera la ritenuta
+    stato                   VARCHAR(20)     NOT NULL DEFAULT 'da_versare',  -- da_versare / versata
+    fk_f24_record_id        INTEGER         REFERENCES f24_record(id) ON DELETE SET NULL,  -- F24 in cui è confluita
+    created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_withholding_per_document  UNIQUE (fk_fiscal_document_id)
+);
+COMMENT ON TABLE withholding_ledger IS
+    'Registro analitico delle ritenute d acconto operate, una riga per documento fiscale. '
+    'Collega la singola ritenuta (booking + documento) al versamento F24 in cui confluisce. '
+    'uq_withholding_per_document garantisce una sola ritenuta per documento fiscale.';
+
+CREATE INDEX idx_withholding_tenant_periodo ON withholding_ledger(fk_tenant_id, periodo_anno, periodo_mese);
+CREATE INDEX idx_withholding_owner          ON withholding_ledger(fk_owner_id);
+CREATE INDEX idx_withholding_f24            ON withholding_ledger(fk_f24_record_id);
+
+CREATE TRIGGER trg_withholding_updated_at
+    BEFORE UPDATE ON withholding_ledger
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
 -- Certificazioni Uniche annuali
 CREATE TABLE cu_record (
     id              SERIAL          PRIMARY KEY,
@@ -623,8 +701,10 @@ CREATE TABLE cu_record (
     tax_year        SMALLINT        NOT NULL,
     total_compensi  DECIMAL(10,2)   NOT NULL DEFAULT 0,
     total_ritenute  DECIMAL(10,2)   NOT NULL DEFAULT 0,
+    total_imponibile DECIMAL(10,2)  DEFAULT 0,   -- imponibile complessivo certificato
     stato           cu_status       NOT NULL DEFAULT 'draft',
     generated_at    TIMESTAMP,                  -- NULL finché non generata
+    sent_at         TIMESTAMP,                  -- NULL finché non trasmessa
     created_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_cu_owner_year UNIQUE (fk_owner_id, tax_year)
@@ -679,10 +759,30 @@ INSERT INTO stato_documento (codice, descrizione, is_error, finale) VALUES
     ('rejected',  'Rifiutato da SDI',         TRUE,  TRUE),
     ('error',     'Errore generico',          TRUE,  FALSE);
 
-INSERT INTO regime_fiscale (codice, descrizione) VALUES
-    ('cedolare_secca', 'Cedolare secca'),
-    ('iva_10',         'IVA 10%'),
-    ('ordinario',      'Regime ordinario');
+INSERT INTO regime_fiscale (codice, descrizione, metadata) VALUES
+    ('cedolare_secca', 'Cedolare secca',    'REGIME_FISCALE'),
+    ('iva_10',         'IVA 10%',           'REGIME_FISCALE'),
+    ('ordinario',      'Regime ordinario',  'REGIME_FISCALE');
+
+-- Codici NATURA_IVA (codici natura SDI per documenti senza IVA)
+INSERT INTO regime_fiscale (codice, descrizione, attivo, metadata) VALUES
+    ('N1',   'Escluse art.13 (forfettario)',       TRUE, 'NATURA_IVA'),
+    ('N2.1', 'Fuori campo IVA art.4 D.L.50/2017',  TRUE, 'NATURA_IVA'),
+    ('N2.2', 'Fuori campo IVA altri casi',         TRUE, 'NATURA_IVA'),
+    ('N3.5', 'Non imponibili regime margine',      TRUE, 'NATURA_IVA'),
+    ('N4',   'Esenti',                             TRUE, 'NATURA_IVA'),
+    ('N6.1', 'Inversione contabile rottami',       TRUE, 'NATURA_IVA');
+
+-- Codici ALIQUOTA_IVA
+INSERT INTO regime_fiscale (codice, descrizione, attivo, metadata) VALUES
+    ('0',  'Esente / Fuori campo IVA', TRUE, 'ALIQUOTA_IVA'),
+    ('10', 'IVA 10% (CAV)',            TRUE, 'ALIQUOTA_IVA'),
+    ('22', 'IVA 22% (ordinaria)',      TRUE, 'ALIQUOTA_IVA');
+
+-- Codici REGIME_FISCALE_PM (codici SDI ufficiali del PM)
+INSERT INTO regime_fiscale (codice, descrizione, attivo, metadata) VALUES
+    ('RF01', 'Ordinario',                                    TRUE, 'REGIME_FISCALE_PM'),
+    ('RF19', 'Forfettario (art.1, commi 54-89, L.190/2014)', TRUE, 'REGIME_FISCALE_PM');
 
 INSERT INTO canale_ota (codice, nome, commissione_default_pct, tassa_soggiorno_inclusa) VALUES
     ('airbnb',          'Airbnb',           15.00, TRUE),
@@ -779,6 +879,9 @@ CREATE INDEX idx_stato_documento_attivo
 CREATE INDEX idx_regime_fiscale_attivo
     ON regime_fiscale(attivo);
     -- lista regimi attivi per UI (selezione regime)
+CREATE INDEX idx_regime_fiscale_metadata
+    ON regime_fiscale(metadata);
+    -- ricerca codici per tipo di transcodifica (REGIME_FISCALE/NATURA_IVA/ALIQUOTA_IVA/REGIME_FISCALE_PM)
 
 -- owner_profile
 CREATE INDEX idx_owner_fk_tenant_id
@@ -819,6 +922,9 @@ CREATE INDEX idx_booking_fk_tenant_id
     -- tutti i booking di un tenant
 CREATE INDEX idx_booking_fk_property_id
     ON booking(fk_property_id);
+
+CREATE INDEX idx_booking_fk_owner_id
+    ON booking(fk_tenant_id, fk_owner_id);
     -- booking di un immobile
 CREATE INDEX idx_booking_checkout_date
     ON booking(fk_tenant_id, checkout_date DESC);
@@ -826,9 +932,6 @@ CREATE INDEX idx_booking_checkout_date
 CREATE INDEX idx_booking_fk_stato_prenotazione_id
     ON booking(fk_tenant_id, fk_stato_prenotazione_id);
     -- filtro per stato workflow (es. tutti i 'ready' da processare)
-CREATE INDEX idx_booking_fk_stato_documento_id
-    ON booking(fk_tenant_id, fk_stato_documento_id);
-    -- filtro documenti da emettere / in errore SDI
 CREATE INDEX idx_booking_settlement_status
     ON booking(fk_tenant_id, settlement_status);
     -- filtro per liquidazioni da calcolare
@@ -849,6 +952,9 @@ CREATE INDEX idx_fiscal_doc_fk_tenant_id
 CREATE INDEX idx_fiscal_doc_fk_booking_id
     ON fiscal_document(fk_booking_id);
     -- documenti di una prenotazione (tipicamente 2)
+CREATE INDEX idx_fiscal_doc_fk_owner_id
+    ON fiscal_document(fk_tenant_id, fk_owner_id);
+    -- documenti di un proprietario (query dirette per owner)
 CREATE INDEX idx_fiscal_doc_fk_stato_documento_id
     ON fiscal_document(fk_tenant_id, fk_stato_documento_id);
     -- documenti in lavorazione / errore SDI
@@ -927,6 +1033,12 @@ CREATE TABLE tenant_settings (
     codice_tributo_f24          VARCHAR(10)     NOT NULL DEFAULT '1919',
     document_window_days        SMALLINT        NOT NULL DEFAULT 14,
     cedolare_secca_enabled      BOOLEAN         NOT NULL DEFAULT TRUE,
+    -- Parametri bollo e regime PM
+    bollo_importo               DECIMAL(5,2)    NOT NULL DEFAULT 2.00,
+    bollo_soglia                DECIMAL(10,2)   NOT NULL DEFAULT 77.47,
+    bollo_addebitato_cliente    BOOLEAN         NOT NULL DEFAULT TRUE,
+    regime_fiscale_pm           VARCHAR(10)     NOT NULL DEFAULT 'RF01',   -- RF01 ordinario, RF19 forfettario
+    natura_iva_esente           VARCHAR(10)     NOT NULL DEFAULT 'N2.1',   -- natura IVA per operazioni esenti/fuori campo
     -- Policy documentali
     sdi_auto_send               BOOLEAN         NOT NULL DEFAULT TRUE,
     deroga_ricevuta_enabled     BOOLEAN         NOT NULL DEFAULT FALSE,
@@ -957,3 +1069,32 @@ ALTER TABLE canale_ota
 
 COMMENT ON COLUMN canale_ota.tourist_tax_collection IS
   'Modalità default riscossione tassa soggiorno per questo canale';
+
+-- ============================================================
+-- IMPORT TEMPLATE (migration 005)
+-- Template di mapping colonne per l'import prenotazioni:
+-- salva nome colonne file → campi di sistema per non rimappare ogni volta.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS import_template (
+    id              SERIAL PRIMARY KEY,
+    fk_tenant_id    INTEGER NOT NULL
+                        REFERENCES tenant(id)
+                        ON DELETE CASCADE,
+    nome            VARCHAR(100) NOT NULL,
+    descrizione     VARCHAR(255),
+    header_row      INTEGER NOT NULL DEFAULT 0,
+    booking_mapping JSONB NOT NULL DEFAULT '{}',
+    guest_mapping   JSONB NOT NULL DEFAULT '{}',
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_import_template_nome
+        UNIQUE (fk_tenant_id, nome)
+);
+
+CREATE TRIGGER import_template_updated_at
+    BEFORE UPDATE ON import_template
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS
+    idx_import_template_tenant
+    ON import_template(fk_tenant_id);

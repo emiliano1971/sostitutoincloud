@@ -3,9 +3,11 @@ package it.gavia.sostitutoincloud.service;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.SdiEsitoDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
+import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
@@ -13,9 +15,11 @@ import it.gavia.sostitutoincloud.dto.document.DocumentRowDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
+import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.SdiEsito;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
+import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -42,6 +46,8 @@ public class FiscalDocumentService {
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
     private final SdiEsitoDAO sdiEsitoDAO;
+    private final TenantDAO tenantDAO;
+    private final OwnerProfileDAO ownerProfileDAO;
 
     public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
                                   BookingDAO bookingDAO,
@@ -49,7 +55,9 @@ public class FiscalDocumentService {
                                   CanaleOtaDAO canaleOtaDAO,
                                   TipoDocumentoDAO tipoDocumentoDAO,
                                   StatoDocumentoDAO statoDocumentoDAO,
-                                  SdiEsitoDAO sdiEsitoDAO) {
+                                  SdiEsitoDAO sdiEsitoDAO,
+                                  TenantDAO tenantDAO,
+                                  OwnerProfileDAO ownerProfileDAO) {
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
@@ -57,22 +65,40 @@ public class FiscalDocumentService {
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.statoDocumentoDAO = statoDocumentoDAO;
         this.sdiEsitoDAO = sdiEsitoDAO;
+        this.tenantDAO = tenantDAO;
+        this.ownerProfileDAO = ownerProfileDAO;
     }
 
     private record LookupMaps(
             Map<Integer, TipoDocumento> tipiById,
             Map<Integer, StatoDocumento> statiById,
-            Map<Integer, SdiEsito> sdiEsitiById
+            Map<Integer, SdiEsito> sdiEsitiById,
+            Map<Integer, OwnerProfile> ownersById
     ) {}
 
-    private LookupMaps buildLookupMaps() {
+    private LookupMaps buildLookupMaps(Integer tenantId) {
         Map<Integer, TipoDocumento> tipiById = tipoDocumentoDAO.findAll().stream()
                 .collect(Collectors.toMap(TipoDocumento::getId, t -> t));
         Map<Integer, StatoDocumento> statiById = statoDocumentoDAO.findAll().stream()
                 .collect(Collectors.toMap(StatoDocumento::getId, s -> s));
         Map<Integer, SdiEsito> sdiEsitiById = sdiEsitoDAO.findAll().stream()
                 .collect(Collectors.toMap(SdiEsito::getId, e -> e));
-        return new LookupMaps(tipiById, statiById, sdiEsitiById);
+        // Tutti gli owner del tenant caricati una volta sola (no N+1).
+        Map<Integer, OwnerProfile> ownersById = ownerProfileDAO.findByTenantId(tenantId).stream()
+                .collect(Collectors.toMap(OwnerProfile::getId, o -> o));
+        return new LookupMaps(tipiById, statiById, sdiEsitiById, ownersById);
+    }
+
+    /**
+     * Nome visualizzato del proprietario: "nome cognome" per persone fisiche,
+     * altrimenti ragione sociale. Restituisce null se l'owner non è presente.
+     */
+    private String ownerDisplayName(OwnerProfile owner) {
+        if (owner == null) return null;
+        if (owner.getFirstName() != null && owner.getLastName() != null) {
+            return owner.getFirstName() + " " + owner.getLastName();
+        }
+        return owner.getLegalName();
     }
 
     private List<DocumentRowDTO> buildRighe(FiscalDocument doc, Booking booking, TipoDocumento tipo) {
@@ -109,8 +135,8 @@ public class FiscalDocumentService {
     }
 
     public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
-                                                  Integer page, Integer size) {
-        LookupMaps lookup = buildLookupMaps();
+                                                  Integer ownerId, Integer page, Integer size) {
+        LookupMaps lookup = buildLookupMaps(tenantId);
 
         List<FiscalDocument> docs = fiscalDocumentDAO.findByTenantId(tenantId);
         List<Booking> bookings = bookingDAO.findByTenantId(tenantId);
@@ -142,15 +168,24 @@ public class FiscalDocumentService {
                                 && d.getDocumentNumber().toLowerCase().contains(ql);
                         boolean matchName = d.getRecipientName() != null
                                 && d.getRecipientName().toLowerCase().contains(ql);
-                        return matchNum || matchName;
+                        String ownerName = ownerDisplayName(lookup.ownersById().get(d.getFkOwnerId()));
+                        boolean matchOwner = ownerName != null && ownerName.toLowerCase().contains(ql);
+                        return matchNum || matchName || matchOwner;
                     }
                     return true;
+                })
+                .filter(d -> {
+                    if (ownerId == null) return true;
+                    // Filtro diretto sul campo denormalizzato fk_owner_id del documento.
+                    return ownerId.equals(d.getFkOwnerId());
                 })
                 .skip((long) pageNum * pageSize)
                 .limit(pageSize)
                 .map(d -> {
                     Booking booking = d.getFkBookingId() != null ? bookingsById.get(d.getFkBookingId()) : null;
                     Property property = booking != null ? propertiesById.get(booking.getFkPropertyId()) : null;
+                    // Owner risolto direttamente dal campo denormalizzato fk_owner_id (nessuna catena).
+                    OwnerProfile owner = d.getFkOwnerId() != null ? lookup.ownersById().get(d.getFkOwnerId()) : null;
                     CanaleOta canale = booking != null ? canaliById.get(booking.getFkCanaleOtaId()) : null;
                     TipoDocumento tipo = lookup.tipiById().get(d.getFkTipoDocumentoId());
                     StatoDocumento stato = lookup.statiById().get(d.getFkStatoDocumentoId());
@@ -172,12 +207,15 @@ public class FiscalDocumentService {
                             .propertyName(property != null ? property.getDisplayName() : null)
                             .channelName(canale != null ? canale.getNome() : null)
                             .fkBookingId(d.getFkBookingId())
+                            .fkOwnerId(d.getFkOwnerId())
+                            .ownerName(ownerDisplayName(owner))
                             .createdAt(d.getCreatedAt())
                             .build();
                 })
                 .collect(Collectors.toList());
 
-        log.info("FiscalDocumentService.findByTenantId() - tenantId={}, risultati={}", tenantId, result.size());
+        log.info("FiscalDocumentService.findByTenantId() - tenantId={}, ownerId={}, risultati={}",
+                tenantId, ownerId, result.size());
         return result;
     }
 
@@ -187,7 +225,7 @@ public class FiscalDocumentService {
             return Optional.empty();
         }
         FiscalDocument doc = opt.get();
-        LookupMaps lookup = buildLookupMaps();
+        LookupMaps lookup = buildLookupMaps(doc.getFkTenantId());
 
         Booking booking = doc.getFkBookingId() != null
                 ? bookingDAO.findById(doc.getFkBookingId()).orElse(null)
@@ -203,6 +241,7 @@ public class FiscalDocumentService {
         StatoDocumento stato = lookup.statiById().get(doc.getFkStatoDocumentoId());
         SdiEsito sdiEsito = doc.getFkSdiEsitoId() != null
                 ? lookup.sdiEsitiById().get(doc.getFkSdiEsitoId()) : null;
+        Tenant tenant = tenantDAO.findById(doc.getFkTenantId()).orElse(null);
 
         List<DocumentRowDTO> righe = buildRighe(doc, booking, tipo);
 
@@ -219,18 +258,53 @@ public class FiscalDocumentService {
                 .recipientTaxCode(doc.getRecipientTaxCode())
                 .totalAmount(doc.getTotalAmount())
                 .vatAmount(doc.getVatAmount())
+                .imponibile(doc.getImponibile())
+                .ritenutaAmount(doc.getRitenutaAmount())
+                .bolloAmount(doc.getBolloAmount())
+                .canoneLocazione(doc.getCanoneLocazione())
+                .fkDocumentoCollegatoId(doc.getFkDocumentoCollegatoId())
                 .statoDocumento(stato != null ? stato.getCodice() : null)
                 .sdiIdentifier(doc.getSdiIdentifier())
                 .sdiEsito(sdiEsito != null ? sdiEsito.getCodice() : null)
                 .propertyName(property != null ? property.getDisplayName() : null)
                 .channelName(canale != null ? canale.getNome() : null)
                 .fkBookingId(doc.getFkBookingId())
+                .externalBookingId(booking != null ? booking.getExternalBookingId() : null)
+                .checkinDate(booking != null ? booking.getCheckinDate() : null)
+                .checkoutDate(booking != null ? booking.getCheckoutDate() : null)
                 .createdAt(doc.getCreatedAt())
                 .updatedAt(doc.getUpdatedAt())
                 .righe(righe)
+                // emittente (tenant)
+                .tenantLegalName(tenant != null ? tenant.getLegalName() : null)
+                .tenantVatNumber(tenant != null ? tenant.getVatNumber() : null)
+                .tenantTaxCode(tenant != null ? tenant.getTaxCode() : null)
+                .tenantLegalAddress(tenant != null ? tenant.getLegalAddress() : null)
+                .tenantPec(tenant != null ? tenant.getPec() : null)
                 .build();
 
         log.info("FiscalDocumentService.findById() - tenantId={}, documentId={}", tenantId, documentId);
         return Optional.of(detail);
+    }
+
+    /**
+     * Aggiorna lo stato di un documento fiscale verificando l'appartenenza al tenant
+     * e risolvendo l'id dello stato dalla lookup per codice.
+     * Restituisce il dettaglio aggiornato.
+     */
+    public DocumentDetailDTO aggiornaStato(Integer tenantId, Integer documentId, String nuovoStato) {
+        FiscalDocument doc = fiscalDocumentDAO.findById(documentId)
+                .filter(d -> tenantId.equals(d.getFkTenantId()))
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Documento non trovato per questo tenant: id=" + documentId));
+        StatoDocumento stato = statoDocumentoDAO.findByCodice(nuovoStato)
+                .orElseThrow(() -> new IllegalArgumentException("Stato documento non valido: " + nuovoStato));
+
+        fiscalDocumentDAO.updateStato(doc.getId(), stato.getId());
+        log.info("FiscalDocumentService.aggiornaStato() - id={} stato={}", documentId, nuovoStato);
+
+        return findById(tenantId, documentId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Documento non trovato dopo aggiornamento: id=" + documentId));
     }
 }

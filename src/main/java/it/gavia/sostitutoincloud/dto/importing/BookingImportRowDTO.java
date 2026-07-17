@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 @Builder
@@ -32,4 +33,21 @@ public class BookingImportRowDTO {
     private BigDecimal touristTaxAmount;
     private Boolean touristTaxIncluded;
     private String currency;
+
+    // V2: id risolti in fase di preview tramite match canale_ota.nome + property_ota_code.external_id
+    private Integer fkPropertyId;
+    private Integer fkCanaleOtaId;
+
+    // V2: dati ospite dal merge con il secondo file (per BOOKING_ID)
+    private String guestFirstName;
+    private String guestLastName;
+    private String guestBirthDate;
+    private String guestGender;
+    private String guestBirthPlace;
+    private String guestDocType;
+    private String guestDocNumber;
+    private String guestCountry;
+
+    // V2: avvisi del calcolo split economico
+    private List<String> splitWarnings;
 }

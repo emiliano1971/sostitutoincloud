@@ -1,14 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Upload, AlertTriangle } from 'lucide-react';
-import { getBookings, type BookingListItem } from '@/api/bookingApi';
+import { Search, Filter, Eye, Upload, AlertTriangle, Trash2 } from 'lucide-react';
+import { getBookings, deleteBooking, type BookingListItem } from '@/api/bookingApi';
+import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLookup } from '@/contexts/LookupContext';
+import { useToast } from '@/hooks/use-toast';
 
 const statusColors: Record<string, string> = {
   imported: 'bg-muted text-muted-foreground',
@@ -30,38 +33,83 @@ const isFinalStatus = (status: string) =>
 
 const BookingsList = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const { lookups, getLabelByCodice } = useLookup();
 
   const getStatusLabel = (codice: string) =>
     getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
   const [searchParams, setSearchParams] = useSearchParams();
   const search = searchParams.get('q') ?? '';
-  const statusFilter = searchParams.get('status') ?? 'da_completare';
+  const statusFilter = searchParams.get('status') ?? 'all';
   const channelFilter = searchParams.get('channel') ?? 'all';
   const [allBookings, setAllBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<TenantSettingsDTO | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const today = new Date().toISOString().slice(0, 10);
 
   useEffect(() => {
+    getSettings().then(setSettings).catch(() => { /* soglia di fallback se i settings non caricano */ });
+  }, []);
+
+  const penaltyThreshold = settings?.documentWindowDays ?? 12;
+
+  const loadBookings = useCallback(() => {
     setLoading(true);
     setError(null);
     const params: Parameters<typeof getBookings>[0] = {};
     if (statusFilter !== 'all') params.status = statusFilter;
     if (channelFilter !== 'all') params.channel = channelFilter;
-    getBookings(params)
+    return getBookings(params)
       .then(data => setAllBookings(data))
       .catch(err => setError(err.message ?? 'Errore nel caricamento'))
       .finally(() => setLoading(false));
   }, [statusFilter, channelFilter]);
 
+  useEffect(() => { loadBookings(); }, [loadBookings]);
+
   const filtered = allBookings.filter(b =>
     search === '' ||
     b.guestName.toLowerCase().includes(search.toLowerCase()) ||
     b.propertyName.toLowerCase().includes(search.toLowerCase()) ||
-    b.externalBookingId.toLowerCase().includes(search.toLowerCase())
+    b.externalBookingId.toLowerCase().includes(search.toLowerCase()) ||
+    (b.ownerName ?? '').toLowerCase().includes(search.toLowerCase())
   );
+
+  const visible = filtered.slice(0, 20);
+  const allSelected = visible.length > 0 && visible.every(b => selectedIds.has(b.id));
+
+  const toggleId = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(visible.map(b => b.id)));
+  };
+
+  const handleDeleteSelected = async () => {
+    const ids = Array.from(selectedIds);
+    const msg = `Eliminare ${ids.length} booking e tutti i dati collegati (documenti, ritenute, liquidazioni)? Operazione irreversibile.`;
+    if (!window.confirm(msg)) return;
+    let ok = 0;
+    for (const id of ids) {
+      try {
+        await deleteBooking(id);
+        ok++;
+      } catch (err) {
+        toast({ title: 'Errore eliminazione', description: `Booking #${id}: ${(err as Error).message}`, variant: 'destructive' });
+      }
+    }
+    if (ok > 0) toast({ title: 'Eliminazione completata', description: `${ok} booking eliminati` });
+    setSelectedIds(new Set());
+    await loadBookings();
+  };
 
   return (
     <div className="space-y-6">
@@ -89,8 +137,8 @@ const BookingsList = () => {
                 <SelectValue placeholder="Stato" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="da_completare">Da completare</SelectItem>
                 <SelectItem value="all">Tutti gli stati</SelectItem>
+                <SelectItem value="da_completare">Da completare</SelectItem>
                 {lookups?.statiPrenotazione.filter(s => s.attivo).map(s => (
                   <SelectItem key={s.codice} value={s.codice}>{s.descrizione}</SelectItem>
                 ))}
@@ -111,6 +159,19 @@ const BookingsList = () => {
         </CardContent>
       </Card>
 
+      {/* Barra azioni selezione (solo local/test: la delete backend è @Profile) */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-destructive/20 bg-destructive/5 p-3">
+          <span className="text-sm font-medium">{selectedIds.size} selezionati</span>
+          <Button variant="destructive" size="sm" className="gap-2" onClick={handleDeleteSelected}>
+            <Trash2 className="h-4 w-4" /> Elimina selezionati
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+            Annulla selezione
+          </Button>
+        </div>
+      )}
+
       {/* Table */}
       <Card>
         <CardContent className="p-0">
@@ -124,9 +185,13 @@ const BookingsList = () => {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Seleziona tutti" />
+                  </TableHead>
                   <TableHead>ID / Canale</TableHead>
                   <TableHead>Ospite</TableHead>
                   <TableHead>Immobile</TableHead>
+                  <TableHead>Proprietario</TableHead>
                   <TableHead>Check-in</TableHead>
                   <TableHead>Check-out</TableHead>
                   <TableHead className="text-right">Notti</TableHead>
@@ -136,16 +201,23 @@ const BookingsList = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.slice(0, 20).map(b => {
+                {visible.map(b => {
                   const checkoutDate = new Date(b.checkoutDate);
                   const todayDate = new Date(today);
                   const daysSinceCheckout = Math.floor((todayDate.getTime() - checkoutDate.getTime()) / (1000 * 60 * 60 * 24));
                   const isOverdue = daysSinceCheckout > 0 && !isFinalStatus(b.statoPrenotazione);
-                  const isPenalty = daysSinceCheckout > 12 && isOverdue;
+                  const isPenalty = daysSinceCheckout > penaltyThreshold && isOverdue;
                   const channelKey = b.channelName.toLowerCase();
 
                   return (
                     <TableRow key={b.id} className={`cursor-pointer ${isPenalty ? 'bg-destructive/8 hover:bg-destructive/12' : isOverdue ? 'bg-warning/6 hover:bg-warning/10' : ''}`} onClick={() => navigate(`/bookings/${b.id}`)}>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(b.id)}
+                          onCheckedChange={() => toggleId(b.id)}
+                          aria-label={`Seleziona booking ${b.id}`}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div>
                           <p className="text-xs font-mono text-muted-foreground">{b.externalBookingId}</p>
@@ -156,6 +228,20 @@ const BookingsList = () => {
                       </TableCell>
                       <TableCell className="font-medium text-sm">{b.guestName}</TableCell>
                       <TableCell className="text-sm">{b.propertyName}</TableCell>
+                      <TableCell className="text-sm">
+                        {b.ownerName && b.fkOwnerId ? (
+                          <button
+                            type="button"
+                            className="text-primary hover:underline"
+                            title="Vedi i documenti di questo proprietario"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/documents?ownerId=${b.fkOwnerId}`); }}
+                          >
+                            {b.ownerName}
+                          </button>
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm">{b.checkinDate}</TableCell>
                       <TableCell className="text-sm">{b.checkoutDate}</TableCell>
                       <TableCell className="text-right text-sm">{b.nights}</TableCell>

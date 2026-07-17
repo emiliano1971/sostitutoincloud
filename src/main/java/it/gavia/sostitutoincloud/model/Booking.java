@@ -20,6 +20,7 @@ public class Booking {
     private Integer id;
     private Integer fkTenantId;
     private Integer fkPropertyId;
+    private Integer fkOwnerId;
     private Integer fkCanaleOtaId;
     private Integer fkScenarioFiscaleId;
     private String externalBookingId;
@@ -35,12 +36,12 @@ public class Booking {
     private BigDecimal pmFeeAmount;
     private BigDecimal ownerNetAmount;
     private BigDecimal withholdingAmount;
+    private BigDecimal aliquotaRitenuta;
     private BigDecimal touristTaxAmount;
     private Boolean touristTaxIncludedInGross;
     private String touristTaxCollection;
     private Integer fkStatoPrenotazioneId;
     private String paymentStatus;
-    private Integer fkStatoDocumentoId;
     private String settlementStatus;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

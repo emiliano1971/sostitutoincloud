@@ -18,6 +18,7 @@ public class RegimeFiscaleRowMapper implements RowMapper<RegimeFiscale> {
                 .codice(rs.getString("codice"))
                 .descrizione(rs.getString("descrizione"))
                 .attivo(rs.getBoolean("attivo"))
+                .metadata(rs.getString("metadata"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

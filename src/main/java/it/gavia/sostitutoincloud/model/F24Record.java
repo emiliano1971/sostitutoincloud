@@ -28,6 +28,9 @@ public class F24Record {
     private String stato;
     private LocalDate deadlineDate;
     private LocalDate paymentDate;
+    private Integer periodoMese;
+    private Integer periodoAnno;
+    private Integer referenceYear;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

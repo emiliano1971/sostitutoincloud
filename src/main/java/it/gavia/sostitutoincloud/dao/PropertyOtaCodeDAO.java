@@ -66,4 +66,29 @@ public class PropertyOtaCodeDAO {
         log.info("PropertyOtaCodeDAO.deleteByPropertyId() - propertyId={}", propertyId);
         jdbcTemplate.update("DELETE FROM property_ota_code WHERE fk_property_id = ?", propertyId);
     }
+
+    /**
+     * Risolve l'immobile a partire dal nome canale OTA (ORIGINE) e dal codice esterno
+     * struttura (STRUTTURA), filtrando per tenant. Match case-insensitive (ILIKE).
+     */
+    public Optional<PropertyOtaMatch> matchByCanaleNomeAndExternalId(String canaleNome, String externalId, Integer tenantId) {
+        log.debug("PropertyOtaCodeDAO.matchByCanaleNomeAndExternalId() - canale={}, externalId={}, tenant={}",
+                canaleNome, externalId, tenantId);
+        String sql = "SELECT p.id AS property_id, p.display_name AS property_name, " +
+                "c.id AS canale_id, c.nome AS canale_nome " +
+                "FROM property p " +
+                "JOIN property_ota_code poc ON poc.fk_property_id = p.id " +
+                "JOIN canale_ota c ON c.id = poc.fk_canale_ota_id " +
+                "WHERE c.nome ILIKE ? AND poc.external_id ILIKE ? AND p.fk_tenant_id = ?";
+        List<PropertyOtaMatch> result = jdbcTemplate.query(sql, (rs, rowNum) -> new PropertyOtaMatch(
+                rs.getInt("property_id"),
+                rs.getString("property_name"),
+                rs.getInt("canale_id"),
+                rs.getString("canale_nome")
+        ), canaleNome, externalId, tenantId);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /** Proiezione del match immobile/canale per l'import V2. */
+    public record PropertyOtaMatch(Integer propertyId, String propertyName, Integer canaleId, String canaleNome) {}
 }

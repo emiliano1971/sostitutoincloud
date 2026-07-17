@@ -52,7 +52,10 @@ public class LookupService {
     public LookupCollectionDTO getAll() {
         log.debug("LookupService.getAll()");
         return LookupCollectionDTO.builder()
-                .regimiFiscali(mapRegimiFiscali(regimeFiscaleDAO.findAll()))
+                .regimiFiscali(mapRegimiFiscali(regimeFiscaleDAO.findByMetadata("REGIME_FISCALE")))
+                .regimiFiscaliPm(mapRegimiFiscali(regimeFiscaleDAO.findByMetadata("REGIME_FISCALE_PM")))
+                .naturaIva(mapRegimiFiscali(regimeFiscaleDAO.findByMetadata("NATURA_IVA")))
+                .aliquoteIva(mapRegimiFiscali(regimeFiscaleDAO.findByMetadata("ALIQUOTA_IVA")))
                 .tipiImmobile(mapTipiImmobile(tipoImmobileDAO.findAll()))
                 .canaliOta(mapCanaliOta(canaleOtaDAO.findAll()))
                 .tipiDocumento(mapTipiDocumento(tipoDocumentoDAO.findAll()))

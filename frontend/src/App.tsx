@@ -26,7 +26,9 @@ import PropertyContracts from "./pages/tenant/PropertyContracts";
 import PropertiesList from "./pages/tenant/PropertiesList";
 import PropertyDetail from "./pages/tenant/PropertyDetail";
 import PropertyCreate from "./pages/tenant/PropertyCreate";
+import PropertyEdit from "./pages/tenant/PropertyEdit";
 import DocumentsList from "./pages/tenant/DocumentsList";
+import DocumentDetail from "./pages/tenant/DocumentDetail";
 import F24List from "./pages/tenant/F24List";
 import SettlementsList from "./pages/tenant/SettlementsList";
 import CUList from "./pages/tenant/CUList";
@@ -81,8 +83,10 @@ function AppRoutes() {
         <Route path="properties" element={<PropertiesList />} />
         <Route path="properties/new" element={<PropertyCreate />} />
         <Route path="properties/:id" element={<PropertyDetail />} />
+        <Route path="properties/:id/edit" element={<PropertyEdit />} />
         <Route path="properties/:id/contracts" element={<PropertyContracts />} />
         <Route path="documents" element={<DocumentsList />} />
+        <Route path="documents/:id" element={<DocumentDetail />} />
         <Route path="f24" element={<F24List />} />
         <Route path="settlements" element={<SettlementsList />} />
         <Route path="cu" element={<CUList />} />

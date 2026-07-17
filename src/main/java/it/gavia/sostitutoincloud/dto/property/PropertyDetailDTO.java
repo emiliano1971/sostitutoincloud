@@ -26,6 +26,7 @@ public class PropertyDetailDTO {
     private String propertyType;
     private String cinCode;
     private Boolean attivo;
+    private Boolean primoImmobile;
     private String ownerName;
     private Integer listingsCount;
     private Integer bookingsCount;

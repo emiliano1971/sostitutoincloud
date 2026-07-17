@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -101,6 +102,10 @@ public class PropertyService {
                     .orElse(null);
         }
         final Integer resolvedTipoId = tipoId;
+        // primo_immobile: TRUE se è il primo immobile attivo dell'owner (ritenuta primaria 21%),
+        // FALSE dal secondo in poi (ritenuta secondaria 26%). Il PM può poi modificarlo manualmente.
+        boolean primoImmobile = dto.getFkOwnerId() != null
+                && propertyDAO.countActiveByOwner(dto.getFkOwnerId(), tenantId) == 0;
         Property property = Property.builder()
                 .fkTenantId(tenantId)
                 .fkOwnerId(dto.getFkOwnerId())
@@ -113,6 +118,7 @@ public class PropertyService {
                 .region(dto.getRegion() != null ? dto.getRegion() : "")
                 .cinCode(dto.getCinCode())
                 .attivo(true)
+                .primoImmobile(primoImmobile)
                 .build();
         Property saved = propertyDAO.insert(property);
         if (dto.getOtaCodes() != null && !dto.getOtaCodes().isEmpty()) {
@@ -131,6 +137,65 @@ public class PropertyService {
                 "Creato immobile " + saved.getDisplayName() + " (" + saved.getInternalCode() + ")");
         LookupMaps maps = buildLookupMaps(tenantId);
         return toDetailDTO(saved, maps);
+    }
+
+    public PropertyDetailDTO update(Integer tenantId, Integer propertyId, PropertyCreateDTO dto) {
+        log.info("PropertyService.update() - id={}", propertyId);
+        Property existing = propertyDAO.findById(propertyId)
+                .filter(p -> tenantId.equals(p.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Property non trovata: id=" + propertyId));
+
+        // codice interno univoco nel tenant (escludendo l'immobile corrente)
+        boolean codeExists = propertyDAO.findByTenantId(tenantId).stream()
+                .anyMatch(p -> !p.getId().equals(propertyId) && dto.getInternalCode().equals(p.getInternalCode()));
+        if (codeExists) {
+            throw new IllegalArgumentException("Codice immobile già esistente");
+        }
+
+        // risoluzione tipo immobile (come nel create): id esplicito, poi codice, poi fallback al primo
+        Integer tipoId = dto.getFkTipoImmobileId();
+        if (tipoId == null && dto.getPropertyType() != null) {
+            tipoId = tipoImmobileDAO.findByCodice(dto.getPropertyType())
+                    .map(TipoImmobile::getId)
+                    .orElse(null);
+        }
+        if (tipoId == null) {
+            tipoId = existing.getFkTipoImmobileId();
+        }
+
+        Property toUpdate = Property.builder()
+                .id(existing.getId())
+                .fkTenantId(tenantId)
+                .displayName(dto.getDisplayName())
+                .internalCode(dto.getInternalCode())
+                .address(dto.getAddress())
+                .city(dto.getCity())
+                .region(dto.getRegion())
+                .cinCode(dto.getCinCode())
+                .fkTipoImmobileId(tipoId)
+                .build();
+        Property updated = propertyDAO.update(toUpdate);
+
+        // codici OTA: cancella e reinserisci quelli non vuoti (stessa logica del create)
+        propertyOtaCodeDAO.deleteByPropertyId(propertyId);
+        if (dto.getOtaCodes() != null && !dto.getOtaCodes().isEmpty()) {
+            for (OtaCodeDTO ota : dto.getOtaCodes()) {
+                if (ota.getExternalId() == null || ota.getExternalId().isBlank()) continue;
+                canaleOtaDAO.findByCodice(ota.getCanaleCodiceName()).ifPresent(canale -> {
+                    PropertyOtaCode otaCode = PropertyOtaCode.builder()
+                            .fkPropertyId(propertyId)
+                            .fkCanaleOtaId(canale.getId())
+                            .externalId(ota.getExternalId())
+                            .build();
+                    propertyOtaCodeDAO.insert(otaCode);
+                });
+            }
+        }
+
+        auditService.log("property.update", "Property", updated.getId(),
+                "Aggiornato immobile " + updated.getDisplayName() + " (" + updated.getInternalCode() + ")");
+        LookupMaps maps = buildLookupMaps(tenantId);
+        return toDetailDTO(updated, maps);
     }
 
     public PropertyDetailDTO updateStatus(Integer tenantId, Integer propertyId, Boolean attivo) {
@@ -161,6 +226,21 @@ public class PropertyService {
         Property updated = propertyDAO.updateOwner(propertyId, fkOwnerId);
         auditService.log("property.assign_owner", "Property", updated.getId(),
                 "Immobile " + updated.getDisplayName() + " assegnato a owner id=" + fkOwnerId);
+        LookupMaps maps = buildLookupMaps(tenantId);
+        return toDetailDTO(updated, maps);
+    }
+
+    public PropertyDetailDTO updatePrimoImmobile(Integer tenantId, Integer propertyId, Boolean primoImmobile) {
+        log.info("PropertyService.updatePrimoImmobile() - tenantId={}, propertyId={}, primoImmobile={}",
+                tenantId, propertyId, primoImmobile);
+        propertyDAO.findById(propertyId)
+                .filter(p -> tenantId.equals(p.getFkTenantId()))
+                .orElseThrow(() -> new RuntimeException("Property non trovata: id=" + propertyId));
+        Property updated = propertyDAO.updatePrimoImmobile(propertyId, primoImmobile);
+        auditService.log("property.primo_immobile", "Property", updated.getId(),
+                "Immobile " + updated.getDisplayName()
+                        + (Boolean.TRUE.equals(primoImmobile) ? " marcato come primo immobile (ritenuta primaria)"
+                                                              : " marcato come secondo+ immobile (ritenuta secondaria)"));
         LookupMaps maps = buildLookupMaps(tenantId);
         return toDetailDTO(updated, maps);
     }
@@ -228,6 +308,7 @@ public class PropertyService {
                 .propertyType(maps.tipoMap.getOrDefault(p.getFkTipoImmobileId(), null))
                 .cinCode(p.getCinCode())
                 .attivo(p.getAttivo())
+                .primoImmobile(p.getPrimoImmobile())
                 .ownerName(resolveOwnerName(p.getFkOwnerId(), maps.ownerMap))
                 .listingsCount(otaCodes.size())
                 .bookingsCount(bookingDAO.findByPropertyId(p.getId()).size())

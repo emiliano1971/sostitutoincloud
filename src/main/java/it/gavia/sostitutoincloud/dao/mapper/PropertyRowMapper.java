@@ -26,6 +26,7 @@ public class PropertyRowMapper implements RowMapper<Property> {
                 .region(rs.getString("region"))
                 .cinCode(rs.getString("cin_code"))
                 .attivo(rs.getBoolean("attivo"))
+                .primoImmobile(rs.getBoolean("primo_immobile"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

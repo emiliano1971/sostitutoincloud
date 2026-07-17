@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -19,7 +20,13 @@ public class SplitEconomicoDTO {
     private BigDecimal pmFeeAmount;
     private BigDecimal ownerNetAmount;
     private BigDecimal withholdingAmount;
+    private BigDecimal aliquotaRitenuta;
     private BigDecimal liquidazioneOwner;
     private BigDecimal touristTaxAmount;
     private Boolean touristTaxIncludedInGross;
+    private BigDecimal imponibileFatturaPm;  // base imponibile scorporata (lordo / 1.22)
+    private BigDecimal ivaScorporataPm;      // IVA scorporata sui servizi PM (informativa, non detrazione)
+    private BigDecimal fatturaPmTotale;      // totale lordo della fattura PM
+    private List<String> warnings;
+    private Boolean calcoloCompleto;
 }

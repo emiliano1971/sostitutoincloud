@@ -84,6 +84,26 @@ public class TenantSettingsService {
                         dto.getCedolareSeccaEnabled() != null
                                 ? dto.getCedolareSeccaEnabled()
                                 : existing.getCedolareSeccaEnabled())
+                .bolloImporto(
+                        dto.getBolloImporto() != null
+                                ? dto.getBolloImporto()
+                                : existing.getBolloImporto())
+                .bolloSoglia(
+                        dto.getBolloSoglia() != null
+                                ? dto.getBolloSoglia()
+                                : existing.getBolloSoglia())
+                .bolloAddebitatoCliente(
+                        dto.getBolloAddebitatoCliente() != null
+                                ? dto.getBolloAddebitatoCliente()
+                                : existing.getBolloAddebitatoCliente())
+                .regimeFiscalePm(
+                        dto.getRegimeFiscalePm() != null
+                                ? dto.getRegimeFiscalePm()
+                                : existing.getRegimeFiscalePm())
+                .naturaIvaEsente(
+                        dto.getNaturaIvaEsente() != null
+                                ? dto.getNaturaIvaEsente()
+                                : existing.getNaturaIvaEsente())
                 .sdiAutoSend(
                         dto.getSdiAutoSend() != null
                                 ? dto.getSdiAutoSend()
@@ -131,8 +151,13 @@ public class TenantSettingsService {
                 .withholdingRatePrimary(new BigDecimal("21.00"))
                 .withholdingRateSecondary(new BigDecimal("26.00"))
                 .codiceTributoF24("1919")
-                .documentWindowDays(14)
+                .documentWindowDays(12)
                 .cedolareSeccaEnabled(true)
+                .bolloImporto(new BigDecimal("2.00"))
+                .bolloSoglia(new BigDecimal("77.47"))
+                .bolloAddebitatoCliente(true)
+                .regimeFiscalePm("RF01")
+                .naturaIvaEsente("N2.1")
                 .sdiAutoSend(true)
                 .derogaRicevutaEnabled(false)
                 .numerazioneAutomatica(true)
@@ -157,6 +182,11 @@ public class TenantSettingsService {
                 .codiceTributoF24(s.getCodiceTributoF24())
                 .documentWindowDays(s.getDocumentWindowDays())
                 .cedolareSeccaEnabled(s.getCedolareSeccaEnabled())
+                .bolloImporto(s.getBolloImporto())
+                .bolloSoglia(s.getBolloSoglia())
+                .bolloAddebitatoCliente(s.getBolloAddebitatoCliente())
+                .regimeFiscalePm(s.getRegimeFiscalePm())
+                .naturaIvaEsente(s.getNaturaIvaEsente())
                 .sdiAutoSend(s.getSdiAutoSend())
                 .derogaRicevutaEnabled(s.getDerogaRicevutaEnabled())
                 .numerazioneAutomatica(s.getNumerazioneAutomatica())

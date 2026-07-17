@@ -18,6 +18,8 @@ public class BookingImportPreviewDTO {
     private Integer newCount;
     private Integer dupeCount;
     private Integer errorCount;
+    private Integer warningCount;
+    private Integer excludedCount;   // righe escluse perché cancellate (STATO)
     private List<BookingImportPreviewRowDTO> rows;
     private String importSessionId;
 }

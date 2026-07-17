@@ -3,6 +3,7 @@ package it.gavia.sostitutoincloud.controller;
 import it.gavia.sostitutoincloud.dto.property.PropertyCreateDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyDetailDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyListDTO;
+import it.gavia.sostitutoincloud.dto.property.PropertyPrimoImmobileUpdateDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyStatusUpdateDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyUpdateOwnerDTO;
 import it.gavia.sostitutoincloud.service.PropertyService;
@@ -50,12 +51,35 @@ public class PropertyController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<?> update(@PathVariable Integer id, @RequestBody PropertyCreateDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            return ResponseEntity.ok(propertyService.update(tenantId, id, dto));
+        } catch (java.util.NoSuchElementException e) {
+            log.warn("PropertyController.update() - not found: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("message", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            log.warn("PropertyController.update() - bad request: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("message", e.getMessage()));
+        }
+    }
+
     @PatchMapping("/{id}/status")
     public ResponseEntity<PropertyDetailDTO> updateStatus(
             @PathVariable Integer id,
             @RequestBody PropertyStatusUpdateDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         PropertyDetailDTO updated = propertyService.updateStatus(tenantId, id, dto.getAttivo());
+        return ResponseEntity.ok(updated);
+    }
+
+    @PatchMapping("/{id}")
+    public ResponseEntity<PropertyDetailDTO> updatePrimoImmobile(
+            @PathVariable Integer id,
+            @RequestBody PropertyPrimoImmobileUpdateDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        PropertyDetailDTO updated = propertyService.updatePrimoImmobile(tenantId, id, dto.getPrimoImmobile());
         return ResponseEntity.ok(updated);
     }
 

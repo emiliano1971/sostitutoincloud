@@ -24,6 +24,9 @@ public class F24RecordRowMapper implements RowMapper<F24Record> {
                 .stato(rs.getString("stato"))
                 .deadlineDate(rs.getObject("deadline_date", LocalDate.class))
                 .paymentDate(rs.getObject("payment_date", LocalDate.class))
+                .periodoMese(rs.getObject("periodo_mese", Integer.class))
+                .periodoAnno(rs.getObject("periodo_anno", Integer.class))
+                .referenceYear(rs.getObject("reference_year", Integer.class))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

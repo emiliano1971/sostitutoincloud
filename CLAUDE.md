@@ -353,6 +353,16 @@ La configurazione è divisa in due livelli:
   nei file di configurazione vengono sostituite al momento della compilazione
 - `SPRING_PROFILES_ACTIVE` è impostato nel `setenv.sh` di Tomcat per il runtime yml
 
+## Note operative ambiente di sviluppo
+
+- Backend Tomcat e frontend Vite sono sempre
+  in esecuzione durante lo sviluppo — non fermarli.
+- Dopo mvn -Plocal clean package le nuove classi
+  sono già in WEB-INF/classes/ e Tomcat le carica
+  automaticamente — nessun riavvio necessario.
+- I curl di test vanno eseguiti direttamente
+  dopo il build Maven senza attendere riavvii.
+
 ## Logging
 
 ### Libreria

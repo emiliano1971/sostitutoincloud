@@ -16,6 +16,12 @@ export interface TenantSettingsDTO {
   codiceTributoF24: string;
   documentWindowDays: number;
   cedolareSeccaEnabled: boolean;
+  // parametri bollo e regime PM
+  bolloImporto: number;
+  bolloSoglia: number;
+  bolloAddebitatoCliente: boolean;
+  regimeFiscalePm: string;
+  naturaIvaEsente: string;
   // policy documentali
   sdiAutoSend: boolean;
   derogaRicevutaEnabled: boolean;

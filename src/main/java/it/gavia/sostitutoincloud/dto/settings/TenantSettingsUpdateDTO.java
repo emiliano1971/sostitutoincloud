@@ -28,6 +28,13 @@ public class TenantSettingsUpdateDTO {
     private Integer documentWindowDays;
     private Boolean cedolareSeccaEnabled;
 
+    // Parametri bollo e regime PM (opzionali)
+    private BigDecimal bolloImporto;
+    private BigDecimal bolloSoglia;
+    private Boolean bolloAddebitatoCliente;
+    private String regimeFiscalePm;
+    private String naturaIvaEsente;
+
     // Policy documentali
     private Boolean sdiAutoSend;
     private Boolean derogaRicevutaEnabled;
