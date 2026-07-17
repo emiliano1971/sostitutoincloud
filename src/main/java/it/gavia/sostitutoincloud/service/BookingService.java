@@ -7,6 +7,7 @@ import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.ScenarioFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
+import it.gavia.sostitutoincloud.dao.SettlementDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
@@ -60,6 +61,7 @@ public class BookingService {
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final SettlementBookingDAO settlementBookingDAO;
+    private final SettlementDAO settlementDAO;
     private final WithholdingLedgerDAO withholdingLedgerDAO;
     private final ContrattoCalcolatoreService contrattoCalcolatore;
     private final AuditService auditService;
@@ -75,6 +77,7 @@ public class BookingService {
                           TipoDocumentoDAO tipoDocumentoDAO,
                           FiscalDocumentDAO fiscalDocumentDAO,
                           SettlementBookingDAO settlementBookingDAO,
+                          SettlementDAO settlementDAO,
                           WithholdingLedgerDAO withholdingLedgerDAO,
                           ContrattoCalcolatoreService contrattoCalcolatore,
                           AuditService auditService) {
@@ -89,6 +92,7 @@ public class BookingService {
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.settlementBookingDAO = settlementBookingDAO;
+        this.settlementDAO = settlementDAO;
         this.withholdingLedgerDAO = withholdingLedgerDAO;
         this.contrattoCalcolatore = contrattoCalcolatore;
         this.auditService = auditService;
@@ -306,7 +310,7 @@ public class BookingService {
                 .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                 .build();
 
-        return BookingDetailDTO.builder()
+        BookingDetailDTO dto = BookingDetailDTO.builder()
                 .id(b.getId())
                 .fkTenantId(b.getFkTenantId())
                 .fkPropertyId(b.getFkPropertyId())
@@ -355,6 +359,17 @@ public class BookingService {
                 // documenti fiscali associati alla prenotazione
                 .documenti(mapDocumenti(b.getId(), maps))
                 .build();
+
+        // settlementStato/settlementId derivati dal settlement reale associato al booking
+        settlementBookingDAO.findSettlementIdByBookingId(b.getId())
+                .flatMap(settlementDAO::findById)
+                .ifPresent(s -> {
+                    dto.setSettlementStato(s.getStato());
+                    dto.setSettlementId(s.getId());
+                });
+        log.debug("BookingService: settlementStato={} per bookingId={}", dto.getSettlementStato(), b.getId());
+
+        return dto;
     }
 
     private List<FiscalDocumentSummaryDTO> mapDocumenti(Integer bookingId, LookupMaps maps) {

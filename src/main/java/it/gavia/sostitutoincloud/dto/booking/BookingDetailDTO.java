@@ -45,6 +45,8 @@ public class BookingDetailDTO {
     private String paymentStatus;
     private String documentStatus;
     private String settlementStatus;
+    private String settlementStato;   // stato del settlement reale associato (null se nessuno)
+    private Integer settlementId;     // id del settlement reale associato (null se nessuno)
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private SplitEconomicoDTO splitEconomico;

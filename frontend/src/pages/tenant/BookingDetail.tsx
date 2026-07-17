@@ -22,9 +22,17 @@ const paymentLabels: Record<string, string> = {
 
 const settlementLabels: Record<string, string> = {
   pending: 'In attesa',
-  calculated: 'Calcolato',
-  paid: 'Liquidato',
-  cancelled: 'Annullato',
+  calculated: 'Calcolata',
+  approved: 'Approvata',
+  paid: 'Pagata',
+};
+
+// Colori badge per stato settlement: null/pending grigio, calculated blu, approved arancione, paid verde
+const settlementBadgeColors: Record<string, string> = {
+  pending: 'bg-muted text-muted-foreground',
+  calculated: 'bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300',
+  approved: 'bg-warning/10 text-warning',
+  paid: 'bg-success/10 text-success',
 };
 
 function toDialogBooking(b: BookingDetailType): Booking {
@@ -291,11 +299,16 @@ const BookingDetail = () => {
             <Badge variant="outline" className="mt-1">{paymentLabels[booking.paymentStatus] ?? booking.paymentStatus}</Badge>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={booking.settlementId != null ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
+          onClick={booking.settlementId != null ? () => navigate(`/settlements?id=${booking.settlementId}`) : undefined}
+        >
           <CardContent className="p-4 text-center">
             <Receipt className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
             <p className="text-xs text-muted-foreground">Liquidazione</p>
-            <Badge variant="outline" className="mt-1">{settlementLabels[booking.settlementStatus] ?? booking.settlementStatus}</Badge>
+            <Badge className={`mt-1 ${settlementBadgeColors[booking.settlementStato ?? 'pending'] ?? settlementBadgeColors.pending}`}>
+              {settlementLabels[booking.settlementStato ?? 'pending'] ?? 'In attesa'}
+            </Badge>
           </CardContent>
         </Card>
       </div>

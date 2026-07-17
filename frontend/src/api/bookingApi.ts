@@ -69,6 +69,9 @@ export interface BookingDetail extends BookingListItem {
   touristTaxIncludedInGross: boolean;
   touristTaxCollection?: string;
   updatedAt: string;
+  // Stato del settlement reale associato (null se nessuno)
+  settlementStato?: string;
+  settlementId?: number;
   splitEconomico: SplitEconomico;
   // Dati immobile per dialog
   propertyAddress?: string;

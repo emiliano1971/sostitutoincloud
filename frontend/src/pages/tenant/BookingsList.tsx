@@ -78,7 +78,7 @@ const BookingsList = () => {
     (b.ownerName ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const visible = filtered.slice(0, 20);
+  const visible = filtered;
   const allSelected = visible.length > 0 && visible.every(b => selectedIds.has(b.id));
 
   const toggleId = (id: number) => {

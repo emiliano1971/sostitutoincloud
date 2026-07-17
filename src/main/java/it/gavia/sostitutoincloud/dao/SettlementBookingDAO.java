@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Log4j2
 @Repository
@@ -30,6 +31,14 @@ public class SettlementBookingDAO {
     public List<SettlementBooking> findByBookingId(Integer bookingId) {
         log.debug("SettlementBookingDAO.findByBookingId() - bookingId={}", bookingId);
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_booking_id = ? ORDER BY id", rowMapper, bookingId);
+    }
+
+    public Optional<Integer> findSettlementIdByBookingId(Integer bookingId) {
+        String sql = "SELECT fk_settlement_id FROM settlement_booking WHERE fk_booking_id = ? LIMIT 1";
+        List<Integer> result = jdbcTemplate.queryForList(sql, Integer.class, bookingId);
+        Optional<Integer> found = result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+        log.debug("SettlementBookingDAO.findSettlementIdByBookingId() - bookingId={} found={}", bookingId, found.orElse(null));
+        return found;
     }
 
     public void insert(Integer settlementId, Integer bookingId) {
