@@ -31,6 +31,8 @@ WEB-INF/lib/
 # File di configurazione locali (contengono credenziali)
 application-local.yml
 db-local.properties
+db-test.properties
+db-prod.properties
 
 # Log applicazione
 logs/

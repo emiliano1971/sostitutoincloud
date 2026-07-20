@@ -20,8 +20,13 @@ export interface SettlementBookingItem {
   checkinDate: string;
   checkoutDate: string;
   grossAmount: number;
+  otaCommissionAmount: number;
+  cleaningAmount: number;
+  pmFeeAmount: number;
+  ivaAmount: number;    // IVA scorporata dalla provvigione PM
   ownerNetAmount: number;
   withholdingAmount: number;
+  bolloCents: number;   // bollo in centesimi (0 o 200)
 }
 
 export interface SettlementDetail extends SettlementListItem {

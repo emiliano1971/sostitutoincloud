@@ -301,7 +301,7 @@ const BookingDetail = () => {
         </Card>
         <Card
           className={booking.settlementId != null ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
-          onClick={booking.settlementId != null ? () => navigate(`/settlements?id=${booking.settlementId}`) : undefined}
+          onClick={booking.settlementId != null ? () => navigate(`/settlements/${booking.settlementId}`) : undefined}
         >
           <CardContent className="p-4 text-center">
             <Receipt className="h-5 w-5 mx-auto text-muted-foreground mb-2" />

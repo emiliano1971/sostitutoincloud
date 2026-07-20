@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
@@ -37,6 +38,7 @@ const fmtEuro = (v: number) => `€${v.toLocaleString('it-IT', { minimumFraction
 
 const SettlementsList = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [settlements, setSettlements] = useState<SettlementListItem[]>([]);
   const [statoFilter, setStatoFilter] = useState<string>('tutti');
   const [isLoading, setIsLoading] = useState(true);
@@ -155,7 +157,7 @@ const SettlementsList = () => {
               </TableHeader>
               <TableBody>
                 {filtered.map(s => (
-                  <TableRow key={s.id}>
+                  <TableRow key={s.id} className="cursor-pointer" onClick={() => navigate(`/settlements/${s.id}`)}>
                     <TableCell className="font-medium">{s.ownerName}</TableCell>
                     <TableCell className="text-sm">{s.period}</TableCell>
                     <TableCell className="text-right">{s.bookingsCount}</TableCell>
@@ -163,7 +165,7 @@ const SettlementsList = () => {
                     <TableCell className="text-right text-destructive">-{fmtEuro(s.withholdingAmount)}</TableCell>
                     <TableCell className="text-right font-medium">{fmtEuro(s.netAmount)}</TableCell>
                     <TableCell><Badge variant="outline" className={statusColors[s.stato]}>{statusLabels[s.stato] || s.stato}</Badge></TableCell>
-                    <TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
                         {s.stato === 'calculated' && (
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-warning" title="Approva" onClick={() => handleUpdateStatus(s.id, 'approved')}>

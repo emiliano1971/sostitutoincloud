@@ -1,10 +1,12 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
 import it.gavia.sostitutoincloud.dao.SettlementDAO;
+import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementBookingDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementCalcolaRequestDTO;
@@ -16,10 +18,12 @@ import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.Settlement;
 import it.gavia.sostitutoincloud.model.SettlementBooking;
+import it.gavia.sostitutoincloud.model.TipoDocumento;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +44,8 @@ public class SettlementService {
     private final BookingDAO bookingDAO;
     private final PropertyDAO propertyDAO;
     private final WithholdingLedgerDAO withholdingLedgerDAO;
+    private final FiscalDocumentDAO fiscalDocumentDAO;
+    private final TipoDocumentoDAO tipoDocumentoDAO;
     private final AuditService auditService;
 
     public SettlementService(SettlementDAO settlementDAO,
@@ -48,6 +54,8 @@ public class SettlementService {
                               BookingDAO bookingDAO,
                               PropertyDAO propertyDAO,
                               WithholdingLedgerDAO withholdingLedgerDAO,
+                              FiscalDocumentDAO fiscalDocumentDAO,
+                              TipoDocumentoDAO tipoDocumentoDAO,
                               AuditService auditService) {
         this.settlementDAO = settlementDAO;
         this.settlementBookingDAO = settlementBookingDAO;
@@ -55,6 +63,8 @@ public class SettlementService {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.withholdingLedgerDAO = withholdingLedgerDAO;
+        this.fiscalDocumentDAO = fiscalDocumentDAO;
+        this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.auditService = auditService;
     }
 
@@ -71,6 +81,35 @@ public class SettlementService {
         BigDecimal total = s.getTotalAmount() != null ? s.getTotalAmount() : BigDecimal.ZERO;
         BigDecimal withholding = s.getWithholdingAmount() != null ? s.getWithholdingAmount() : BigDecimal.ZERO;
         return total.subtract(withholding);
+    }
+
+    private BigDecimal nullSafe(BigDecimal val) {
+        return val != null ? val : BigDecimal.ZERO;
+    }
+
+    /** IVA scorporata dalla provvigione PM (imponibile IVA 22%): pmFee * 0.22 / 1.22, arrotondata a 2 decimali. */
+    private BigDecimal calcolaIva(BigDecimal pmFee) {
+        if (pmFee == null || pmFee.compareTo(BigDecimal.ZERO) == 0) {
+            return BigDecimal.ZERO;
+        }
+        return pmFee.multiply(new BigDecimal("0.22"))
+                .divide(new BigDecimal("1.22"), 2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Somma il bollo (in centesimi) dei fiscal_document di tipo "ricevuta" associati al booking.
+     * bollo_amount è in euro (es. 2.00) → *100 = centesimi (es. 200). Nessuna ricevuta → 0.
+     */
+    private Integer bolloCentsPerBooking(Integer bookingId, Map<Integer, TipoDocumento> tipiDocumentoById) {
+        BigDecimal bolloEuro = fiscalDocumentDAO.findByBookingId(bookingId).stream()
+                .filter(d -> {
+                    TipoDocumento tipo = d.getFkTipoDocumentoId() != null
+                            ? tipiDocumentoById.get(d.getFkTipoDocumentoId()) : null;
+                    return tipo != null && "ricevuta".equals(tipo.getCodice());
+                })
+                .map(d -> d.getBolloAmount() != null ? d.getBolloAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return bolloEuro.multiply(BigDecimal.valueOf(100)).intValue();
     }
 
     public List<SettlementListDTO> findByTenantId(Integer tenantId, Integer ownerId, String period) {
@@ -118,6 +157,9 @@ public class SettlementService {
         Map<Integer, Property> propertiesById = propertyDAO.findByTenantId(tenantId).stream()
                 .collect(Collectors.toMap(Property::getId, p -> p));
 
+        Map<Integer, TipoDocumento> tipiDocumentoById = tipoDocumentoDAO.findAll().stream()
+                .collect(Collectors.toMap(TipoDocumento::getId, t -> t));
+
         List<SettlementBookingDTO> bookingDTOs = settlementBookings.stream()
                 .map(sb -> {
                     Booking booking = bookingDAO.findById(sb.getFkBookingId()).orElse(null);
@@ -130,8 +172,13 @@ public class SettlementService {
                             .checkinDate(booking.getCheckinDate())
                             .checkoutDate(booking.getCheckoutDate())
                             .grossAmount(booking.getGrossAmount())
+                            .otaCommissionAmount(nullSafe(booking.getOtaCommissionAmount()))
+                            .cleaningAmount(nullSafe(booking.getCleaningAmount()))
+                            .pmFeeAmount(nullSafe(booking.getPmFeeAmount()))
+                            .ivaAmount(calcolaIva(booking.getPmFeeAmount()))
                             .ownerNetAmount(booking.getOwnerNetAmount())
                             .withholdingAmount(booking.getWithholdingAmount())
+                            .bolloCents(bolloCentsPerBooking(booking.getId(), tipiDocumentoById))
                             .build();
                 })
                 .filter(dto -> dto != null)

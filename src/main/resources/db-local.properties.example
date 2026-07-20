@@ -1,0 +1,9 @@
+# DataSource — locale (TEMPLATE)
+# Copiare in db-local.properties e aggiornare con le credenziali reali:
+#   cp db-local.properties.example db-local.properties
+db.url=jdbc:postgresql://localhost:5432/sostitutoincloud
+db.username=sostitutoincloud
+db.password=sostitutoincloud
+db.driver-class-name=org.postgresql.Driver
+db.pool.maximum-pool-size=5
+db.pool.minimum-idle=2

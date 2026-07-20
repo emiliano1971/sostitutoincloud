@@ -31,6 +31,7 @@ import DocumentsList from "./pages/tenant/DocumentsList";
 import DocumentDetail from "./pages/tenant/DocumentDetail";
 import F24List from "./pages/tenant/F24List";
 import SettlementsList from "./pages/tenant/SettlementsList";
+import SettlementDetail from "./pages/tenant/SettlementDetail";
 import CUList from "./pages/tenant/CUList";
 import AuditLog from "./pages/tenant/AuditLog";
 import ImportBookings from "./pages/tenant/ImportBookings";
@@ -89,6 +90,7 @@ function AppRoutes() {
         <Route path="documents/:id" element={<DocumentDetail />} />
         <Route path="f24" element={<F24List />} />
         <Route path="settlements" element={<SettlementsList />} />
+        <Route path="settlements/:id" element={<SettlementDetail />} />
         <Route path="cu" element={<CUList />} />
         <Route path="audit" element={<AuditLog />} />
         <Route path="import/bookings" element={<ImportBookings />} />

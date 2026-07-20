@@ -66,41 +66,81 @@ OrdineController → OrdineService → OrdineDAO → PostgreSQL
 L'architettura è predisposta per una eventuale separazione futura:
 - Frontend deployato separatamente (Nginx, CDN, app mobile, Capacitor)
 - Backend Spring Boot raggiunto tramite URL assoluto
-- Questa separazione NON richiederà modifiche al codice React grazie a `VITE_API_BASE_URL`
+- Questa separazione NON richiederà modifiche al codice React grazie al `config.json` runtime (vedi sotto)
 
-### Configurazione URL API nel frontend
-Il base URL delle API è gestito tramite variabili d'ambiente Vite — mai hardcoded nel codice.
+### Configurazione URL API nel frontend — ATTUALE (runtime config.json)
+Il base URL delle API è gestito tramite un file JSON statico caricato **a runtime** dal
+browser (fetch), NON tramite variabili d'ambiente Vite compilate nel bundle.
+
+Vantaggio: l'URL dell'API si cambia modificando un file statico servito da Tomcat,
+**senza ricompilare il bundle JavaScript**.
+
+File per ambiente in `frontend/public/`:
+```
+frontend/public/config.local.json
+frontend/public/config.test.json
+frontend/public/config.prod.json
+```
+In fase di deploy la variante dell'ambiente viene copiata/rinominata in `config.json`
+(è questo il file che il frontend scarica).
+
+Esempio `frontend/public/config.test.json`:
+```json
+{
+  "apiBaseUrl": "http://localhost:8081/sostitutoincloud/api",
+  "environment": "test"
+}
+```
+
+Caricamento in React (`src/config/AppConfig.ts`):
+```ts
+export async function loadConfig(): Promise<AppConfig> {
+  if (_config) return _config;
+  const res = await fetch(`${import.meta.env.BASE_URL}config.json`);
+  if (!res.ok) throw new Error('Impossibile caricare config.json');
+  _config = await res.json();
+  return _config!;
+}
+export function getConfig(): AppConfig { /* ... ritorna la config già caricata ... */ }
+```
+
+Tutte le chiamate API usano il base URL dalla config caricata:
+```ts
+const base = getConfig().apiBaseUrl;   // es. in src/lib/apiClient.ts, src/api/*.ts
+fetch(`${base}/utenti`)
+```
+
+<!--
+### STORICO — approccio PRECEDENTE (SUPERATO, ~lug 2026): variabili d'ambiente Vite
+Conservato come promemoria dell'evoluzione. NON è più l'approccio in uso:
+si è passati al config.json caricato a runtime (sopra) per poter cambiare
+l'URL API senza ricompilare il bundle.
+
+Il base URL delle API era gestito tramite variabili d'ambiente Vite — mai hardcoded nel codice.
 
 `frontend/.env.local`:
-```
-VITE_API_BASE_URL=http://localhost:8081/sostitutoincloud/api
-```
+    VITE_API_BASE_URL=http://localhost:8081/sostitutoincloud/api
 
 `frontend/.env.test`:
-```
-VITE_API_BASE_URL=https://testpms.siv.cloud.it:8443/sostitutoincloud/api
-```
+    VITE_API_BASE_URL=https://testpms.siv.cloud.it:8443/sostitutoincloud/api
 
 `frontend/.env.production`:
-```
-VITE_API_BASE_URL=https://prodpms.siv.cloud.it:8443/sostitutoincloud/api
-```
+    VITE_API_BASE_URL=https://prodpms.siv.cloud.it:8443/sostitutoincloud/api
 
 Unico punto di configurazione in React:
-```ts
-// src/config/api.ts
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-```
+    // src/config/api.ts
+    export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-Tutte le chiamate API usano questa costante:
-```ts
-fetch(`${API_BASE_URL}/utenti`)
-```
+Tutte le chiamate API usavano questa costante:
+    fetch(`${API_BASE_URL}/utenti`)
+-->
+
 
 ### Sviluppo locale
 - Frontend React gira separato su Vite dev server (porta 5173)
 - Backend Spring Boot gira su porta 8081
-- Il proxy Vite non è necessario grazie a `VITE_API_BASE_URL` ma può restare come fallback:
+- Il proxy Vite non è necessario grazie all'`apiBaseUrl` del `config.json` ma può restare come fallback:
+  <!-- STORICO: in precedenza il base URL veniva da VITE_API_BASE_URL (vedi sezione "STORICO" sopra) -->
   ```ts
   // vite.config.ts
   server: {
@@ -338,8 +378,9 @@ La configurazione è divisa in due livelli:
 ### Regole per Claude
 - La porta di sviluppo locale è **8081**, mai 8080
 - Il context-path `/sostitutoincloud` è fisso — NON cambiarlo per nessun profilo
-- Le chiamate API React usano SEMPRE `API_BASE_URL` da `src/config/api.ts` — mai path o URL hardcoded
-- Il base URL è definito nei file `.env.*` del frontend, mai nel codice
+- Le chiamate API React usano SEMPRE il base URL da `getConfig().apiBaseUrl` (`src/config/AppConfig.ts`) — mai path o URL hardcoded
+- Il base URL è definito nei file `frontend/public/config.<env>.json` (copiati in `config.json` al deploy), caricati a runtime — mai nel codice
+  <!-- STORICO (SUPERATO): in precedenza il base URL era `API_BASE_URL` da `src/config/api.ts`, letto da `VITE_API_BASE_URL` nei file `.env.*` — vedi sezione "STORICO" nel blocco "Configurazione URL API nel frontend" -->
 - Il backend Spring Boot espone tutte le API sotto `/sostitutoincloud/api`
 - La configurazione CORS è per profilo nel yml — mai hardcoded nel codice Java
 - Per aggiungere origini CORS future modificare solo i file yml, non il codice
