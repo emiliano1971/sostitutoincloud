@@ -3,3 +3,8 @@ spring:
     name: sostitutoincloud
   profiles:
     active: "@spring.profiles.active@"
+
+app:
+  storage:
+    base-path: /app/storage
+    pdf-path: /app/storage/pdf

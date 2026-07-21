@@ -4,8 +4,9 @@ prima di procedere.
 Crea Dockerfile multi-stage per deploy su Coolify.
 Il build replica esattamente la struttura che
 my-build.xml crea su Tomcat locale.
-Il PostgreSQL e l'app girano su container separati
-gestiti manualmente su Coolify.
+Il PostgreSQL 18 e l'app girano su container
+separati gestiti manualmente su Coolify.
+Supporta due ambienti: test e prod.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. DOCKERFILE
@@ -17,6 +18,10 @@ Crea Dockerfile nella root del progetto:
 FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /build
+
+# Build argument per profilo Maven
+# default prod, override con test su Coolify
+ARG MAVEN_PROFILE=prod
 
 # Installa Node.js 18
 RUN apt-get update && apt-get install -y \
@@ -35,9 +40,10 @@ RUN mvn dependency:go-offline -q
 # Copia tutto il progetto
 COPY . .
 
-# Build Maven con profilo prod
+# Build Maven con profilo da ARG
 # (include build frontend React)
-RUN mvn -Pprod clean package -DskipTests
+RUN mvn -P${MAVEN_PROFILE} clean package \
+-DskipTests
 
 # ─── Stage 2: Runtime ─────────────────────
 FROM tomcat:10.1-jdk17
@@ -45,39 +51,72 @@ FROM tomcat:10.1-jdk17
 # Rimuovi app di default Tomcat
 RUN rm -rf /usr/local/tomcat/webapps/*
 
-# Crea struttura app in webapps
+# Crea struttura app in webapps + storage
 RUN mkdir -p \
-/usr/local/tomcat/webapps/sostitutoincloud/WEB-INF/classes \
-/usr/local/tomcat/webapps/sostitutoincloud/WEB-INF/lib \
+/usr/local/tomcat/webapps/sostitutoincloud/\
+WEB-INF/classes \
+/usr/local/tomcat/webapps/sostitutoincloud/\
+WEB-INF/lib \
 /app/storage/pdf
 
-# Copia struttura WEB-INF compilata
-# (my-build.xml ha popolato WEB-INF/ nella
-#  root del progetto durante mvn package)
+# Copia struttura WEB-INF compilata dallo
+# stage build (my-build.xml ha popolato
+# WEB-INF/ nella root del progetto)
 COPY --from=builder \
 /build/WEB-INF/ \
-/usr/local/tomcat/webapps/sostitutoincloud/WEB-INF/
+/usr/local/tomcat/webapps/sostitutoincloud/\
+WEB-INF/
 
-# Volume per file persistenti (PDF generati ecc.)
+# Volume per file persistenti (PDF generati)
 VOLUME /app/storage
 
 # Porta Tomcat
 EXPOSE 8080
 
-# Variabili ambiente (override a runtime da Coolify)
+# Variabili ambiente (override a runtime
+# da Coolify per ogni ambiente)
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV JAVA_OPTS="-Xms512m -Xmx1024m"
 
 CMD ["catalina.sh", "run"]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-2. db-prod.properties
+2. application.yml (base comune)
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Modifica src/main/resources/db-prod.properties
-per leggere le credenziali da variabili
-d'ambiente impostate su Coolify:
+Aggiungi in src/main/resources/application.yml
+la sezione storage — comune a tutti i profili:
 
+app:
+storage:
+base-path: /app/storage
+pdf-path: /app/storage/pdf
+
+In src/main/resources/application-local.yml
+aggiungi override per sviluppo locale:
+
+app:
+storage:
+base-path: /tmp/sostitutoincloud/storage
+pdf-path: /tmp/sostitutoincloud/storage/pdf
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. db-test.properties e db-prod.properties
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Modifica entrambi i file per leggere
+le credenziali da variabili d'ambiente
+impostate su Coolify.
+
+src/main/resources/db-test.properties:
+db.url=${DB_URL:jdbc:postgresql://localhost:5432/sostitutoincloud}
+db.username=${DB_USERNAME:sostitutoincloud}
+db.password=${DB_PASSWORD:sostitutoincloud}
+db.driver-class-name=org.postgresql.Driver
+db.pool.maximum-pool-size=5
+db.pool.minimum-idle=1
+
+src/main/resources/db-prod.properties:
 db.url=${DB_URL:jdbc:postgresql://localhost:5432/sostitutoincloud}
 db.username=${DB_USERNAME:sostitutoincloud}
 db.password=${DB_PASSWORD:sostitutoincloud}
@@ -85,44 +124,35 @@ db.driver-class-name=org.postgresql.Driver
 db.pool.maximum-pool-size=10
 db.pool.minimum-idle=2
 
-Il formato ${VAR:default} usa la variabile
-d'ambiente se presente, altrimenti il default.
-Verifica che HikariCP/Spring legga correttamente
-questo formato — se non supportato usa
-@Value("${DB_URL:...}") nel DataSource bean.
+Verifica che HikariCP/Spring legga
+correttamente il formato ${VAR:default}.
+Se non supportato usa environment variables
+nel DataSource bean con @Value.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3. application-prod.yml
+4. config.test.json e config.prod.json
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Aggiungi la configurazione storage
-in src/main/resources/application-prod.yml:
+Modifica entrambi i file per usare
+path relativo — funziona con qualsiasi
+dominio assegnato da Coolify:
 
-app:
-storage:
-base-path: /app/storage
-pdf-path: /app/storage/pdf
+frontend/public/config.test.json:
+{
+"apiBaseUrl": "/sostitutoincloud/api",
+"environment": "test"
+}
 
-Questa property verrà usata dal PDF service
-quando verrà implementato.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. config.prod.json — URL relativo
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Modifica frontend/public/config.prod.json
-per usare path relativo (funziona con
-qualsiasi dominio Coolify):
-
+frontend/public/config.prod.json:
 {
 "apiBaseUrl": "/sostitutoincloud/api",
 "environment": "prod"
 }
 
-Frontend e backend sono sullo stesso container
-quindi il path relativo funziona sempre,
-indipendentemente dal dominio assegnato
-da Coolify.
+Frontend e backend sono sullo stesso
+container quindi il path relativo
+funziona sempre indipendentemente
+dal dominio Coolify.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 5. .dockerignore
@@ -141,40 +171,66 @@ WEB-INF/classes/
 WEB-INF/lib/
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-6. VARIABILI AMBIENTE COOLIFY
+6. README-INSTALL.md — sezione Coolify
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Documenta in README-INSTALL.md una sezione
-"Deploy su Coolify" con le variabili
-d'ambiente da impostare nel container app:
+Aggiungi in README-INSTALL.md una sezione
+"## Deploy su Coolify":
 
-DB_URL=jdbc:postgresql://{host-postgres}:5432/sostitutoincloud
-DB_USERNAME=sostitutoincloud
-DB_PASSWORD={password}
-SPRING_PROFILES_ACTIVE=prod
-JAVA_OPTS=-Xms512m -Xmx1024m
-
-E per il container PostgreSQL 18:
+### Container PostgreSQL 18
+Immagine: postgres:18
+Variabili d'ambiente:
 POSTGRES_DB=sostitutoincloud
 POSTGRES_USER=sostitutoincloud
 POSTGRES_PASSWORD={password}
+Volume: postgres_data → /var/lib/postgresql/data
+Esegui dopo il primo avvio:
+psql -U sostitutoincloud -d sostitutoincloud \
+-f install.sql
 
-Nota: {host-postgres} è il nome del servizio
-PostgreSQL assegnato da Coolify nella
-stessa rete privata (es. il nome container).
+### Container Applicazione
+Immagine: build da Dockerfile nel repo GitHub
+
+Variabili d'ambiente ambiente TEST:
+MAVEN_PROFILE=test
+SPRING_PROFILES_ACTIVE=test
+DB_URL=jdbc:postgresql://{host-postgres}:5432/sostitutoincloud
+DB_USERNAME=sostitutoincloud
+DB_PASSWORD={password}
+JAVA_OPTS=-Xms512m -Xmx1024m
+
+Variabili d'ambiente ambiente PROD:
+MAVEN_PROFILE=prod
+SPRING_PROFILES_ACTIVE=prod
+DB_URL=jdbc:postgresql://{host-postgres}:5432/sostitutoincloud
+DB_USERNAME=sostitutoincloud
+DB_PASSWORD={password}
+JAVA_OPTS=-Xms512m -Xmx1024m
+
+Volume: app_storage → /app/storage
+Porta: 8080
+
+Nota: {host-postgres} è il nome del container
+PostgreSQL nella rete privata Coolify
+(es. sostitutoincloud-db).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-7. TEST BUILD LOCALE
+7. VERIFICA BUILD
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Testa il build Docker localmente
-(senza avviare il container — solo verifica
-che il Dockerfile compili correttamente):
+Verifica che il build Maven con profilo
+prod funzioni ancora normalmente in locale
+(senza Docker):
 
-docker build -t sostitutoincloud:test .
+mvn -Pprod clean package -DskipTests
 
-Se il build fallisce riporta l'errore
-completo per diagnosticare.
-Se il build ha successo riporta:
-- dimensione immagine finale
-- layer principali
+Verifica che i file modificati siano
+coerenti:
+- WEB-INF/classes/static/config.json
+  deve contenere /sostitutoincloud/api
+  (copiato da config.prod.json)
+- db.properties in WEB-INF/classes/
+  deve contenere il formato ${DB_URL:...}
+
+Riporta output build e contenuto
+dei due file verificati.
