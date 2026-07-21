@@ -21,7 +21,15 @@ const statusLabels: Record<string, string> = {
   paid: 'Pagato',
 };
 
+// Sfondi per gruppo di colonne (chiari in light, tenui in dark)
+const COST_BG = 'bg-[#fff5f5] dark:bg-red-950/20';       // voci di costo
+const FISCAL_BG = 'bg-[#fffaf0] dark:bg-amber-950/20';   // deduzioni fiscali
+const NET_BG = 'bg-[#f0fff4] dark:bg-green-950/20';      // netto
+
 const fmtEuro = (v: number) => `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Voce di costo/deduzione: negativa in rosso se > 0, altrimenti €0,00 neutro
+const fmtCost = (v: number) => ((v ?? 0) > 0 ? `-${fmtEuro(v)}` : fmtEuro(0));
 
 const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('it-IT') : '—');
 
@@ -71,11 +79,18 @@ const SettlementDetail = () => {
   }
 
   const bookings = settlement.bookings ?? [];
-  // Netto per riga = quanto realmente pagato al proprietario = ownerNetAmount − ritenuta.
-  // Così i totali della tabella riconciliano con settlement.netAmount (card "Netto da pagare").
+
+  // Netto per riga = canone − ritenuta (il bollo è informativo e NON incide sui totali).
+  // Il totale riconcilia con settlement.netAmount (card "Netto da pagare").
   const nettoRiga = (b: { ownerNetAmount?: number; withholdingAmount?: number }) =>
     (b.ownerNetAmount ?? 0) - (b.withholdingAmount ?? 0);
+
   const sumLordo = bookings.reduce((acc, b) => acc + (b.grossAmount ?? 0), 0);
+  const sumOta = bookings.reduce((acc, b) => acc + (b.otaCommissionAmount ?? 0), 0);
+  const sumCleaning = bookings.reduce((acc, b) => acc + (b.cleaningAmount ?? 0), 0);
+  const sumPm = bookings.reduce((acc, b) => acc + (b.pmFeeAmount ?? 0), 0);
+  const sumIva = bookings.reduce((acc, b) => acc + (b.ivaAmount ?? 0), 0);
+  const sumCanone = bookings.reduce((acc, b) => acc + (b.ownerNetAmount ?? 0), 0);
   const sumBolloCents = bookings.reduce((acc, b) => acc + (b.bolloCents ?? 0), 0);
   const sumRitenuta = bookings.reduce((acc, b) => acc + (b.withholdingAmount ?? 0), 0);
   const sumNetto = bookings.reduce((acc, b) => acc + nettoRiga(b), 0);
@@ -103,7 +118,7 @@ const SettlementDetail = () => {
         </div>
       </div>
 
-      {/* Tabella prenotazioni */}
+      {/* Tabella prenotazioni — dal lordo al netto */}
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -117,15 +132,20 @@ const SettlementDetail = () => {
                   <TableHead>Check-out</TableHead>
                   <TableHead className="text-right">Notti</TableHead>
                   <TableHead className="text-right">Lordo €</TableHead>
-                  <TableHead className="text-right">Bollo €</TableHead>
-                  <TableHead className="text-right">Ritenuta €</TableHead>
-                  <TableHead className="text-right">Netto €</TableHead>
+                  <TableHead className={`text-right ${COST_BG}`}>Comm. OTA €</TableHead>
+                  <TableHead className={`text-right ${COST_BG}`}>Pulizie €</TableHead>
+                  <TableHead className={`text-right ${COST_BG}`}>Provv. PM €</TableHead>
+                  <TableHead className={`text-right ${COST_BG}`}>di cui IVA €</TableHead>
+                  <TableHead className="text-right">Canone €</TableHead>
+                  <TableHead className={`text-right ${FISCAL_BG}`}>Bollo €</TableHead>
+                  <TableHead className={`text-right ${FISCAL_BG}`}>Ritenuta €</TableHead>
+                  <TableHead className={`text-right ${NET_BG}`}>Netto €</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {bookings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
+                    <TableCell colSpan={15} className="text-center py-10 text-muted-foreground">
                       Nessuna prenotazione collegata
                     </TableCell>
                   </TableRow>
@@ -143,9 +163,15 @@ const SettlementDetail = () => {
                       <TableCell className="text-sm">{fmtDate(b.checkoutDate)}</TableCell>
                       <TableCell className="text-right">{notti(b.checkinDate, b.checkoutDate)}</TableCell>
                       <TableCell className="text-right">{fmtEuro(b.grossAmount)}</TableCell>
-                      <TableCell className="text-right">{fmtEuro((b.bolloCents ?? 0) / 100)}</TableCell>
-                      <TableCell className="text-right text-destructive">-{fmtEuro(b.withholdingAmount)}</TableCell>
-                      <TableCell className="text-right font-semibold">{fmtEuro(nettoRiga(b))}</TableCell>
+                      <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.otaCommissionAmount)}</TableCell>
+                      <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.cleaningAmount)}</TableCell>
+                      <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.pmFeeAmount)}</TableCell>
+                      <TableCell className={`text-right text-muted-foreground text-xs ${COST_BG}`}>{fmtEuro(b.ivaAmount)}</TableCell>
+                      <TableCell className="text-right font-semibold">{fmtEuro(b.ownerNetAmount)}</TableCell>
+                      {/* Bollo: informativo, non incide sul netto */}
+                      <TableCell className={`text-right text-muted-foreground ${FISCAL_BG}`}>{fmtEuro((b.bolloCents ?? 0) / 100)}</TableCell>
+                      <TableCell className={`text-right text-destructive ${FISCAL_BG}`}>{fmtCost(b.withholdingAmount)}</TableCell>
+                      <TableCell className={`text-right font-semibold text-success ${NET_BG}`}>{fmtEuro(nettoRiga(b))}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -155,19 +181,27 @@ const SettlementDetail = () => {
                   <TableRow className="bg-muted/50 font-bold hover:bg-muted/50">
                     <TableCell colSpan={6}>TOTALE</TableCell>
                     <TableCell className="text-right">{fmtEuro(sumLordo)}</TableCell>
-                    <TableCell className="text-right">{fmtEuro(sumBollo)}</TableCell>
-                    <TableCell className="text-right text-destructive">-{fmtEuro(sumRitenuta)}</TableCell>
-                    <TableCell className="text-right">{fmtEuro(sumNetto)}</TableCell>
+                    <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(sumOta)}</TableCell>
+                    <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(sumCleaning)}</TableCell>
+                    <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(sumPm)}</TableCell>
+                    <TableCell className={`text-right text-muted-foreground text-xs ${COST_BG}`}>{fmtEuro(sumIva)}</TableCell>
+                    <TableCell className="text-right">{fmtEuro(sumCanone)}</TableCell>
+                    <TableCell className={`text-right text-muted-foreground ${FISCAL_BG}`}>{fmtEuro(sumBollo)}</TableCell>
+                    <TableCell className={`text-right text-destructive ${FISCAL_BG}`}>{fmtCost(sumRitenuta)}</TableCell>
+                    <TableCell className={`text-right text-success ${NET_BG}`}>{fmtEuro(sumNetto)}</TableCell>
                   </TableRow>
                 </tfoot>
               )}
             </Table>
           </div>
+          <p className="px-4 py-2 text-xs text-muted-foreground">
+            Il bollo è mostrato a titolo informativo e non è dedotto dal netto pagato al proprietario.
+          </p>
         </CardContent>
       </Card>
 
       {/* Riepilogo card */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Lordo totale</p>
@@ -176,23 +210,45 @@ const SettlementDetail = () => {
         </Card>
         <Card>
           <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Comm. OTA</p>
+            <p className="text-xl font-bold mt-1 text-destructive">{fmtCost(sumOta)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Pulizie</p>
+            <p className="text-xl font-bold mt-1 text-destructive">{fmtCost(sumCleaning)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Provv. PM (+ IVA)</p>
+            <p className="text-xl font-bold mt-1 text-destructive">{fmtCost(sumPm)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">di cui IVA {fmtEuro(sumIva)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Bollo totale</p>
-            <p className="text-xl font-bold mt-1">{fmtEuro(sumBollo)}</p>
+            <p className="text-xl font-bold mt-1 text-muted-foreground">{fmtEuro(sumBollo)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">informativo</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Ritenute totali</p>
-            <p className="text-xl font-bold mt-1 text-destructive">-{fmtEuro(settlement.withholdingAmount)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Netto da pagare</p>
-            <p className="text-xl font-bold mt-1 text-success">{fmtEuro(settlement.netAmount)}</p>
+            <p className="text-xl font-bold mt-1 text-destructive">{fmtCost(settlement.withholdingAmount)}</p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Netto da pagare — evidenza */}
+      <Card className={NET_BG}>
+        <CardContent className="p-6 text-center">
+          <p className="text-sm text-muted-foreground">Netto da pagare</p>
+          <p className="text-3xl font-bold mt-1 text-success">{fmtEuro(settlement.netAmount)}</p>
+        </CardContent>
+      </Card>
     </div>
   );
 };

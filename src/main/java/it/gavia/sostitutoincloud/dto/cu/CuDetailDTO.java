@@ -23,6 +23,7 @@ public class CuDetailDTO {
     private String ownerIban;
     private Integer taxYear;
     private BigDecimal totalCompensi;
+    private BigDecimal totalImponibile;
     private BigDecimal totalRitenute;
     private String stato;
     private LocalDate generatedAt;

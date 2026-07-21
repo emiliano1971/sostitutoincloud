@@ -256,7 +256,7 @@ const F24List = () => {
 
       {/* Dialog: Genera F24 */}
       <Dialog open={generaOpen} onOpenChange={closeGenera}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Genera F24</DialogTitle>
             <DialogDescription>Aggrega le ritenute da versare del periodo selezionato.</DialogDescription>
@@ -345,16 +345,16 @@ const F24List = () => {
 };
 
 const RitenuteTable = ({ ritenute }: { ritenute: F24GenerazioneResult['ritenute'] }) => (
-  <div className="max-h-80 overflow-auto">
-    <Table>
+  <div className="max-h-80 overflow-x-auto overflow-y-auto">
+    <Table className="min-w-[640px]">
       <TableHeader>
         <TableRow>
-          <TableHead>Proprietario</TableHead>
-          <TableHead>Prenotazione</TableHead>
-          <TableHead>Documento</TableHead>
-          <TableHead className="text-right">Canone €</TableHead>
-          <TableHead className="text-right">Aliq. %</TableHead>
-          <TableHead className="text-right">Ritenuta €</TableHead>
+          <TableHead className="whitespace-nowrap">Proprietario</TableHead>
+          <TableHead className="whitespace-nowrap">Prenotazione</TableHead>
+          <TableHead className="whitespace-nowrap">Documento</TableHead>
+          <TableHead className="text-right whitespace-nowrap">Canone €</TableHead>
+          <TableHead className="text-right whitespace-nowrap">Aliq. %</TableHead>
+          <TableHead className="text-right whitespace-nowrap">Ritenuta €</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

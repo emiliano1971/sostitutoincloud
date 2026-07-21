@@ -5,6 +5,7 @@ export interface CuListItem {
   ownerName: string;
   taxYear: number;
   totalCompensi: number;
+  totalImponibile: number;
   totalRitenute: number;
   stato: string;
   generatedAt?: string;

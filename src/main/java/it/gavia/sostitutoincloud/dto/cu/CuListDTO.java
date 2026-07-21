@@ -19,6 +19,7 @@ public class CuListDTO {
     private String ownerName;
     private Integer taxYear;
     private BigDecimal totalCompensi;
+    private BigDecimal totalImponibile;
     private BigDecimal totalRitenute;
     private String stato;
     private LocalDate generatedAt;
