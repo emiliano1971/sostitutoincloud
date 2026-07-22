@@ -4,9 +4,9 @@ server:
     context-path: /sostitutoincloud
 
 app:
-  base-url: https://sostituto-in-cloud-prova.gaviatech.it/sostitutoincloud # https://testpms.siv.cloud.it:8443/sostitutoincloud
+  base-url: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud # https://testpms.siv.cloud.it:8443/sostitutoincloud
   cors:
-    allowed-origins: https://sostituto-in-cloud-prova.gaviatech.it/sostitutoincloud  # https://testpms.siv.cloud.it:8443
+    allowed-origins: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud  # https://testpms.siv.cloud.it:8443
   security:
     admin-password: ${ADMIN_PASSWORD:CHANGE_ME}
   jwt:
