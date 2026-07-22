@@ -1,55 +1,55 @@
-# ─── Stage 1: Build ───────────────────────
+# ─── Stage 1: Build ─────────────────────────────────────────
 FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /build
 
-# Installa Node.js 18
-RUN apt-get update && apt-get install -y \
-curl && \
-curl -fsSL https://deb.nodesource.com/setup_18.x \
-| bash - && \
-apt-get install -y nodejs && \
-apt-get clean && \
-rm -rf /var/lib/apt/lists/*
+# Profilo Maven: prod di default, override con test su Coolify
+# (è un BUILD ARG: su Coolify va impostato tra le build variables)
+ARG MAVEN_PROFILE=prod
 
-# Copia pom.xml e scarica dipendenze
-# (layer cache — rieseguito solo se pom.xml cambia)
+# Node.js 18 — richiesto dai profili test/prod del pom
+# (exec-maven-plugin esegue npm install + npm run build)
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Layer cache dipendenze Maven: rieseguito solo se pom.xml cambia
 COPY pom.xml .
 RUN mvn dependency:go-offline -q
 
-# Copia tutto il progetto
+# Copia il progetto (vedi .dockerignore per le esclusioni)
 COPY . .
 
-# Build Maven con profilo prod
-# (include build frontend React)
-RUN mvn -Pprod clean package -DskipTests
+# Build con profilo da ARG. Il profilo test/prod:
+#  - builda il frontend React (npm) con base path /sostitutoincloud/
+#  - copia frontend/dist → target/classes/static/
+#  - rinomina config.{env}.json → static/config.json
+#  - rinomina db-{env}.properties → db.properties
+#  - produce il WAR completo in target/
+RUN mvn -P${MAVEN_PROFILE} clean package -DskipTests
 
-# ─── Stage 2: Runtime ─────────────────────
+# ─── Stage 2: Runtime ───────────────────────────────────────
 FROM tomcat:10.1-jdk17
 
-# Rimuovi app di default Tomcat
+# Rimuovi le webapp di default di Tomcat
 RUN rm -rf /usr/local/tomcat/webapps/*
 
-# Crea struttura app in webapps
-RUN mkdir -p \
-/usr/local/tomcat/webapps/sostitutoincloud/WEB-INF/classes \
-/usr/local/tomcat/webapps/sostitutoincloud/WEB-INF/lib \
-/app/storage/pdf
+# Storage per file persistenti (PDF generati)
+RUN mkdir -p /app/storage/pdf
 
-# Copia struttura WEB-INF compilata
-# (my-build.xml ha popolato WEB-INF/ nella
-#  root del progetto durante mvn package)
-COPY --from=builder \
-/build/WEB-INF/ \
-/usr/local/tomcat/webapps/sostitutoincloud/WEB-INF/
+# Deploya il WAR: Tomcat lo espande sul context /sostitutoincloud
+# (il WAR è l'artefatto completo: classi, lib, frontend, config.json,
+#  db.properties, log4j2.xml filtrato — a differenza della cartella
+#  WEB-INF/ del progetto, che è pensata solo per il deploy locale)
+COPY --from=builder /build/target/*.war /usr/local/tomcat/webapps/sostitutoincloud.war
 
-# Volume per file persistenti (PDF generati ecc.)
+# Volume per i file persistenti
 VOLUME /app/storage
 
-# Porta Tomcat
 EXPOSE 8080
 
-# Variabili ambiente (override a runtime da Coolify)
+# Default: override a runtime dalle env di Coolify
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV JAVA_OPTS="-Xms512m -Xmx1024m"
 
