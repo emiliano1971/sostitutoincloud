@@ -1,4 +1,4 @@
 {
-  "apiBaseUrl": "https://sostituto-in-cloud-prova.gaviatech.it/sostitutoincloud/api",
+  "apiBaseUrl": "https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud/api",
   "environment": "test"
 }
