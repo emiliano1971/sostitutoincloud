@@ -399,7 +399,7 @@ const ImportBookings = () => {
   );
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 w-full max-w-none">
       <div>
         <h1 className="text-2xl font-bold">Import Dati</h1>
         <p className="text-sm text-muted-foreground">Importa prenotazioni con file ospiti e mapping colonne personalizzato</p>
@@ -603,6 +603,7 @@ const ImportBookings = () => {
                     <TableHead>ID Prenotazione</TableHead>
                     <TableHead>#</TableHead>
                     <TableHead>Ospite</TableHead>
+                    <TableHead>CF</TableHead>
                     <TableHead>Immobile</TableHead>
                     <TableHead>Canale</TableHead>
                     <TableHead>Check-in</TableHead>
@@ -621,6 +622,11 @@ const ImportBookings = () => {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{row.rowNumber}</TableCell>
                       <TableCell className="text-sm font-medium">{row.guestName}</TableCell>
+                      <TableCell className="text-xs font-mono">
+                        {row.guestTaxCode
+                          ? row.guestTaxCode
+                          : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
                       <TableCell className="text-sm">{row.propertyName ?? row.propertyCode}</TableCell>
                       <TableCell className="text-sm">{row.channelName ?? row.channelCode}</TableCell>
                       <TableCell className="text-sm">{row.checkinDate}</TableCell>
