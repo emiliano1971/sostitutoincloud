@@ -14,12 +14,22 @@ import { useLookup } from '@/contexts/LookupContext';
 import { useToast } from '@/hooks/use-toast';
 
 const statusColors: Record<string, string> = {
-  imported: 'bg-muted text-muted-foreground',
-  enriched: 'bg-primary/10 text-primary',
-  ready: 'bg-success/10 text-success',
-  doc_issued: 'bg-accent/10 text-accent-foreground',
-  settled: 'bg-success/20 text-success',
-  cancelled: 'bg-destructive/10 text-destructive',
+  imported: 'bg-muted text-muted-foreground',                                        // grigio
+  enriched: 'bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300',      // blu
+  ready: 'bg-sky-100 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300',             // azzurro
+  doc_issued: 'bg-success/10 text-success',                                          // verde
+  settled: 'bg-emerald-600/20 text-emerald-800 dark:text-emerald-300',               // verde scuro
+  cancelled: 'bg-destructive/10 text-destructive',                                   // rosso
+};
+
+// Label brevi per il badge stato (fallback alla descrizione lookup se codice ignoto)
+const statusLabels: Record<string, string> = {
+  imported: 'Importata',
+  enriched: 'Arricchita',
+  ready: 'Pronta',
+  doc_issued: 'Doc. emesso',
+  settled: 'Liquidata',
+  cancelled: 'Annullata',
 };
 
 const channelColors: Record<string, string> = {
@@ -37,7 +47,7 @@ const BookingsList = () => {
   const { lookups, getLabelByCodice } = useLookup();
 
   const getStatusLabel = (codice: string) =>
-    getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
+    statusLabels[codice] ?? getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
   const [searchParams, setSearchParams] = useSearchParams();
   const search = searchParams.get('q') ?? '';
   const statusFilter = searchParams.get('status') ?? 'all';

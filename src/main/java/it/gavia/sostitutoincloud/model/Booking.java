@@ -26,6 +26,13 @@ public class Booking {
     private String externalBookingId;
     private String guestName;
     private String guestTaxCode;
+    private LocalDate guestBirthDate;
+    private String guestSesso;
+    private String guestBirthPlace;
+    private String guestBirthBelfiore;
+    private String guestDocType;
+    private String guestDocNumber;
+    private String guestCountry;
     private LocalDate checkinDate;
     private LocalDate checkoutDate;
     private Integer nights;

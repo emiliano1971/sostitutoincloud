@@ -18,9 +18,19 @@ import java.util.Optional;
 @Repository
 public class BookingDAO {
 
+    // ID stato_prenotazione (evita magic numbers nel codice del workflow booking)
+    public static final int STATO_IMPORTED   = 1;
+    public static final int STATO_ENRICHED   = 2;
+    public static final int STATO_READY      = 3;
+    public static final int STATO_DOC_ISSUED = 4;
+    public static final int STATO_SETTLED    = 5;
+    public static final int STATO_CANCELLED  = 6;
+
     private static final String SELECT_ALL =
             "SELECT b.id, b.fk_tenant_id, b.fk_property_id, b.fk_owner_id, b.fk_canale_ota_id, b.fk_scenario_fiscale_id, " +
-            "b.external_booking_id, b.guest_name, b.guest_tax_code, b.checkin_date, b.checkout_date, " +
+            "b.external_booking_id, b.guest_name, b.guest_tax_code, " +
+            "b.guest_birth_date, b.guest_sesso, b.guest_birth_place, b.guest_birth_belfiore, " +
+            "b.guest_doc_type, b.guest_doc_number, b.guest_country, b.checkin_date, b.checkout_date, " +
             "b.nights, b.guests, b.gross_amount, b.ota_commission_amount, b.cleaning_amount, " +
             "b.pm_fee_amount, b.owner_net_amount, b.withholding_amount, b.aliquota_ritenuta, b.tourist_tax_amount, " +
             "b.tourist_tax_included_in_gross, b.tourist_tax_collection, b.fk_stato_prenotazione_id, " +
@@ -156,6 +166,21 @@ public class BookingDAO {
         String sql = "UPDATE booking SET fk_stato_prenotazione_id = ?, updated_at = NOW() WHERE id = ?";
         jdbcTemplate.update(sql, fkStatoPrenotazioneId, bookingId);
         log.info("BookingDAO.updateStato() - bookingId={} stato={}", bookingId, fkStatoPrenotazioneId);
+    }
+
+    /** Aggiorna i dati anagrafici dell'ospite. Restituisce il numero di righe modificate (0 se tenant non combacia). */
+    public int updateGuestAnagrafica(Integer bookingId, Integer tenantId, Booking g) {
+        String sql = "UPDATE booking SET guest_name = ?, guest_tax_code = ?, guest_birth_date = ?, " +
+                "guest_sesso = ?, guest_birth_place = ?, guest_birth_belfiore = ?, " +
+                "guest_doc_type = ?, guest_doc_number = ?, guest_country = ?, updated_at = NOW() " +
+                "WHERE id = ? AND fk_tenant_id = ?";
+        int updated = jdbcTemplate.update(sql,
+                g.getGuestName(), g.getGuestTaxCode(), g.getGuestBirthDate(),
+                g.getGuestSesso(), g.getGuestBirthPlace(), g.getGuestBirthBelfiore(),
+                g.getGuestDocType(), g.getGuestDocNumber(), g.getGuestCountry(),
+                bookingId, tenantId);
+        log.info("BookingDAO.updateGuestAnagrafica() - bookingId={} tenantId={} updated={}", bookingId, tenantId, updated);
+        return updated;
     }
 
     public Integer countByTenantIdAndStatoPrenotazioneId(Integer tenantId, Integer statoId) {

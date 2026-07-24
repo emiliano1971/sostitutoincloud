@@ -18,6 +18,7 @@ public class BookingImportPreviewRowDTO {
     private Integer rowNumber;
     private String externalBookingId;
     private String guestName;
+    private String guestTaxCode;   // CF ospite (calcolato o fornito), esposto in anteprima
     private String propertyCode;
     private String propertyName;
     private Integer fkPropertyId;   // id immobile risolto (per dialog contratto inline in preview)

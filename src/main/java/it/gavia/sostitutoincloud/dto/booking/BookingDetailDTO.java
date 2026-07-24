@@ -24,6 +24,13 @@ public class BookingDetailDTO {
     private String externalBookingId;
     private String guestName;
     private String guestTaxCode;
+    private java.time.LocalDate guestBirthDate;
+    private String guestSesso;
+    private String guestBirthPlace;
+    private String guestBirthBelfiore;
+    private String guestDocType;
+    private String guestDocNumber;
+    private String guestCountry;
     private String propertyName;
     private String ownerName;
     private String channelName;

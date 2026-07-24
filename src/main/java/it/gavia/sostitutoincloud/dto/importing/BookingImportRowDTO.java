@@ -15,6 +15,7 @@ import java.util.List;
 @AllArgsConstructor
 public class BookingImportRowDTO {
 
+    private Integer rowNumber;   // numero riga della preview (per conferma selettiva)
     private String externalBookingId;
     private String channelCode;
     private String propertyCode;

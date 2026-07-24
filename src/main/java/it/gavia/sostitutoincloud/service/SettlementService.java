@@ -350,6 +350,16 @@ public class SettlementService {
             throw new IllegalStateException("Settlement già pagato");
         }
         Settlement updated = settlementDAO.updateStato(settlementId, nuovoStato);
+
+        // Liquidazione pagata → i booking collegati avanzano a 'settled'.
+        if ("paid".equals(nuovoStato)) {
+            List<SettlementBooking> sb = settlementBookingDAO.findBySettlementId(settlementId);
+            for (SettlementBooking b : sb) {
+                bookingDAO.updateStato(b.getFkBookingId(), BookingDAO.STATO_SETTLED);
+            }
+            log.info("SettlementService: {} booking → settled per settlement {}", sb.size(), settlementId);
+        }
+
         OwnerProfile owner = ownerProfileDAO.findById(updated.getFkOwnerId()).orElse(null);
         int bookingsCount = settlementBookingDAO.findBySettlementId(updated.getId()).size();
         log.info("SettlementService.updateStatus() - tenantId={} settlementId={} stato={}",

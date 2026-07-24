@@ -62,6 +62,8 @@ public class BookingImportService {
     private final ImportSessionCache importSessionCache;
     private final AuditService auditService;
     private final ContrattoCalcolatoreService contrattoCalcolatore;
+    private final CodiceFiscaleService codiceFiscaleService;
+    private final BookingService bookingService;
 
     public BookingImportService(BookingDAO bookingDAO,
                                 PropertyDAO propertyDAO,
@@ -70,7 +72,9 @@ public class BookingImportService {
                                 StatoPrenotazioneDAO statoPrenotazioneDAO,
                                 ImportSessionCache importSessionCache,
                                 AuditService auditService,
-                                ContrattoCalcolatoreService contrattoCalcolatore) {
+                                ContrattoCalcolatoreService contrattoCalcolatore,
+                                CodiceFiscaleService codiceFiscaleService,
+                                BookingService bookingService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.canaleOtaDAO = canaleOtaDAO;
@@ -79,6 +83,8 @@ public class BookingImportService {
         this.importSessionCache = importSessionCache;
         this.auditService = auditService;
         this.contrattoCalcolatore = contrattoCalcolatore;
+        this.codiceFiscaleService = codiceFiscaleService;
+        this.bookingService = bookingService;
     }
 
     // ── campi di sistema import V2 ─────────────────────────────────────────
@@ -174,7 +180,14 @@ public class BookingImportService {
         List<BookingImportRowDTO> cached = importSessionCache.get(dto.getImportSessionId());
         if (cached == null) throw new RuntimeException("Sessione import non trovata o scaduta");
 
-        Set<String> selectedIds = Set.copyOf(dto.getSelectedExternalIds());
+        // Selezione: priorità a selectedRowNumbers; fallback a selectedExternalIds; se entrambi vuoti → tutto.
+        boolean byRows = dto.getSelectedRowNumbers() != null && !dto.getSelectedRowNumbers().isEmpty();
+        Set<Integer> selectedRowNums = byRows ? Set.copyOf(dto.getSelectedRowNumbers()) : Set.of();
+        boolean byIds = !byRows && dto.getSelectedExternalIds() != null && !dto.getSelectedExternalIds().isEmpty();
+        Set<String> selectedIds = byIds ? Set.copyOf(dto.getSelectedExternalIds()) : Set.of();
+        long selezionabili = byRows ? selectedRowNums.size() : (byIds ? selectedIds.size() : cached.size());
+        log.info("BookingImportService.confirm() - sessionId={} selectedRows={} totalRows={}",
+                dto.getImportSessionId(), selezionabili, cached.size());
         List<Property> properties = propertyDAO.findByTenantId(tenantId);
         Map<String, Property> propertyByCode = properties.stream()
                 .collect(Collectors.toMap(Property::getInternalCode, p -> p, (a, b) -> a));
@@ -194,7 +207,15 @@ public class BookingImportService {
         List<String> errorMessages = new ArrayList<>();
 
         for (BookingImportRowDTO row : cached) {
-            if (!selectedIds.contains(row.getExternalBookingId())) {
+            boolean selected;
+            if (byRows) {
+                selected = row.getRowNumber() != null && selectedRowNums.contains(row.getRowNumber());
+            } else if (byIds) {
+                selected = selectedIds.contains(row.getExternalBookingId());
+            } else {
+                selected = true; // nessun filtro → importa tutto
+            }
+            if (!selected) {
                 skipped++;
                 continue;
             }
@@ -257,7 +278,9 @@ public class BookingImportService {
                         .paymentStatus("pending")
                         .settlementStatus("pending")
                         .build();
-                bookingDAO.insert(booking);
+                Booking saved = bookingDAO.insert(booking);
+                // Avanzamento automatico dello stato in base ai dati disponibili (imported/enriched/ready)
+                bookingService.aggiornaStato(saved.getId());
                 imported++;
             } catch (Exception e) {
                 errors++;
@@ -513,13 +536,31 @@ public class BookingImportService {
             if (blank(numDocumento))  warnings.add("Documento identificativo mancante");
             if (nomeMancante)         warnings.add("Nome ospite mancante");
 
+            // Calcolo automatico del CF ospite se i dati anagrafici sono completi.
+            String cfCalcolato = null;
+            if (!blank(firstName) && !blank(lastName) && !blank(dataNascita)
+                    && !blank(comuneNascita) && guest != null && !blank(guest.getGender())) {
+                LocalDate nascita = null;
+                try { nascita = parseFlexibleDate(dataNascita); } catch (Exception ignore) { }
+                if (nascita != null) {
+                    Optional<String> cf = codiceFiscaleService.calcolaSafe(
+                            lastName, firstName, nascita, guest.getGender(), comuneNascita);
+                    if (cf.isPresent()) {
+                        cfCalcolato = cf.get();
+                        warnings.removeIf(w -> w.startsWith("CF non calcolabile"));
+                    }
+                }
+            }
+
             boolean duplicata = bookingDAO.findByExternalBookingId(externalId).isPresent();
 
             BookingImportRowDTO raw = BookingImportRowDTO.builder()
+                    .rowNumber(rowNum)
                     .externalBookingId(externalId)
                     .fkPropertyId(m.propertyId())
                     .fkCanaleOtaId(m.canaleId())
                     .guestName(guestName)
+                    .guestTaxCode(cfCalcolato)
                     .guestFirstName(firstName)
                     .guestLastName(lastName)
                     .guestBirthDate(guest != null ? guest.getBirthDate() : null)
@@ -544,6 +585,7 @@ public class BookingImportService {
                     .rowNumber(rowNum)
                     .externalBookingId(externalId)
                     .guestName(guestName)
+                    .guestTaxCode(cfCalcolato)
                     .propertyCode(struttura)
                     .propertyName(m.propertyName())
                     .fkPropertyId(m.propertyId())

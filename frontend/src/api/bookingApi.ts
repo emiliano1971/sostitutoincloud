@@ -1,4 +1,4 @@
-import { get, del } from '@/lib/apiClient';
+import { get, del, patch, post } from '@/lib/apiClient';
 
 export interface SplitEconomico {
   grossAmount: number;
@@ -60,6 +60,13 @@ export interface BookingDetail extends BookingListItem {
   fkPropertyId: number;
   fkOwnerId: number;
   guestTaxCode?: string;
+  guestBirthDate?: string;
+  guestSesso?: string;
+  guestBirthPlace?: string;
+  guestBirthBelfiore?: string;
+  guestDocType?: string;
+  guestDocNumber?: string;
+  guestCountry?: string;
   fiscalScenarioCode?: string;
   otaCommissionAmount?: number;
   cleaningAmount?: number;
@@ -117,4 +124,34 @@ export async function getBookingById(id: number): Promise<BookingDetail> {
 // Disponibile solo nei profili local e test (endpoint backend @Profile).
 export async function deleteBooking(id: number): Promise<void> {
   await del<unknown>(`/bookings/${id}`);
+}
+
+export interface GuestUpdateRequest {
+  guestName: string;
+  guestTaxCode?: string;
+  guestBirthDate?: string;
+  guestSesso?: string;
+  guestBirthPlace?: string;
+  guestBirthBelfiore?: string;
+  guestDocType?: string;
+  guestDocNumber?: string;
+  guestCountry?: string;
+}
+
+export async function updateBookingGuest(id: number, data: GuestUpdateRequest): Promise<BookingDetail> {
+  return patch<BookingDetail>(`/bookings/${id}/guest`, data);
+}
+
+/** Calcola il codice fiscale via backend; ritorna solo la stringa CF. */
+export async function calcolaCodiceFiscale(
+  cognome: string,
+  nome: string,
+  dataNascita: string,
+  sesso: string,
+  comuneNascita: string,
+): Promise<string> {
+  const res = await post<{ codiceFiscale: string }>('/cf/calcola', {
+    cognome, nome, dataNascita, sesso, comuneNascita,
+  });
+  return res.codiceFiscale;
 }

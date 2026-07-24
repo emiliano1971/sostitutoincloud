@@ -6,6 +6,7 @@ export interface ImportPreviewRow {
   rowNumber: number;
   externalBookingId: string;
   guestName: string;
+  guestTaxCode?: string;
   propertyCode: string;
   propertyName?: string;
   fkPropertyId?: number;
@@ -85,9 +86,9 @@ export async function uploadImportFile(file: File): Promise<ImportPreview> {
 
 export async function confirmImport(
   importSessionId: string,
-  selectedExternalIds: string[]
+  selectedRowNumbers: number[]
 ): Promise<ImportResult> {
-  return post<ImportResult>('/bookings/import/confirm', { importSessionId, selectedExternalIds });
+  return post<ImportResult>('/bookings/import/confirm', { importSessionId, selectedRowNumbers });
 }
 
 // ── Import V2: doppio file (prenotazioni + ospiti) + mapping colonne manuale ──

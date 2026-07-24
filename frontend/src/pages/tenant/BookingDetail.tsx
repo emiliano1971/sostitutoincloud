@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, FileText, Receipt, User, Home, Calendar, CreditCard, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, FileText, Receipt, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil } from 'lucide-react';
+import GuestEditDialog from '@/components/GuestEditDialog';
 import { getBookingById, type BookingDetail as BookingDetailType } from '@/api/bookingApi';
 import { generateDocument, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { Booking, OwnerProfile, Property } from '@/types';
@@ -76,6 +77,7 @@ const BookingDetail = () => {
   const { lookups, getLabelByCodice } = useLookup();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [guestEditOpen, setGuestEditOpen] = useState(false);
   const [booking, setBooking] = useState<BookingDetailType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -236,12 +238,33 @@ const BookingDetail = () => {
 
         <div className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="text-sm flex items-center gap-2"><User className="h-4 w-4" /> Ospite</CardTitle></CardHeader>
-            <CardContent>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-sm flex items-center gap-2"><User className="h-4 w-4" /> Ospite</CardTitle>
+              <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setGuestEditOpen(true)}>
+                <Pencil className="h-3.5 w-3.5" /> Modifica
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
               <p className="font-medium">{booking.guestName}</p>
-              {datiFatturazioneMancanti && (
-                <Badge variant="outline" className="mt-2 text-xs text-orange-600 border-orange-300">
+              {booking.guestTaxCode && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Codice fiscale</span><span className="font-mono">{booking.guestTaxCode}</span></div>
+              )}
+              {booking.guestBirthDate && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Data nascita</span><span>{booking.guestBirthDate}</span></div>
+              )}
+              {booking.guestBirthPlace && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Comune nascita</span><span>{booking.guestBirthPlace}</span></div>
+              )}
+              {(booking.guestDocType || booking.guestDocNumber) && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Documento</span><span>{[booking.guestDocType?.replace('_', ' '), booking.guestDocNumber].filter(Boolean).join(' · ')}</span></div>
+              )}
+              {datiFatturazioneMancanti ? (
+                <Badge variant="outline" className="mt-1 text-xs text-orange-600 border-orange-300">
                   Dati fatturazione: incompleti
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="mt-1 text-xs text-success border-success/40">
+                  Dati completi
                 </Badge>
               )}
             </CardContent>
@@ -338,6 +361,24 @@ const BookingDetail = () => {
           existingDoc={existingReceipt}
           isSaving={savingReceipt}
           onEmetti={() => handleEmetti('ricevuta_owner', setSavingReceipt, setGeneratedReceipt)}
+        />
+
+        <GuestEditDialog
+          bookingId={booking.id}
+          open={guestEditOpen}
+          onClose={() => setGuestEditOpen(false)}
+          guest={{
+            guestName: booking.guestName,
+            guestTaxCode: booking.guestTaxCode,
+            guestBirthDate: booking.guestBirthDate,
+            guestSesso: booking.guestSesso,
+            guestBirthPlace: booking.guestBirthPlace,
+            guestBirthBelfiore: booking.guestBirthBelfiore,
+            guestDocType: booking.guestDocType,
+            guestDocNumber: booking.guestDocNumber,
+            guestCountry: booking.guestCountry,
+          }}
+          onSaved={(updated) => setBooking(updated)}
         />
       </div>
     </div>

@@ -6,5 +6,5 @@ spring:
 
 app:
   storage:
-    base-path: /app/storage
-    pdf-path: /app/storage/pdf
+    base-path: /opt/sostitutoincloud/storage
+    pdf-path: /opt/sostitutoincloud/storage/pdf

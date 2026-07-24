@@ -13,4 +13,5 @@ public class BookingImportConfirmDTO {
 
     private String importSessionId;
     private List<String> selectedExternalIds;
+    private List<Integer> selectedRowNumbers;   // righe (# preview) da importare; precede selectedExternalIds
 }

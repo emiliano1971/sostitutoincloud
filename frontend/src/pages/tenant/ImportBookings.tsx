@@ -36,15 +36,16 @@ interface StepNavProps {
   onNext?: () => void;
   nextLabel?: string;
   nextDisabled?: boolean;
+  nextTitle?: string;
   loading?: boolean;
 }
 
 // Barra di navigazione dello step: renderizzata sia in cima che in fondo ad ogni step.
-const StepNav = ({ onBack, onNext, nextLabel = 'Avanti', nextDisabled, loading }: StepNavProps) => (
+const StepNav = ({ onBack, onNext, nextLabel = 'Avanti', nextDisabled, nextTitle, loading }: StepNavProps) => (
   <div className="flex gap-3 justify-end">
     {onBack && <Button variant="outline" onClick={onBack} disabled={loading}>Indietro</Button>}
     {onNext && (
-      <Button onClick={onNext} disabled={nextDisabled || loading} className="gap-2">
+      <Button onClick={onNext} disabled={nextDisabled || loading} className="gap-2" title={nextTitle}>
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         {nextLabel}
       </Button>
@@ -116,6 +117,7 @@ const ImportBookings = () => {
 
   // Step 2/3
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [isConfirming, setIsConfirming] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [contractDialogOpen, setContractDialogOpen] = useState(false);
@@ -233,6 +235,8 @@ const ImportBookings = () => {
         },
       });
       setPreview(prev);
+      // Pre-seleziona tutte le righe importabili (stato 'nuova')
+      setSelectedRows(new Set(prev.rows.filter(r => r.status === 'nuova').map(r => r.rowNumber)));
       setStep(2);
     } catch (err) {
       toast({ title: 'Errore anteprima', description: (err as Error).message, variant: 'destructive' });
@@ -241,12 +245,26 @@ const ImportBookings = () => {
     }
   };
 
+  const toggleRow = (rowNumber: number) => {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(rowNumber)) next.delete(rowNumber);
+      else next.add(rowNumber);
+      return next;
+    });
+  };
+
+  // Righe importabili (solo 'nuova') e stato "tutte selezionate"
+  const nuoveRows = preview?.rows.filter(r => r.status === 'nuova') ?? [];
+  const tutteLeNuoveSelezionate = nuoveRows.length > 0 && nuoveRows.every(r => selectedRows.has(r.rowNumber));
+  const selezionaTutte = () => setSelectedRows(new Set(nuoveRows.map(r => r.rowNumber)));
+  const deselezionaTutte = () => setSelectedRows(new Set());
+
   const handleConfirm = async () => {
     if (!preview) return;
-    const newIds = preview.rows.filter(r => r.status === 'nuova').map(r => r.externalBookingId);
     setIsConfirming(true);
     try {
-      const res = await confirmImport(preview.importSessionId, newIds);
+      const res = await confirmImport(preview.importSessionId, [...selectedRows]);
       setResult(res);
       setStep(4);
     } catch (err) {
@@ -517,17 +535,8 @@ const ImportBookings = () => {
         <div className="space-y-4">
           <StepNav onBack={() => setStep(0)} onNext={handlePreview} nextLabel="Genera Anteprima"
                    nextDisabled={!canPreview} loading={isPreviewing} />
-          <div className="flex flex-col md:flex-row gap-4">
-            {mappingCard('Mapping Prenotazioni', BOOKING_FIELDS, uploadResponse.bookingColumns, bookingMapping, setBookingMapping)}
-            {hasGuest && mappingCard('Mapping Ospiti', GUEST_FIELDS, uploadResponse.guestColumns ?? [], guestMapping, setGuestMapping)}
-          </div>
-          {!canPreview && (
-            <div className="flex items-center gap-2 text-warning text-sm">
-              <AlertTriangle className="h-4 w-4" /> Mappa tutti i campi obbligatori (*) per continuare.
-            </div>
-          )}
 
-          {/* Salva questo mapping come template */}
+          {/* Salva questo mapping come template — in cima, sempre visibile */}
           <Card>
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center gap-2">
@@ -552,6 +561,16 @@ const ImportBookings = () => {
             </CardContent>
           </Card>
 
+          <div className="flex flex-col md:flex-row gap-4">
+            {mappingCard('Mapping Prenotazioni', BOOKING_FIELDS, uploadResponse.bookingColumns, bookingMapping, setBookingMapping)}
+            {hasGuest && mappingCard('Mapping Ospiti', GUEST_FIELDS, uploadResponse.guestColumns ?? [], guestMapping, setGuestMapping)}
+          </div>
+          {!canPreview && (
+            <div className="flex items-center gap-2 text-warning text-sm">
+              <AlertTriangle className="h-4 w-4" /> Mappa tutti i campi obbligatori (*) per continuare.
+            </div>
+          )}
+
           <StepNav onBack={() => setStep(0)} onNext={handlePreview} nextLabel="Genera Anteprima"
                    nextDisabled={!canPreview} loading={isPreviewing} />
         </div>
@@ -561,8 +580,9 @@ const ImportBookings = () => {
       {step === 2 && preview && (
         <div className="space-y-4">
           <StepNav onBack={() => setStep(1)} onNext={() => setStep(3)}
-                   nextLabel={`Conferma Import (${preview.newCount} prenotazioni)`}
-                   nextDisabled={preview.newCount === 0} />
+                   nextLabel={`Conferma Import (${selectedRows.size} prenotazioni)`}
+                   nextDisabled={selectedRows.size === 0}
+                   nextTitle={selectedRows.size === 0 ? 'Seleziona almeno una prenotazione' : undefined} />
           <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -600,6 +620,13 @@ const ImportBookings = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={tutteLeNuoveSelezionate}
+                        onCheckedChange={(checked) => { if (checked) selezionaTutte(); else deselezionaTutte(); }}
+                        aria-label="Seleziona tutte"
+                      />
+                    </TableHead>
                     <TableHead>ID Prenotazione</TableHead>
                     <TableHead>#</TableHead>
                     <TableHead>Ospite</TableHead>
@@ -615,6 +642,15 @@ const ImportBookings = () => {
                 <TableBody>
                   {preview.rows.map(row => (
                     <TableRow key={row.rowNumber} className={row.status === 'errore' ? 'opacity-60' : ''}>
+                      <TableCell>
+                        {row.status === 'nuova'
+                          ? <Checkbox
+                              checked={selectedRows.has(row.rowNumber)}
+                              onCheckedChange={() => toggleRow(row.rowNumber)}
+                              aria-label={`Seleziona riga ${row.rowNumber}`}
+                            />
+                          : <Checkbox disabled checked={false} />}
+                      </TableCell>
                       <TableCell className="text-xs font-mono">
                         {row.externalBookingId && row.externalBookingId.length > 15
                           ? <span title={row.externalBookingId}>{row.externalBookingId.slice(0, 15)}…</span>
@@ -674,8 +710,9 @@ const ImportBookings = () => {
             </div>
 
             <StepNav onBack={() => setStep(1)} onNext={() => setStep(3)}
-                     nextLabel={`Conferma Import (${preview.newCount} prenotazioni)`}
-                     nextDisabled={preview.newCount === 0} />
+                     nextLabel={`Conferma Import (${selectedRows.size} prenotazioni)`}
+                     nextDisabled={selectedRows.size === 0}
+                     nextTitle={selectedRows.size === 0 ? 'Seleziona almeno una prenotazione' : undefined} />
           </CardContent>
           </Card>
         </div>
@@ -689,13 +726,13 @@ const ImportBookings = () => {
           <CardHeader><CardTitle className="text-base">Conferma Import</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm">
-              Stai per importare <strong>{preview.newCount} prenotazioni</strong>.
+              Stai per importare <strong>{selectedRows.size} prenotazioni</strong>.
               {preview.dupeCount > 0 && <> {preview.dupeCount} duplicate saranno ignorate.</>}
               {' '}Questa azione non può essere annullata.
             </p>
-            <StepNav onBack={() => setStep(2)} onNext={handleConfirm} nextLabel="Procedi" loading={isConfirming} />
           </CardContent>
           </Card>
+          <StepNav onBack={() => setStep(2)} onNext={handleConfirm} nextLabel="Procedi" loading={isConfirming} />
         </div>
       )}
 

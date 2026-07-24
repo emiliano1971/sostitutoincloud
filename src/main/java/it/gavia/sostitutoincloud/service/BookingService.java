@@ -17,6 +17,7 @@ import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
 import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
+import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.model.Booking;
@@ -64,6 +65,7 @@ public class BookingService {
     private final SettlementDAO settlementDAO;
     private final WithholdingLedgerDAO withholdingLedgerDAO;
     private final ContrattoCalcolatoreService contrattoCalcolatore;
+    private final CodiceFiscaleService codiceFiscaleService;
     private final AuditService auditService;
 
     public BookingService(BookingDAO bookingDAO,
@@ -80,6 +82,7 @@ public class BookingService {
                           SettlementDAO settlementDAO,
                           WithholdingLedgerDAO withholdingLedgerDAO,
                           ContrattoCalcolatoreService contrattoCalcolatore,
+                          CodiceFiscaleService codiceFiscaleService,
                           AuditService auditService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
@@ -95,6 +98,7 @@ public class BookingService {
         this.settlementDAO = settlementDAO;
         this.withholdingLedgerDAO = withholdingLedgerDAO;
         this.contrattoCalcolatore = contrattoCalcolatore;
+        this.codiceFiscaleService = codiceFiscaleService;
         this.auditService = auditService;
     }
 
@@ -121,6 +125,103 @@ public class BookingService {
                     LookupMaps maps = buildLookupMaps(tenantId);
                     return toDetailDTO(b, maps);
                 });
+    }
+
+    // ── workflow stato prenotazione ─────────────────────────────────────────
+
+    /**
+     * Determina lo stato corretto del booking dai dati disponibili, in ordine di priorità
+     * decrescente: cancelled > settled > doc_issued > ready > enriched > imported.
+     */
+    private int resolveStatoId(Booking booking) {
+        // 1. Cancellato manualmente: non retrocedere
+        if (booking.getFkStatoPrenotazioneId() != null
+                && booking.getFkStatoPrenotazioneId() == BookingDAO.STATO_CANCELLED) {
+            return BookingDAO.STATO_CANCELLED;
+        }
+        // 2. Liquidazione pagata
+        boolean settlementPagato = settlementBookingDAO.findSettlementIdByBookingId(booking.getId())
+                .flatMap(settlementDAO::findById)
+                .map(s -> "paid".equals(s.getStato()))
+                .orElse(false);
+        if (settlementPagato) return BookingDAO.STATO_SETTLED;
+        // 3. Documento fiscale emesso
+        if (!fiscalDocumentDAO.findByBookingId(booking.getId()).isEmpty()) {
+            return BookingDAO.STATO_DOC_ISSUED;
+        }
+        // 4. Split economico calcolato (provvigione PM presente e calcolo senza errori)
+        if (booking.getPmFeeAmount() != null && booking.getPmFeeAmount().signum() > 0) {
+            try {
+                contrattoCalcolatore.calcola(booking.getFkTenantId(), booking.getFkPropertyId(),
+                        booking.getFkCanaleOtaId(), booking.getGrossAmount(),
+                        booking.getOtaCommissionAmount(), booking.getNights(), booking.getGuests());
+                return BookingDAO.STATO_READY;
+            } catch (Exception e) {
+                log.debug("resolveStatoId - split non calcolabile per booking {}: {}", booking.getId(), e.getMessage());
+            }
+        }
+        // 5. CF ospite valorizzato
+        if (booking.getGuestTaxCode() != null && !booking.getGuestTaxCode().isBlank()) {
+            return BookingDAO.STATO_ENRICHED;
+        }
+        // 6. Solo importato
+        return BookingDAO.STATO_IMPORTED;
+    }
+
+    /** Ricalcola e persiste lo stato del booking in base ai dati correnti. */
+    public void aggiornaStato(Integer bookingId) {
+        Booking booking = bookingDAO.findById(bookingId)
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+        int statoId = resolveStatoId(booking);
+        bookingDAO.updateStato(bookingId, statoId);
+        log.info("BookingService.aggiornaStato() - bookingId={} → statoId={}", bookingId, statoId);
+    }
+
+    /** Aggiorna l'anagrafica ospite di un booking e ricalcola lo stato. */
+    public Optional<BookingDetailDTO> updateBookingGuest(Integer tenantId, Integer bookingId, GuestUpdateDTO dto) {
+        Booking existing = bookingDAO.findById(bookingId)
+                .filter(b -> tenantId.equals(b.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+
+        LocalDate birthDate = null;
+        if (dto.getGuestBirthDate() != null && !dto.getGuestBirthDate().isBlank()) {
+            birthDate = LocalDate.parse(dto.getGuestBirthDate().trim());
+        }
+
+        // CF: se non fornito, prova a calcolarlo dai dati anagrafici (come nel flusso import).
+        String taxCode = emptyToNull(dto.getGuestTaxCode());
+        String sesso = emptyToNull(dto.getGuestSesso());
+        String comune = emptyToNull(dto.getGuestBirthPlace());
+        if (comune == null) comune = emptyToNull(dto.getGuestBirthBelfiore());
+        if (taxCode == null && dto.getGuestName() != null && !dto.getGuestName().isBlank()
+                && birthDate != null && sesso != null && comune != null) {
+            String full = dto.getGuestName().trim();
+            int sp = full.indexOf(' ');
+            String cognome = sp < 0 ? full : full.substring(0, sp);
+            String nome = sp < 0 ? full : full.substring(sp + 1).trim();
+            taxCode = codiceFiscaleService.calcolaSafe(cognome, nome, birthDate, sesso, comune).orElse(null);
+        }
+
+        Booking g = Booking.builder()
+                .guestName(dto.getGuestName())
+                .guestTaxCode(taxCode)
+                .guestBirthDate(birthDate)
+                .guestSesso(emptyToNull(dto.getGuestSesso()))
+                .guestBirthPlace(emptyToNull(dto.getGuestBirthPlace()))
+                .guestBirthBelfiore(emptyToNull(dto.getGuestBirthBelfiore()))
+                .guestDocType(emptyToNull(dto.getGuestDocType()))
+                .guestDocNumber(emptyToNull(dto.getGuestDocNumber()))
+                .guestCountry(emptyToNull(dto.getGuestCountry()))
+                .build();
+
+        bookingDAO.updateGuestAnagrafica(existing.getId(), tenantId, g);
+        aggiornaStato(existing.getId());
+        log.info("BookingService.updateBookingGuest() - tenantId={} bookingId={}", tenantId, bookingId);
+        return findById(tenantId, bookingId);
+    }
+
+    private String emptyToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     /**
@@ -318,6 +419,13 @@ public class BookingService {
                 .externalBookingId(b.getExternalBookingId())
                 .guestName(b.getGuestName())
                 .guestTaxCode(b.getGuestTaxCode())
+                .guestBirthDate(b.getGuestBirthDate())
+                .guestSesso(b.getGuestSesso())
+                .guestBirthPlace(b.getGuestBirthPlace())
+                .guestBirthBelfiore(b.getGuestBirthBelfiore())
+                .guestDocType(b.getGuestDocType())
+                .guestDocNumber(b.getGuestDocNumber())
+                .guestCountry(b.getGuestCountry())
                 .propertyName(prop != null ? prop.getDisplayName() : null)
                 .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)

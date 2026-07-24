@@ -515,6 +515,14 @@ CREATE TABLE booking (
     external_booking_id             VARCHAR(100),           -- ID prenotazione sul canale OTA
     guest_name                      VARCHAR(150)            NOT NULL,
     guest_tax_code                  VARCHAR(20),            -- VARCHAR perché può essere codice fiscale estero
+    -- Anagrafica ospite (migration 007) per calcolo CF automatico e dati fatturazione
+    guest_birth_date                DATE,
+    guest_sesso                     CHAR(1),
+    guest_birth_place               VARCHAR(100),
+    guest_birth_belfiore            CHAR(4),
+    guest_doc_type                  VARCHAR(30),
+    guest_doc_number                VARCHAR(30),
+    guest_country                   VARCHAR(50),
     checkin_date                    DATE                    NOT NULL,
     checkout_date                   DATE                    NOT NULL,
     nights                          SMALLINT                NOT NULL,
@@ -1098,3 +1106,24 @@ CREATE TRIGGER import_template_updated_at
 CREATE INDEX IF NOT EXISTS
     idx_import_template_tenant
     ON import_template(fk_tenant_id);
+
+-- ============================================================
+-- COMUNE ITALIANO (migration 006)
+-- Elenco comuni italiani (fonte ISTAT, 7.894 comuni) con codice
+-- catastale Belfiore, usato per il calcolo automatico del codice fiscale.
+-- Seed: docs/db/seed-comuni.sql
+-- ============================================================
+CREATE TABLE IF NOT EXISTS comune_italiano (
+    id               SERIAL PRIMARY KEY,
+    nome             VARCHAR(150) NOT NULL,
+    sigla_provincia  CHAR(2)      NOT NULL,
+    regione          VARCHAR(100) NOT NULL,
+    codice_belfiore  CHAR(4)      NOT NULL UNIQUE,
+    created_at       TIMESTAMP    NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_comune_nome
+    ON comune_italiano (LOWER(nome), sigla_provincia);
+
+CREATE INDEX IF NOT EXISTS idx_comune_belfiore
+    ON comune_italiano (codice_belfiore);
