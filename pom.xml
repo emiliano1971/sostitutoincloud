@@ -132,6 +132,13 @@
             <version>5.2.5</version>
         </dependency>
 
+        <!-- ── PDF (compilazione AcroForm F24) ── -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
         <!-- ── Test ── -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -149,11 +156,22 @@
 
     <build>
 
-        <!-- Filtering abilitato su src/main/resources: sostituisce @property@ al momento della build -->
+        <!-- Filtering abilitato su src/main/resources: sostituisce @property@ al momento della build.
+             I template binari (PDF) sono esclusi dal filtering per non corromperli. -->
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
                 <filtering>true</filtering>
+                <excludes>
+                    <exclude>templates/**</exclude>
+                </excludes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <includes>
+                    <include>templates/**</include>
+                </includes>
             </resource>
         </resources>
 

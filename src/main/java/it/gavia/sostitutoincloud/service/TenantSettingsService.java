@@ -104,6 +104,22 @@ public class TenantSettingsService {
                         dto.getNaturaIvaEsente() != null
                                 ? dto.getNaturaIvaEsente()
                                 : existing.getNaturaIvaEsente())
+                .dataNascita(
+                        dto.getDataNascita() != null
+                                ? dto.getDataNascita()
+                                : existing.getDataNascita())
+                .sesso(
+                        dto.getSesso() != null
+                                ? dto.getSesso()
+                                : existing.getSesso())
+                .comuneNascita(
+                        dto.getComuneNascita() != null
+                                ? dto.getComuneNascita()
+                                : existing.getComuneNascita())
+                .provinciaNascita(
+                        dto.getProvinciaNascita() != null
+                                ? dto.getProvinciaNascita()
+                                : existing.getProvinciaNascita())
                 .sdiAutoSend(
                         dto.getSdiAutoSend() != null
                                 ? dto.getSdiAutoSend()
@@ -187,6 +203,10 @@ public class TenantSettingsService {
                 .bolloAddebitatoCliente(s.getBolloAddebitatoCliente())
                 .regimeFiscalePm(s.getRegimeFiscalePm())
                 .naturaIvaEsente(s.getNaturaIvaEsente())
+                .dataNascita(s.getDataNascita())
+                .sesso(s.getSesso())
+                .comuneNascita(s.getComuneNascita())
+                .provinciaNascita(s.getProvinciaNascita())
                 .sdiAutoSend(s.getSdiAutoSend())
                 .derogaRicevutaEnabled(s.getDerogaRicevutaEnabled())
                 .numerazioneAutomatica(s.getNumerazioneAutomatica())

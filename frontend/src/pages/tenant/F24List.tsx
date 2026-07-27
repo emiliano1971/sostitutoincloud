@@ -11,11 +11,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Eye, CheckCircle2, Loader2, AlertCircle, Plus, Info, X, RefreshCw, Filter } from 'lucide-react';
+import { Eye, CheckCircle2, Loader2, AlertCircle, Plus, Info, X, RefreshCw, Filter, Download } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import {
-  getF24List, generaF24, getF24Detail, marcaF24Pagato, ricalcolaF24,
+  getF24List, generaF24, getF24Detail, marcaF24Pagato, ricalcolaF24, downloadF24Pdf,
   type F24Record, type F24GenerazioneResult,
 } from '@/api/f24Api';
 
@@ -75,6 +75,20 @@ const F24List = () => {
 
   // Conferma pagamento
   const [pagatoTarget, setPagatoTarget] = useState<F24Record | null>(null);
+
+  // Download PDF
+  const [downloadingPdf, setDownloadingPdf] = useState<number | null>(null);
+
+  const handleDownloadPdf = async (id: number) => {
+    setDownloadingPdf(id);
+    try {
+      await downloadF24Pdf(id);
+    } catch (err) {
+      toast({ title: 'Errore generazione PDF', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setDownloadingPdf(null);
+    }
+  };
 
   const reload = () => {
     setIsLoading(true);
@@ -234,6 +248,14 @@ const F24List = () => {
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Dettaglio" onClick={() => openDettaglio(f.id)}>
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
+                        {f.stato !== 'draft' && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Scarica PDF"
+                                  disabled={downloadingPdf === f.id} onClick={() => handleDownloadPdf(f.id)}>
+                            {downloadingPdf === f.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Download className="h-3.5 w-3.5" />}
+                          </Button>
+                        )}
                         {f.stato !== 'paid' && (
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="Aggiungi ritenute non incluse" onClick={() => handleRicalcola(f.id)}>
                             <RefreshCw className="h-3.5 w-3.5" />

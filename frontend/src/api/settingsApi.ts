@@ -22,6 +22,11 @@ export interface TenantSettingsDTO {
   bolloAddebitatoCliente: boolean;
   regimeFiscalePm: string;
   naturaIvaEsente: string;
+  // dati anagrafici di nascita PM (per F24)
+  dataNascita?: string;
+  sesso?: string;
+  comuneNascita?: string;
+  provinciaNascita?: string;
   // policy documentali
   sdiAutoSend: boolean;
   derogaRicevutaEnabled: boolean;

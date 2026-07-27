@@ -37,6 +37,12 @@ public class TenantSettingsDTO {
     private String regimeFiscalePm;
     private String naturaIvaEsente;
 
+    // Dati anagrafici di nascita PM (per F24)
+    private java.time.LocalDate dataNascita;
+    private String sesso;
+    private String comuneNascita;
+    private String provinciaNascita;
+
     // Policy documentali
     private Boolean sdiAutoSend;
     private Boolean derogaRicevutaEnabled;

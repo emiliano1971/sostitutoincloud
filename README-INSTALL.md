@@ -90,3 +90,17 @@ mvn -Plocal clean package
   (profilo local/test/prod)
 - I log si trovano in `logs/` nella root del progetto
 - Per il profilo test usare `mvn -Ptest clean package`
+
+## Deploy su Coolify
+
+### Template PDF
+Copiare i template PDF nella directory storage del container:
+```
+/opt/sostitutoincloud/storage/templates/
+└── f24-semplificato-acroform.pdf
+```
+
+Se la directory non esiste o il file non è presente, il sistema usa il
+template incluso nel WAR come fallback.
+Per aggiornare il template F24 (es. nuova versione AdE) sostituire il file
+nella directory senza necessità di rebuild.

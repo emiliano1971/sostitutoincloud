@@ -8,3 +8,4 @@ app:
   storage:
     base-path: /opt/sostitutoincloud/storage
     pdf-path: /opt/sostitutoincloud/storage/pdf
+    templates-path: /opt/sostitutoincloud/storage/templates

@@ -230,6 +230,34 @@ const TenantSettings = () => {
                 </div>
               </div>
 
+              {/* Sezione Dati anagrafici PM (per F24) */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold mb-3">Dati anagrafici PM (per F24)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Data di nascita</Label>
+                    <Input type="date" defaultValue={settings.dataNascita ?? ''} id="pmDataNascita" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Sesso</Label>
+                    <select id="pmSesso" defaultValue={settings.sesso ?? ''}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                      <option value=""></option>
+                      <option value="M">M</option>
+                      <option value="F">F</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Comune di nascita</Label>
+                    <Input defaultValue={settings.comuneNascita ?? ''} id="pmComuneNascita" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Provincia di nascita (sigla)</Label>
+                    <Input defaultValue={settings.provinciaNascita ?? ''} id="pmProvinciaNascita" maxLength={2} className="uppercase" />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex justify-end">
                 <Button disabled={saving} onClick={() => {
                   handleSave({
@@ -243,6 +271,10 @@ const TenantSettings = () => {
                     bolloAddebitatoCliente: (document.getElementById('bolloAddebitatoCliente') as HTMLButtonElement).getAttribute('data-state') === 'checked',
                     regimeFiscalePm: (document.getElementById('regimeFiscalePm') as HTMLSelectElement).value,
                     naturaIvaEsente: (document.getElementById('naturaIvaEsente') as HTMLSelectElement).value,
+                    dataNascita: (document.getElementById('pmDataNascita') as HTMLInputElement).value || undefined,
+                    sesso: (document.getElementById('pmSesso') as HTMLSelectElement).value || undefined,
+                    comuneNascita: (document.getElementById('pmComuneNascita') as HTMLInputElement).value || undefined,
+                    provinciaNascita: ((document.getElementById('pmProvinciaNascita') as HTMLInputElement).value || '').toUpperCase() || undefined,
                   });
                 }}>
                   {saving ? 'Salvataggio...' : 'Salva Parametri'}

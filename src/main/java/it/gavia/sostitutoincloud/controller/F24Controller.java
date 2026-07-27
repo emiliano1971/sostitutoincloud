@@ -3,14 +3,18 @@ package it.gavia.sostitutoincloud.controller;
 import it.gavia.sostitutoincloud.dto.fiscal.F24GeneraRequestDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.F24GenerazioneResultDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.F24RecordDTO;
+import it.gavia.sostitutoincloud.service.F24PdfService;
 import it.gavia.sostitutoincloud.service.F24Service;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/api/f24")
@@ -18,9 +22,11 @@ import java.util.List;
 public class F24Controller {
 
     private final F24Service f24Service;
+    private final F24PdfService f24PdfService;
 
-    public F24Controller(F24Service f24Service) {
+    public F24Controller(F24Service f24Service, F24PdfService f24PdfService) {
         this.f24Service = f24Service;
+        this.f24PdfService = f24PdfService;
     }
 
     @GetMapping
@@ -42,6 +48,26 @@ public class F24Controller {
     public ResponseEntity<F24GenerazioneResultDTO> findById(@PathVariable Integer id) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         return ResponseEntity.ok(f24Service.findDettaglio(tenantId, id));
+    }
+
+    @GetMapping("/{id}/pdf")
+    public ResponseEntity<?> pdf(@PathVariable Integer id) {
+        log.info("F24Controller.pdf() - id={}", id);
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            byte[] pdf = f24PdfService.generaPdf(tenantId, id);
+            var det = f24Service.findDettaglio(tenantId, id);
+            String periodo = String.format("%02d_%d", det.getPeriodoMese(), det.getPeriodoAnno());
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"F24_" + periodo + ".pdf\"")
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .body(pdf);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(java.util.Map.of("error", e.getMessage()));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
     }
 
     @PatchMapping("/{id}/pagato")

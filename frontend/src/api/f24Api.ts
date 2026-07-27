@@ -1,4 +1,5 @@
-import { get, post, patch } from '@/lib/apiClient';
+import { get, post, patch, getToken } from '@/lib/apiClient';
+import { getConfig } from '@/config/AppConfig';
 
 export interface F24Record {
   id: number;
@@ -53,4 +54,35 @@ export async function marcaF24Pagato(id: number): Promise<F24Record> {
 
 export async function ricalcolaF24(id: number): Promise<F24GenerazioneResult> {
   return patch<F24GenerazioneResult>(`/f24/${id}/ricalcola`, {});
+}
+
+/** Scarica il PDF del modello F24 nel browser. */
+export async function downloadF24Pdf(id: number): Promise<void> {
+  const base = getConfig().apiBaseUrl;
+  const token = getToken();
+  const res = await fetch(`${base}/f24/${id}/pdf`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      msg = j.error || j.message || msg;
+    } catch { /* body non JSON */ }
+    throw new Error(msg);
+  }
+  // nome file dal Content-Disposition, fallback F24_{id}.pdf
+  const cd = res.headers.get('Content-Disposition') ?? '';
+  const match = cd.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : `F24_${id}.pdf`;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
