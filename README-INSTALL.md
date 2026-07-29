@@ -40,12 +40,17 @@ export JAVA_OPTS="-Xms512m -Xmx1024m"
 ```
 
 ## 4. Configura il database
-Copia e adatta il file properties:
+Copia `.env.example` in `.env` e adatta le credenziali DB:
 ```bash
-cp src/main/resources/db-local.properties.example \
-   src/main/resources/db-local.properties
-# Modifica le credenziali se necessario
+cp .env.example .env
+# Modifica DB_URL / DB_USERNAME / DB_PASSWORD se necessario
 ```
+
+> Il file `.env` non va committato nel repo (è in `.gitignore`).
+> Ogni sviluppatore mantiene il proprio `.env` locale.
+> Le credenziali sono lette da `src/main/resources/db.properties`
+> (placeholder `${DB_*:default}`) risolti a runtime da Spring: prima dal
+> `.env` (spring-dotenv) / variabili d'ambiente, poi dai default.
 
 ## 4b. Adatta la configurazione al tuo ambiente
 
@@ -55,10 +60,10 @@ Verifica/modifica:
 - `app.cors.allowed-origins`
 - `app.base-url`
 
-### Backend — db-local.properties
+### Backend — .env (credenziali DB)
 Verifica/modifica:
-- `db.url` — host, porta e nome DB
-- `db.username` e `db.password`
+- `DB_URL` — host, porta e nome DB
+- `DB_USERNAME` e `DB_PASSWORD`
 
 ### Frontend — frontend/public/config.local.json
 Verifica/modifica:

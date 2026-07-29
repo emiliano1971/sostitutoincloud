@@ -24,7 +24,6 @@
         </condition>
 
         <echo message="[my-build] Deploy ambiente: ${deploy.env}"/>
-        <echo message="[my-build] DB properties:   ${db.properties.source}"/>
 
         <!-- ── 1. Cancella e ricrea WEB-INF/classes/ ── -->
         <delete dir="${project.basedir}/WEB-INF/classes" quiet="true"/>
@@ -39,12 +38,11 @@
 
         <!--
             ── 3. Copia risorse da src/main/resources/ → WEB-INF/classes/ ──
-            Esclude i file ambiente-specifici (db-*.properties) gestiti al passo 6.
+            Include db.properties (file unico con placeholder ${DB_*:default} risolti a runtime da Spring).
             Esclude i file log4j2*.xml gestiti al passo 7 (serve la versione filtrata).
         -->
         <copy todir="${project.basedir}/WEB-INF/classes" overwrite="true">
             <fileset dir="${project.basedir}/src/main/resources">
-                <exclude name="db-*.properties"/>
                 <exclude name="log4j2*.xml"/>
             </fileset>
         </copy>
@@ -65,12 +63,9 @@
               overwrite="true"/>
 
         <!--
-            ── 6. Copia il file DB properties per ambiente → WEB-INF/classes/db.properties ──
-            Il nome del file sorgente è determinato dalla proprietà db.properties.source.
+            ── 6. (rimosso) db.properties è ora un file unico, copiato dal passo 3.
+                 Le credenziali sono risolte a runtime da Spring (${DB_*} da .env / env / default).
         -->
-        <copy tofile="${project.basedir}/WEB-INF/classes/db.properties"
-              file="${project.basedir}/src/main/resources/${db.properties.source}"
-              overwrite="true"/>
 
         <!--
             ── 7. Copia il file Log4j2 filtrato → WEB-INF/classes/log4j2.xml ──

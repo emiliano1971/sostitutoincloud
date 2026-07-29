@@ -266,45 +266,59 @@ senza generare un WAR da deployare separatamente.
 | `project.build.directory` | cartella `target/` |
 | `project.build.outputDirectory` | cartella `target/classes/` |
 | `deploy.env` | profilo attivo (local, test, prod) |
-| `db.properties.source` | file properties DB per ambiente |
 | `log4j.source` | file Log4j2 per ambiente |
 
 ### Cosa fa my-build.xml
 1. Cancella e ricrea `WEB-INF/classes/`
 2. Copia le classi compilate da `target/classes/` → `WEB-INF/classes/`
-3. Copia le risorse da `src/main/resources/` → `WEB-INF/classes/`
+3. Copia le risorse da `src/main/resources/` → `WEB-INF/classes/` (incluso `db.properties`, file unico)
 4. Pulisce e ricopia i JAR da `target/lib/` → `WEB-INF/lib/`
 5. Copia `web.xml` da `src/main/webapp/WEB-INF/`
-6. Copia il file DB properties per ambiente → `WEB-INF/classes/db.properties`
-7. Copia il file Log4j2 per ambiente → `WEB-INF/classes/log4j2.xml`
+6. Copia il file Log4j2 per ambiente → `WEB-INF/classes/log4j2.xml`
 
 ### Properties in testa al pom.xml
 ```xml
 <properties>
     <spring.profiles.active>local</spring.profiles.active>
     <deploy.env>${spring.profiles.active}</deploy.env>
-    <db.properties.source>db-local.properties</db.properties.source>
     <log4j.source>log4j2.xml</log4j.source>
 </properties>
 ```
 - `spring.profiles.active` è il valore master — cambiando solo questo si propaga a `deploy.env`
-- `db.properties.source` va aggiornato per ogni profilo (db-local, db-test, db-prod)
 - `log4j.source` è **fisso** `log4j2.xml` — un solo file Log4j2 che gestisce i livelli internamente
+- Le credenziali DB NON sono più per-profilo: unico `db.properties` con placeholder `${DB_*:default}` (vedi sezione "Credenziali DB" sotto)
 
-### Struttura file per ambiente in src/main/resources/
+### Struttura file in src/main/resources/
 ```
 src/main/resources/
-├── db-local.properties
-├── db-test.properties
-├── db-prod.properties
+├── db.properties           ← file UNICO, placeholder ${DB_*:default} risolti a runtime
 └── log4j2.xml              ← file unico, gestisce i livelli per profilo internamente
 ```
+
+### Credenziali DB — .env + db.properties unico (dal 2026-07)
+- Un solo `src/main/resources/db.properties` con placeholder:
+  ```properties
+  db.url=${DB_URL:jdbc:postgresql://localhost:5432/sostitutoincloud}
+  db.username=${DB_USERNAME:sostitutoincloud}
+  db.password=${DB_PASSWORD:postgres}
+  ```
+- Le variabili sono lette da un file **`.env`** nella root (dipendenza `me.paulschwarz:spring-dotenv`)
+  e messe nell'Environment di Spring **prima** dei `.properties`; se assenti valgono i default.
+- `.env` è in `.gitignore`; `.env.example` è committato come template.
+- `DataSourceConfig` usa `@PropertySource("classpath:db.properties")` + `@Value("${db.url}")` ecc.
+- **NB Tomcat**: avviando con `catalina` la CWD è `bin/`, quindi spring-dotenv NON legge il `.env`
+  della root del progetto → valgono i **default** di `db.properties` (per questo il default password
+  è `postgres`, il valore reale locale). Il `.env` in root serve a `mvn spring-boot:run` e al dev server Vite.
+- Il filtering Maven NON tocca i `${...}` perché spring-boot-parent usa il delimitatore `@`.
+<!-- STORICO (SUPERATO): in precedenza esistevano db-local/test/prod.properties selezionati
+     per profilo via la property Maven `db.properties.source` e copiati da my-build.xml (step 6).
+     Sostituiti dal file unico db.properties + .env. -->
 
 ### Strategia profili — build e runtime
 La configurazione è divisa in due livelli:
 
 **Build time (Maven `-Plocal/-Ptest/-Pprod`)**
-- Determina `log.level`, `db.properties.source`, `deploy.env`
+- Determina `log.level`, `deploy.env`
 - Maven filtering scrive i valori nei file di configurazione al momento della compilazione
 - Abilitare filtering delle risorse nel pom.xml:
   ```xml
@@ -322,7 +336,6 @@ La configurazione è divisa in due livelli:
       <properties>
           <spring.profiles.active>local</spring.profiles.active>
           <deploy.env>local</deploy.env>
-          <db.properties.source>db-local.properties</db.properties.source>
           <log4j.source>log4j2.xml</log4j.source>
           <log.level>DEBUG</log.level>
       </properties>
@@ -332,7 +345,6 @@ La configurazione è divisa in due livelli:
       <properties>
           <spring.profiles.active>test</spring.profiles.active>
           <deploy.env>test</deploy.env>
-          <db.properties.source>db-test.properties</db.properties.source>
           <log4j.source>log4j2.xml</log4j.source>
           <log.level>INFO</log.level>
       </properties>
@@ -342,7 +354,6 @@ La configurazione è divisa in due livelli:
       <properties>
           <spring.profiles.active>prod</spring.profiles.active>
           <deploy.env>prod</deploy.env>
-          <db.properties.source>db-prod.properties</db.properties.source>
           <log4j.source>log4j2.xml</log4j.source>
           <log.level>INFO</log.level>
       </properties>
@@ -386,7 +397,7 @@ La configurazione è divisa in due livelli:
 - Per aggiungere origini CORS future modificare solo i file yml, non il codice
 - NON generare logica di deploy diversa da questa — è intenzionale e collaudata
 - Il file `my-build.xml` deve stare nella root del progetto accanto al `pom.xml`
-- I profili Maven devono definire `log.level`, `db.properties.source` e `log4j.source`
+- I profili Maven devono definire `log.level` e `log4j.source` (le credenziali DB NON sono per-profilo: unico `db.properties` + `.env`)
 - NON usare `maven-war-plugin` per il deploy — il deploy avviene tramite Ant
 - La cartella `WEB-INF/` è nella root del progetto (dentro webapps di Tomcat),
   NON dentro `src/main/webapp/`

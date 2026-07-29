@@ -10,10 +10,12 @@ import { ArrowLeft, Building2, Hash, Globe, Save, Loader2 } from 'lucide-react';
 import { getOwners, type OwnerListItem } from '@/api/ownerApi';
 import { createProperty } from '@/api/propertyApi';
 import { useToast } from '@/hooks/use-toast';
+import { useLookup } from '@/contexts/LookupContext';
 
 const PropertyCreate = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { lookups } = useLookup();
   const [tenantOwners, setTenantOwners] = useState<OwnerListItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [ownerError, setOwnerError] = useState(false);
@@ -32,14 +34,13 @@ const PropertyCreate = () => {
     property_type: 'LT',
     cin_code: '',
     owner_id: '',
-    airbnb_id: '',
-    booking_id: '',
-    vrbo_id: '',
-    tripadvisor_id: '',
-    expedia_id: '',
   });
 
+  // Codici OTA per canale: { [codiceCanale]: externalId }
+  const [otaCodes, setOtaCodes] = useState<Record<string, string>>({});
+
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
+  const updateOta = (codice: string, value: string) => setOtaCodes(prev => ({ ...prev, [codice]: value }));
 
   const handleSave = async () => {
     if (!form.display_name || !form.internal_code || !form.city) {
@@ -53,13 +54,9 @@ const PropertyCreate = () => {
       ownerFieldRef.current?.querySelector('button')?.focus();
       return;
     }
-    const otaCodes = [
-      { canaleCodiceName: 'airbnb',       externalId: form.airbnb_id },
-      { canaleCodiceName: 'booking',      externalId: form.booking_id },
-      { canaleCodiceName: 'vrbo',         externalId: form.vrbo_id },
-      { canaleCodiceName: 'tripadvisor',  externalId: form.tripadvisor_id },
-      { canaleCodiceName: 'expedia',      externalId: form.expedia_id },
-    ].filter(o => o.externalId.trim() !== '');
+    const otaCodesList = Object.entries(otaCodes)
+      .filter(([, v]) => v.trim() !== '')
+      .map(([k, v]) => ({ canaleCodiceName: k, externalId: v }));
     setIsSaving(true);
     try {
       await createProperty({
@@ -71,7 +68,7 @@ const PropertyCreate = () => {
         region:       form.region || undefined,
         cinCode:      form.cin_code || undefined,
         fkOwnerId:    form.owner_id ? Number(form.owner_id) : undefined,
-        otaCodes:     otaCodes.length > 0 ? otaCodes : undefined,
+        otaCodes:     otaCodesList.length > 0 ? otaCodesList : undefined,
       });
       toast({ title: 'Immobile creato', description: `${form.display_name} è stato creato con successo.` });
       navigate('/properties');
@@ -166,26 +163,17 @@ const PropertyCreate = () => {
             <CardContent className="space-y-4">
               <p className="text-xs text-muted-foreground">Inserisci gli ID delle piattaforme OTA per associare automaticamente le prenotazioni importate a questo immobile.</p>
               <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Airbnb Listing ID</Label>
-                  <Input value={form.airbnb_id} onChange={e => update('airbnb_id', e.target.value)} placeholder="es. 12345678" className="font-mono text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Booking.com Property ID</Label>
-                  <Input value={form.booking_id} onChange={e => update('booking_id', e.target.value)} placeholder="es. 9876543" className="font-mono text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Vrbo Property ID</Label>
-                  <Input value={form.vrbo_id} onChange={e => update('vrbo_id', e.target.value)} placeholder="es. VR-001122" className="font-mono text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">TripAdvisor ID</Label>
-                  <Input value={form.tripadvisor_id} onChange={e => update('tripadvisor_id', e.target.value)} placeholder="es. TP-887766" className="font-mono text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Expedia Property ID</Label>
-                  <Input value={form.expedia_id} onChange={e => update('expedia_id', e.target.value)} placeholder="es. EX-556677" className="font-mono text-sm" />
-                </div>
+                {lookups?.canaliOta.filter(c => c.attivo).map(canale => (
+                  <div key={canale.codice} className="space-y-1">
+                    <Label className="text-xs">{canale.descrizione}</Label>
+                    <Input
+                      value={otaCodes[canale.codice] ?? ''}
+                      onChange={e => updateOta(canale.codice, e.target.value)}
+                      placeholder={`es. ID_${canale.codice}`}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>

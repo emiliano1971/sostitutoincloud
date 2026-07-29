@@ -27,7 +27,6 @@
         <java.version>17</java.version>
         <spring.profiles.active>local</spring.profiles.active>
         <deploy.env>${spring.profiles.active}</deploy.env>
-        <db.properties.source>db-local.properties</db.properties.source>
         <log4j.source>log4j2.xml</log4j.source>
         <log.level>DEBUG</log.level>
         <console.threshold>ALL</console.threshold>
@@ -137,6 +136,13 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>3.0.3</version>
+        </dependency>
+
+        <!-- ── .env → Spring Environment (credenziali DB) ── -->
+        <dependency>
+            <groupId>me.paulschwarz</groupId>
+            <artifactId>spring-dotenv</artifactId>
+            <version>4.0.0</version>
         </dependency>
 
         <!-- ── Test ── -->
@@ -268,8 +274,6 @@
                                               value="${project.build.outputDirectory}"/>
                                     <property name="deploy.env"
                                               value="${deploy.env}"/>
-                                    <property name="db.properties.source"
-                                              value="${db.properties.source}"/>
                                     <property name="log4j.source"
                                               value="${log4j.source}"/>
                                 </ant>
@@ -293,7 +297,6 @@
             <properties>
                 <spring.profiles.active>local</spring.profiles.active>
                 <deploy.env>local</deploy.env>
-                <db.properties.source>db-local.properties</db.properties.source>
                 <log4j.source>log4j2.xml</log4j.source>
                 <log.level>DEBUG</log.level>
                 <console.threshold>ALL</console.threshold>
@@ -309,7 +312,6 @@
             <properties>
                 <spring.profiles.active>test</spring.profiles.active>
                 <deploy.env>test</deploy.env>
-                <db.properties.source>db-test.properties</db.properties.source>
                 <log4j.source>log4j2.xml</log4j.source>
                 <log.level>INFO</log.level>
                 <console.threshold>OFF</console.threshold>
@@ -456,7 +458,6 @@
             <properties>
                 <spring.profiles.active>prod</spring.profiles.active>
                 <deploy.env>prod</deploy.env>
-                <db.properties.source>db-prod.properties</db.properties.source>
                 <log4j.source>log4j2.xml</log4j.source>
                 <log.level>INFO</log.level>
                 <console.threshold>OFF</console.threshold>

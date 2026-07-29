@@ -1,4 +1,4 @@
 {
-  "apiBaseUrl": "https://prodpms.siv.cloud.it:8443/sostitutoincloud/api",
+  "apiBaseUrl": "/sostitutoincloud/api",
   "environment": "prod"
 }
