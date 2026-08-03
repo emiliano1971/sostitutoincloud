@@ -2,14 +2,17 @@ package it.gavia.sostitutoincloud.controller;
 
 import it.gavia.sostitutoincloud.dto.cf.CfCalcolaRequestDTO;
 import it.gavia.sostitutoincloud.service.CodiceFiscaleService;
+import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Year;
 import java.util.Map;
 
 /**
@@ -36,5 +39,14 @@ public class CfController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    @GetMapping("/estero")
+    public ResponseEntity<?> estero() {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        int anno = Year.now().getValue();
+        String cf = codiceFiscaleService.generaCfEstero(tenantId, anno);
+        log.info("CfController.estero() - tenantId={} cf={}", tenantId, cf);
+        return ResponseEntity.ok(Map.of("cf", cf));
     }
 }

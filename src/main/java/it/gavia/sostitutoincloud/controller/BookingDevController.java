@@ -41,6 +41,10 @@ public class BookingDevController {
             return ResponseEntity.ok(Map.of("message", "Booking eliminato", "id", id));
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+        } catch (IllegalStateException e) {
+            // 422: cancellazione bloccata (es. booking con documenti fiscali emessi).
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(Map.of("error", e.getMessage(), "message", e.getMessage()));
         } catch (Exception e) {
             log.error("BookingDevController.delete() - errore id={}: {}", id, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -66,6 +66,7 @@ public class BookingService {
     private final WithholdingLedgerDAO withholdingLedgerDAO;
     private final ContrattoCalcolatoreService contrattoCalcolatore;
     private final CodiceFiscaleService codiceFiscaleService;
+    private final TouristTaxService touristTaxService;
     private final AuditService auditService;
 
     public BookingService(BookingDAO bookingDAO,
@@ -83,6 +84,7 @@ public class BookingService {
                           WithholdingLedgerDAO withholdingLedgerDAO,
                           ContrattoCalcolatoreService contrattoCalcolatore,
                           CodiceFiscaleService codiceFiscaleService,
+                          TouristTaxService touristTaxService,
                           AuditService auditService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
@@ -99,6 +101,7 @@ public class BookingService {
         this.withholdingLedgerDAO = withholdingLedgerDAO;
         this.contrattoCalcolatore = contrattoCalcolatore;
         this.codiceFiscaleService = codiceFiscaleService;
+        this.touristTaxService = touristTaxService;
         this.auditService = auditService;
     }
 
@@ -234,6 +237,13 @@ public class BookingService {
         Booking booking = bookingDAO.findById(bookingId)
                 .filter(b -> tenantId.equals(b.getFkTenantId()))
                 .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+
+        // Blocca la cancellazione se esistono documenti fiscali emessi, PRIMA di toccare qualsiasi dato.
+        int docCount = fiscalDocumentDAO.countByBookingId(booking.getId());
+        if (docCount > 0) {
+            throw new IllegalStateException("Impossibile eliminare: il booking ha " + docCount
+                    + " documento/i fiscale/i emesso/i. Eliminare prima i documenti dal DB.");
+        }
 
         settlementBookingDAO.deleteByBookingId(booking.getId());
         withholdingLedgerDAO.deleteByBookingId(booking.getId());
@@ -392,6 +402,22 @@ public class BookingService {
                 b.getOtaCommissionAmount(),
                 b.getNights(),
                 b.getGuests());
+
+        // Ricalcolo tassa di soggiorno per booking importati senza tassa (comune con regola attiva).
+        if (safeVal(b.getTouristTaxAmount()).signum() == 0
+                && !Boolean.TRUE.equals(b.getTouristTaxIncludedInGross())) {
+            BigDecimal tassa = touristTaxService.calcolaPerBooking(
+                    b.getFkTenantId(),
+                    prop != null ? prop.getCity() : null,
+                    b.getCheckinDate(),
+                    b.getNights(),
+                    b.getGuests(),
+                    b.getTouristTaxIncludedInGross());
+            if (tassa != null && tassa.signum() > 0) {
+                bookingDAO.updateTouristTax(b.getId(), tassa);
+                b.setTouristTaxAmount(tassa);
+            }
+        }
 
         SplitEconomicoDTO split = SplitEconomicoDTO.builder()
                 .grossAmount(b.getGrossAmount())

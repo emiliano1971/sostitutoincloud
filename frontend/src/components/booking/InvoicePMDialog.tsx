@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FileText, Printer, Send } from 'lucide-react';
+import { FileText, Printer, Send, Download } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { aggiornaStatoDocumento, type DocumentGenerateResponse } from '@/api/documentApi';
@@ -84,13 +84,56 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
     ? generatedDoc.importoTotale
     : otaLordo + cleaningLordo + pmLordo;
 
+  // Semantica bottoni in base allo stato: 'doc_issued' = documenti già emessi (solo stampa/download),
+  // altrimenti emissione (azione irreversibile).
+  const isDocIssued = booking.booking_status === 'doc_issued';
+
+  // Stampa in una finestra dedicata: window.print() sul dialog Radix (portal) stampa l'intera app.
+  const handlePrint = () => {
+    const content = document.getElementById('print-document-content')?.innerHTML;
+    if (!content) return;
+    const styles = Array.from(document.styleSheets)
+      .map(s => {
+        try { return Array.from(s.cssRules).map(r => r.cssText).join('\n'); }
+        catch { return ''; }
+      }).join('\n');
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Documento</title>
+          <style>${styles}</style>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 12px; margin: 20px; color: #000; }
+            * { box-sizing: border-box; }
+          </style>
+        </head>
+        <body>${content}</body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    printWindow.close();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button className="w-full sm:w-auto gap-2">
-          <FileText className="h-4 w-4" />
-          Stampa Fattura P.M.
-        </Button>
+        {isDocIssued ? (
+          <Button variant="outline" className="w-full sm:w-auto gap-2">
+            <Download className="h-4 w-4" />
+            Scarica Fattura PM
+          </Button>
+        ) : (
+          <Button className="w-full sm:w-auto gap-2">
+            <FileText className="h-4 w-4" />
+            Emetti Fattura PM
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -100,7 +143,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
           </DialogTitle>
         </DialogHeader>
 
-        <div className="border rounded-lg p-6 space-y-6 bg-background text-foreground text-sm" id="invoice-preview">
+        <div className="border rounded-lg p-6 space-y-6 bg-background text-foreground text-sm" id="print-document-content">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-lg font-bold text-foreground">{tenantData.legal_name}</h2>
@@ -122,6 +165,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Destinatario</p>
               <p className="font-medium">{booking.guest_name}</p>
+              <p className="text-xs text-muted-foreground">CF: {booking.guest_tax_code ?? '—'}</p>
               <p className="text-xs text-muted-foreground mt-1">Prenotazione: {booking.external_booking_id}</p>
               <p className="text-xs text-muted-foreground">Canale: {booking.channel_name}</p>
             </div>
@@ -216,7 +260,13 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
 
         <div className="flex gap-3 justify-end pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
-          {existingDoc ? (
+          {isDocIssued ? (
+            // Documenti già emessi: azione ripetibile, solo stampa/download.
+            <Button className="gap-2" onClick={handlePrint}>
+              <Printer className="h-4 w-4" />
+              Stampa
+            </Button>
+          ) : existingDoc ? (
             <>
               <Button className="gap-2" disabled>
                 <FileText className="h-4 w-4" />
@@ -236,7 +286,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             </Button>
           ) : (
             <>
-              <Button className="gap-2" onClick={() => window.print()}>
+              <Button className="gap-2" onClick={handlePrint}>
                 <Printer className="h-4 w-4" />
                 Stampa / PDF
               </Button>

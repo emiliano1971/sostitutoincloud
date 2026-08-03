@@ -49,11 +49,16 @@ public class DocumentController {
     }
 
     @PostMapping("/generate")
-    public ResponseEntity<DocumentGenerateResponseDTO> generate(
-            @RequestBody DocumentGenerateRequestDTO request) {
+    public ResponseEntity<?> generate(@RequestBody DocumentGenerateRequestDTO request) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        DocumentGenerateResponseDTO result = documentGenerationService.generate(tenantId, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        try {
+            DocumentGenerateResponseDTO result = documentGenerationService.generate(tenantId, request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        } catch (IllegalStateException e) {
+            // 422: emissione bloccata (es. fattura PM senza CF ospite).
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
     }
 
     @PatchMapping("/{id}/stato")

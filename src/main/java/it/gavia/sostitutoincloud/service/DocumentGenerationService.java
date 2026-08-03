@@ -89,6 +89,13 @@ public class DocumentGenerationService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Prenotazione non trovata per questo tenant: id=" + request.getBookingId()));
 
+        // Blocco fattura PM senza CF ospite (la ricevuta owner resta emettibile senza CF).
+        if (TIPO_FATTURA_PM.equals(tipo)
+                && (booking.getGuestTaxCode() == null || booking.getGuestTaxCode().isBlank())) {
+            throw new IllegalStateException(
+                    "CF ospite mancante — inserire il codice fiscale prima di emettere la fattura PM");
+        }
+
         // Risoluzione lookup tipo_documento: il request usa termini di dominio (ricevuta_owner/fattura_pm)
         // mentre la tabella lookup ha i codici 'ricevuta'/'fattura'. Servono entrambi per collegare i documenti.
         TipoDocumento tipoFattura = tipoDocumentoDAO.findByCodice("fattura")

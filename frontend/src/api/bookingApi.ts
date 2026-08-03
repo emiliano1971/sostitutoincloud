@@ -155,3 +155,9 @@ export async function calcolaCodiceFiscale(
   });
   return res.codiceFiscale;
 }
+
+/** Genera un CF fittizio per ospite straniero (progressivo per tenant/anno). */
+export async function generaCfEstero(): Promise<string> {
+  const res = await get<{ cf: string }>('/cf/estero');
+  return res.cf;
+}

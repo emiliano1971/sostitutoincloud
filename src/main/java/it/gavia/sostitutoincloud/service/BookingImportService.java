@@ -64,6 +64,7 @@ public class BookingImportService {
     private final ContrattoCalcolatoreService contrattoCalcolatore;
     private final CodiceFiscaleService codiceFiscaleService;
     private final BookingService bookingService;
+    private final TouristTaxService touristTaxService;
 
     public BookingImportService(BookingDAO bookingDAO,
                                 PropertyDAO propertyDAO,
@@ -74,7 +75,8 @@ public class BookingImportService {
                                 AuditService auditService,
                                 ContrattoCalcolatoreService contrattoCalcolatore,
                                 CodiceFiscaleService codiceFiscaleService,
-                                BookingService bookingService) {
+                                BookingService bookingService,
+                                TouristTaxService touristTaxService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.canaleOtaDAO = canaleOtaDAO;
@@ -85,6 +87,7 @@ public class BookingImportService {
         this.contrattoCalcolatore = contrattoCalcolatore;
         this.codiceFiscaleService = codiceFiscaleService;
         this.bookingService = bookingService;
+        this.touristTaxService = touristTaxService;
     }
 
     // ── campi di sistema import V2 ─────────────────────────────────────────
@@ -279,6 +282,17 @@ public class BookingImportService {
                         .settlementStatus("pending")
                         .build();
                 Booking saved = bookingDAO.insert(booking);
+                // Tassa di soggiorno: calcolo e persistenza già all'import (comune property con regola attiva).
+                BigDecimal tassa = touristTaxService.calcolaPerBooking(
+                        tenantId,
+                        property != null ? property.getCity() : null,
+                        saved.getCheckinDate(),
+                        saved.getNights(),
+                        saved.getGuests(),
+                        saved.getTouristTaxIncludedInGross());
+                if (tassa != null && tassa.signum() > 0) {
+                    bookingDAO.updateTouristTax(saved.getId(), tassa);
+                }
                 // Avanzamento automatico dello stato in base ai dati disponibili (imported/enriched/ready)
                 bookingService.aggiornaStato(saved.getId());
                 imported++;

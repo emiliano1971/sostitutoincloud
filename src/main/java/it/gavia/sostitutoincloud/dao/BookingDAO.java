@@ -162,6 +162,12 @@ public class BookingDAO {
         log.info("BookingDAO.deleteById() - id={}", id);
     }
 
+    public void updateTouristTax(Integer id, java.math.BigDecimal touristTaxAmount) {
+        jdbcTemplate.update("UPDATE booking SET tourist_tax_amount = ?, updated_at = NOW() WHERE id = ?",
+                touristTaxAmount, id);
+        log.info("BookingDAO.updateTouristTax() - id={} amount={}", id, touristTaxAmount);
+    }
+
     public void updateStato(Integer bookingId, Integer fkStatoPrenotazioneId) {
         String sql = "UPDATE booking SET fk_stato_prenotazione_id = ?, updated_at = NOW() WHERE id = ?";
         jdbcTemplate.update(sql, fkStatoPrenotazioneId, bookingId);
@@ -181,6 +187,15 @@ public class BookingDAO {
                 bookingId, tenantId);
         log.info("BookingDAO.updateGuestAnagrafica() - bookingId={} tenantId={} updated={}", bookingId, tenantId, updated);
         return updated;
+    }
+
+    /** Conta i booking del tenant con CF estero (guest_tax_code LIKE 'EST%') creati nell'anno indicato. */
+    public Integer countCfEsteroByTenantAndAnno(Integer tenantId, Integer anno) {
+        log.debug("BookingDAO.countCfEsteroByTenantAndAnno() - tenantId={} anno={}", tenantId, anno);
+        String sql = "SELECT COUNT(*) FROM booking WHERE fk_tenant_id = ? " +
+                "AND EXTRACT(YEAR FROM created_at) = ? AND guest_tax_code LIKE 'EST%'";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, tenantId, anno);
+        return count != null ? count : 0;
     }
 
     public Integer countByTenantIdAndStatoPrenotazioneId(Integer tenantId, Integer statoId) {

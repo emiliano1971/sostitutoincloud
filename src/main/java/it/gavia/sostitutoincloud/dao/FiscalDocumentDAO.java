@@ -65,6 +65,13 @@ public class FiscalDocumentDAO {
         jdbcTemplate.update("DELETE FROM fiscal_document WHERE fk_booking_id = ?", bookingId);
     }
 
+    public int countByBookingId(Integer bookingId) {
+        log.debug("FiscalDocumentDAO.countByBookingId() - bookingId={}", bookingId);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM fiscal_document WHERE fk_booking_id = ?", Integer.class, bookingId);
+        return count != null ? count : 0;
+    }
+
     public Optional<FiscalDocument> findByDocumentNumber(String documentNumber) {
         log.debug("FiscalDocumentDAO.findByDocumentNumber() - documentNumber={}", documentNumber);
         List<FiscalDocument> result = jdbcTemplate.query(SELECT_ALL + " WHERE document_number = ?", fiscalDocumentRowMapper, documentNumber);

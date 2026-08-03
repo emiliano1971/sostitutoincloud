@@ -126,7 +126,7 @@ const TenantsList = () => {
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7"
-                          disabled={togglingId === t.id || t.stato === 'draft' || t.stato === 'closed'}
+                          disabled={togglingId === t.id || t.stato === 'closed'}
                           onClick={() => handleToggleStatus(t)}>
                           {togglingId === t.id
                             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />

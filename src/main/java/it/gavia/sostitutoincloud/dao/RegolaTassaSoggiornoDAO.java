@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.Types;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -50,6 +51,20 @@ public class RegolaTassaSoggiornoDAO {
         String sql = "SELECT " + COLUMNS + " FROM regola_tassa_soggiorno WHERE id = ?";
         List<RegolaTassaSoggiorno> result = jdbcTemplate.query(sql, regolaTassaSoggiornoRowMapper, id);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /** Regola attiva per comune valida alla data indicata (la più recente per valida_dal). */
+    public Optional<RegolaTassaSoggiorno> findAttivaByComune(Integer tenantId, String comune, LocalDate dataRiferimento) {
+        String sql = "SELECT " + COLUMNS + " FROM regola_tassa_soggiorno " +
+                "WHERE fk_tenant_id = ? AND LOWER(comune) = LOWER(?) AND attivo = true " +
+                "AND valida_dal <= ? AND (valida_al IS NULL OR valida_al >= ?) " +
+                "ORDER BY valida_dal DESC LIMIT 1";
+        List<RegolaTassaSoggiorno> result = jdbcTemplate.query(sql, regolaTassaSoggiornoRowMapper,
+                tenantId, comune, dataRiferimento, dataRiferimento);
+        Optional<RegolaTassaSoggiorno> found = result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+        log.debug("RegolaTassaSoggiornoDAO.findAttivaByComune() - comune={} data={} trovata={}",
+                comune, dataRiferimento, found.isPresent());
+        return found;
     }
 
     public List<RegolaTassaSoggiorno> findByComune(String comune) {

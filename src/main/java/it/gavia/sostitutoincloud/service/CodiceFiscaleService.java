@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.service;
 
+import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.ComuneItalianoDAO;
 import it.gavia.sostitutoincloud.model.ComuneItaliano;
 import lombok.extern.log4j.Log4j2;
@@ -27,9 +28,23 @@ public class CodiceFiscaleService {
     };
 
     private final ComuneItalianoDAO comuneItalianoDAO;
+    private final BookingDAO bookingDAO;
 
-    public CodiceFiscaleService(ComuneItalianoDAO comuneItalianoDAO) {
+    public CodiceFiscaleService(ComuneItalianoDAO comuneItalianoDAO, BookingDAO bookingDAO) {
         this.comuneItalianoDAO = comuneItalianoDAO;
+        this.bookingDAO = bookingDAO;
+    }
+
+    /**
+     * Genera un CF fittizio per ospite straniero: "EST" + anno(4) + progressivo(9) = 16 caratteri.
+     * Il progressivo è il numero di booking del tenant con CF estero nell'anno + 1.
+     */
+    public String generaCfEstero(Integer tenantId, Integer anno) {
+        int count = bookingDAO.countCfEsteroByTenantAndAnno(tenantId, anno);
+        String progressivo = String.format("%09d", count + 1);
+        String cf = "EST" + anno + progressivo;
+        log.info("CodiceFiscaleService.generaCfEstero() - tenantId={} cf={}", tenantId, cf);
+        return cf;
     }
 
     public String calcola(String cognome, String nome, LocalDate dataNascita, String sesso, String comuneNascita) {

@@ -6,11 +6,13 @@ import { cercaComuni, type ComuneItaliano } from '@/api/comuneApi';
 interface ComuneAutocompleteProps {
   value: string;
   onChange: (nome: string, belfiore: string) => void;
+  /** Callback opzionale con il comune completo selezionato (nome, sigla provincia, regione, belfiore). */
+  onSelect?: (comune: ComuneItaliano) => void;
   placeholder?: string;
   disabled?: boolean;
 }
 
-const ComuneAutocomplete = ({ value, onChange, placeholder, disabled }: ComuneAutocompleteProps) => {
+const ComuneAutocomplete = ({ value, onChange, onSelect, placeholder, disabled }: ComuneAutocompleteProps) => {
   const [query, setQuery] = useState(value ?? '');
   const [results, setResults] = useState<ComuneItaliano[]>([]);
   const [loading, setLoading] = useState(false);
@@ -58,6 +60,7 @@ const ComuneAutocomplete = ({ value, onChange, placeholder, disabled }: ComuneAu
     setOpen(false);
     setResults([]);
     onChange(c.nome, c.codiceBelfiore);
+    onSelect?.(c);
   };
 
   return (

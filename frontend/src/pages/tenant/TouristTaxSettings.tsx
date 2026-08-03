@@ -8,23 +8,33 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Calculator, MapPin, Users, Calendar, Shield, Loader2, AlertCircle } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Calculator, MapPin, Users, Calendar, Shield, Loader2, AlertCircle, Plus, Pencil } from 'lucide-react';
 import {
   getTouristTaxRules,
   getTouristTaxRule,
   calculateTouristTax,
+  updateTouristTaxStatus,
   type TouristTaxRuleListItem,
   type TouristTaxRuleDetail,
   type TouristTaxCalculation,
 } from '@/api/touristTaxApi';
+import TouristTaxRuleDialog from '@/components/TouristTaxRuleDialog';
+import { useToast } from '@/hooks/use-toast';
 
 const TouristTaxSettings = () => {
+  const { toast } = useToast();
   const [rules, setRules] = useState<TouristTaxRuleListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedRule, setSelectedRule] = useState<TouristTaxRuleDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // Dialog CRUD (crea/modifica)
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<TouristTaxRuleDetail | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   // Simulator
   const [simNights, setSimNights] = useState('3');
@@ -37,16 +47,36 @@ const TouristTaxSettings = () => {
   const removeGuest = (i: number) => setSimGuests(prev => prev.filter((_, idx) => idx !== i));
 
   // Load list
-  useEffect(() => {
-    let active = true;
+  const reload = () => {
     setLoading(true);
     setError(null);
     getTouristTaxRules()
-      .then(data => { if (active) setRules(data); })
-      .catch(err => { if (active) setError(err instanceof Error ? err.message : 'Errore di caricamento'); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
+      .then(setRules)
+      .catch(err => setError(err instanceof Error ? err.message : 'Errore di caricamento'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const handleToggle = async (rule: TouristTaxRuleListItem) => {
+    setTogglingId(rule.id);
+    try {
+      await updateTouristTaxStatus(rule.id, !rule.attivo);
+      setRules(prev => prev.map(r => (r.id === rule.id ? { ...r, attivo: !r.attivo } : r)));
+    } catch (err) {
+      toast({ title: 'Errore', description: err instanceof Error ? err.message : 'Aggiornamento stato fallito', variant: 'destructive' });
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleAdd = () => { setEditingRule(null); setDialogOpen(true); };
+
+  const handleEdit = (id: number) => {
+    getTouristTaxRule(id)
+      .then(detail => { setEditingRule(detail); setDialogOpen(true); })
+      .catch(err => toast({ title: 'Errore', description: err instanceof Error ? err.message : 'Caricamento regola fallito', variant: 'destructive' }));
+  };
 
   // Open detail by id
   const openDetail = (id: number) => {
@@ -86,9 +116,14 @@ const TouristTaxSettings = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Tassa di Soggiorno</h1>
-        <p className="text-sm text-muted-foreground">Regole di calcolo per comune. La tassa viene calcolata automaticamente per ogni prenotazione in base all'immobile.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Tassa di Soggiorno</h1>
+          <p className="text-sm text-muted-foreground">Regole di calcolo per comune. La tassa viene calcolata automaticamente per ogni prenotazione in base all'immobile.</p>
+        </div>
+        <Button className="gap-2 shrink-0" onClick={handleAdd}>
+          <Plus className="h-4 w-4" /> Aggiungi regola
+        </Button>
       </div>
 
       {/* Municipalities table */}
@@ -130,15 +165,26 @@ const TouristTaxSettings = () => {
                     <TableCell className="text-center">{rule.maxNotti ?? '∞'}</TableCell>
                     <TableCell className="text-center">{rule.maxAmountPerPerson ? `€${rule.maxAmountPerPerson}` : '—'}</TableCell>
                     <TableCell className="text-center">{rule.fascieEtaCount}</TableCell>
-                    <TableCell className="text-center">
-                      <Badge variant={rule.attivo ? 'default' : 'secondary'}>
-                        {rule.attivo ? 'Attivo' : 'Inattivo'}
-                      </Badge>
+                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-2">
+                        <Switch
+                          checked={rule.attivo}
+                          disabled={togglingId === rule.id}
+                          onCheckedChange={() => handleToggle(rule)}
+                          aria-label={rule.attivo ? 'Disattiva' : 'Attiva'}
+                        />
+                        <span className="text-xs text-muted-foreground">{rule.attivo ? 'Attivo' : 'Inattivo'}</span>
+                      </div>
                     </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm" className="text-xs" onClick={(e) => { e.stopPropagation(); openDetail(rule.id); }}>
-                        Dettaglio
-                      </Button>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Modifica" onClick={() => handleEdit(rule.id)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="text-xs" onClick={() => openDetail(rule.id)}>
+                          Dettaglio
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -356,6 +402,14 @@ const TouristTaxSettings = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Dialog crea/modifica regola */}
+      <TouristTaxRuleDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSaved={reload}
+        regola={editingRule}
+      />
     </div>
   );
 };

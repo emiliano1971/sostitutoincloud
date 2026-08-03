@@ -4,11 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Calculator, AlertCircle } from 'lucide-react';
+import { Loader2, Calculator, AlertCircle, Globe } from 'lucide-react';
 import ComuneAutocomplete from '@/components/ComuneAutocomplete';
 import { toast } from '@/hooks/use-toast';
 import {
-  updateBookingGuest, calcolaCodiceFiscale,
+  updateBookingGuest, calcolaCodiceFiscale, generaCfEstero,
   type BookingDetail, type GuestUpdateRequest,
 } from '@/api/bookingApi';
 
@@ -42,7 +42,8 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
   const [birthBelfiore, setBirthBelfiore] = useState(guest.guestBirthBelfiore ?? '');
   const [docType, setDocType] = useState(guest.guestDocType ?? '');
   const [docNumber, setDocNumber] = useState(guest.guestDocNumber ?? '');
-  const [country, setCountry] = useState(guest.guestCountry ?? 'Italia');
+  const [nazione, setNazione] = useState<'Italia' | 'Straniero'>(
+    guest.guestCountry === 'Straniero' ? 'Straniero' : 'Italia');
   const [taxCode, setTaxCode] = useState(guest.guestTaxCode ?? '');
   const [calcolando, setCalcolando] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -71,6 +72,19 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
     }
   };
 
+  const handleGeneraEstero = async () => {
+    setCalcolando(true);
+    try {
+      const cf = await generaCfEstero();
+      setTaxCode(cf);
+      toast({ title: `CF estero generato: ${cf}` });
+    } catch (e) {
+      toast({ title: 'Impossibile generare CF estero', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setCalcolando(false);
+    }
+  };
+
   const handleSave = async () => {
     setError(null);
     setSaving(true);
@@ -84,7 +98,7 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
         guestBirthBelfiore: birthBelfiore || undefined,
         guestDocType: docType || undefined,
         guestDocNumber: docNumber || undefined,
-        guestCountry: country || undefined,
+        guestCountry: nazione,
       };
       const updated = await updateBookingGuest(bookingId, payload);
       toast({ title: 'Dati ospite aggiornati' });
@@ -111,31 +125,46 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
             <Input value={guestName} onChange={e => setGuestName(e.target.value)} placeholder="Nome e cognome" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Data di nascita</Label>
-              <Input type="date" value={birthDate} onChange={e => setBirthDate(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Sesso</Label>
-              <Select value={sesso} onValueChange={setSesso}>
-                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="M">M</SelectItem>
-                  <SelectItem value="F">F</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Nazione</Label>
+            <Select value={nazione} onValueChange={v => setNazione(v as 'Italia' | 'Straniero')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Italia">Italia</SelectItem>
+                <SelectItem value="Straniero">Straniero</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          <div className="space-y-1">
-            <Label className="text-xs">Comune di nascita</Label>
-            <ComuneAutocomplete
-              value={birthPlace}
-              onChange={(comune, belfiore) => { setBirthPlace(comune); setBirthBelfiore(belfiore); }}
-              placeholder="Cerca comune…"
-            />
-          </div>
+          {nazione === 'Italia' && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Data di nascita</Label>
+                  <Input type="date" value={birthDate} onChange={e => setBirthDate(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Sesso</Label>
+                  <Select value={sesso} onValueChange={setSesso}>
+                    <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="M">M</SelectItem>
+                      <SelectItem value="F">F</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Comune di nascita</Label>
+                <ComuneAutocomplete
+                  value={birthPlace}
+                  onChange={(comune, belfiore) => { setBirthPlace(comune); setBirthBelfiore(belfiore); }}
+                  placeholder="Cerca comune…"
+                />
+              </div>
+            </>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -154,18 +183,25 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Nazione</Label>
-            <Input value={country} onChange={e => setCountry(e.target.value)} />
-          </div>
-
-          <div className="space-y-1">
             <Label className="text-xs">Codice Fiscale</Label>
             <div className="flex gap-2">
-              <Input value={taxCode} readOnly className="font-mono" placeholder="—" />
-              <Button type="button" variant="outline" onClick={handleCalcCf} disabled={!canCalc || calcolando} className="gap-2 shrink-0">
-                {calcolando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-                Calcola CF
-              </Button>
+              <Input
+                value={taxCode}
+                readOnly
+                className="font-mono"
+                placeholder={nazione === 'Straniero' ? 'Verrà generato automaticamente' : '—'}
+              />
+              {nazione === 'Italia' ? (
+                <Button type="button" variant="outline" onClick={handleCalcCf} disabled={!canCalc || calcolando} className="gap-2 shrink-0">
+                  {calcolando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+                  Calcola CF
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" onClick={handleGeneraEstero} disabled={calcolando} className="gap-2 shrink-0">
+                  {calcolando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                  Genera CF Straniero
+                </Button>
+              )}
             </div>
           </div>
 

@@ -27,7 +27,7 @@ import java.util.Set;
 @Log4j2
 public class TenantService {
 
-    private static final Set<String> STATI_VALIDI = Set.of("active", "suspended");
+    private static final Set<String> STATI_VALIDI = Set.of("active", "suspended", "draft", "closed");
 
     private final TenantDAO tenantDAO;
     private final PropertyDAO propertyDAO;
@@ -192,6 +192,13 @@ public class TenantService {
                 .codiceTributoF24("1919")
                 .documentWindowDays(14)
                 .cedolareSeccaEnabled(true)
+                // Campi NOT NULL: vanno valorizzati perché il DAO li inserisce esplicitamente
+                // (un NULL esplicito non usa il DEFAULT della colonna).
+                .bolloImporto(new BigDecimal("2.00"))
+                .bolloSoglia(new BigDecimal("77.47"))
+                .bolloAddebitatoCliente(true)
+                .regimeFiscalePm("RF01")
+                .naturaIvaEsente("N2.1")
                 .sdiAutoSend(true)
                 .derogaRicevutaEnabled(false)
                 .numerazioneAutomatica(true)

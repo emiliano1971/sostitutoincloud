@@ -13,8 +13,12 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 @Log4j2
@@ -24,18 +28,48 @@ public class TouristTaxService {
     private final TassaFasciaEtaDAO fasciaEtaDAO;
     private final TassaStagioneDAO stagioneDAO;
     private final TassaZonaDAO zonaDAO;
+    private final TouristTaxCalculatorService calculatorService;
     private final AuditService auditService;
 
     public TouristTaxService(RegolaTassaSoggiornoDAO regolaDAO,
                              TassaFasciaEtaDAO fasciaEtaDAO,
                              TassaStagioneDAO stagioneDAO,
                              TassaZonaDAO zonaDAO,
+                             TouristTaxCalculatorService calculatorService,
                              AuditService auditService) {
         this.regolaDAO = regolaDAO;
         this.fasciaEtaDAO = fasciaEtaDAO;
         this.stagioneDAO = stagioneDAO;
         this.zonaDAO = zonaDAO;
+        this.calculatorService = calculatorService;
         this.auditService = auditService;
+    }
+
+    /**
+     * Calcola la tassa di soggiorno per un booking cercando la regola attiva del comune.
+     * Ritorna 0 se la tassa è già inclusa nel lordo OTA o se non c'è una regola per il comune.
+     */
+    public BigDecimal calcolaPerBooking(Integer tenantId, String comune, LocalDate checkinDate,
+                                        Integer nights, Integer guests, Boolean touristTaxIncludedInGross) {
+        if (Boolean.TRUE.equals(touristTaxIncludedInGross)) {
+            return BigDecimal.ZERO;
+        }
+        if (comune == null || comune.isBlank() || checkinDate == null) {
+            return BigDecimal.ZERO;
+        }
+        Optional<RegolaTassaSoggiorno> regolaOpt = regolaDAO.findAttivaByComune(tenantId, comune, checkinDate);
+        if (regolaOpt.isEmpty()) {
+            log.debug("TouristTaxService.calcolaPerBooking() - nessuna regola tassa soggiorno per comune={}", comune);
+            return BigDecimal.ZERO;
+        }
+        RegolaTassaSoggiornoDetailDTO detail = findById(tenantId, regolaOpt.get().getId());
+        int g = (guests != null && guests > 0) ? guests : 1;
+        List<Integer> guestAges = Collections.nCopies(g, 18); // età reale non nota nei booking OTA
+        TouristTaxCalculationDTO result = calculatorService.calculate(detail, nights, checkinDate, null, guestAges);
+        BigDecimal tassa = result.getTotal() != null ? result.getTotal() : BigDecimal.ZERO;
+        log.info("TouristTaxService.calcolaPerBooking() - comune={} nights={} guests={} tassa={}",
+                comune, nights, g, tassa);
+        return tassa;
     }
 
     public List<RegolaTassaSoggiornoListDTO> findByTenantId(Integer tenantId) {
