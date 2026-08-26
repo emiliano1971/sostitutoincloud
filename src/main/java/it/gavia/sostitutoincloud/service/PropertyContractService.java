@@ -38,11 +38,13 @@ public class PropertyContractService {
             "commissione_pm", "Commissione PM",
             "provvigione_proprietario", "Provvigione Proprietario");
 
+    // Label mostrate nei badge della lista regole (PropertyContracts.tsx) e in
+    // QuickContractDialog: tenere allineate a calcModeLabels del frontend.
     private static final Map<String, String> CALC_MODE_LABELS = Map.of(
             "fisso", "Importo Fisso (€)",
             "percentuale", "Percentuale (%)",
-            "fisso_per_notte", "Fisso per Notte (€)",
-            "fisso_per_persona", "Fisso per Persona (€)",
+            "fisso_per_notte", "Fisso per Notte (€/notte)",
+            "fisso_per_persona", "Fisso per Persona (€/persona)",
             "percentuale_lordo", "Percentuale sul Lordo (%)",
             "rimanenza", "Rimanenza automatica");
 

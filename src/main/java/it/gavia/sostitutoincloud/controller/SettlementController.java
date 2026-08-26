@@ -35,6 +35,20 @@ public class SettlementController {
         return ResponseEntity.ok(settlementService.findByTenantId(tenantId, ownerId, period));
     }
 
+    /**
+     * Prenotazioni con documenti emessi non ancora liquidate: alimenta l'avviso
+     * nella lista liquidazioni. Passa dal service, non dal DAO (Controller → Service → DAO).
+     * NB: mappato prima di /{id} non sarebbe necessario — "da-liquidare" non è un Integer —
+     * ma resta comunque il path più specifico.
+     */
+    @GetMapping("/da-liquidare")
+    public ResponseEntity<Map<String, Integer>> countDaLiquidare() {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        Integer count = settlementService.countDaLiquidare(tenantId);
+        log.debug("SettlementController.countDaLiquidare() - tenantId={} count={}", tenantId, count);
+        return ResponseEntity.ok(Map.of("count", count));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<SettlementDetailDTO> findById(@PathVariable Integer id) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();

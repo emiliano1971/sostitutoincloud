@@ -37,6 +37,11 @@ public class DocumentDetailDTO {
     private String statoDocumento;
     private String sdiIdentifier;
     private String sdiEsito;
+    // Invio SDI (migration 010)
+    private String sdiProgressivo;
+    private String sdiFilePath;
+    private LocalDateTime sdiSentAt;
+    private String sdiErrorMsg;
     private String propertyName;
     private String channelName;
     private Integer fkBookingId;
@@ -46,6 +51,18 @@ public class DocumentDetailDTO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private List<DocumentRowDTO> righe;
+
+    // Versamento F24 della ritenuta (valorizzati solo per la ricevuta owner)
+    private Integer f24RecordId;    // null se la ritenuta non è ancora in un F24
+    private String f24Periodo;      // es. "06/2026"
+    private String f24Stato;
+    private Boolean f24Pagato;
+
+    // Certificazione Unica (valorizzati solo per la ricevuta owner)
+    private Integer cuRecordId;     // null se la CU dell'anno non è stata generata
+    private Integer cuTaxYear;
+    private String cuStato;
+    private Boolean cuConsegnata;
 
     // Emittente (tenant)
     private String tenantLegalName;

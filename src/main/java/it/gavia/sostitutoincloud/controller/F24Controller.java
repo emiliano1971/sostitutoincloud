@@ -38,10 +38,21 @@ public class F24Controller {
     // IllegalStateException (F24 già esistente) e IllegalArgumentException (nessuna ritenuta)
     // sono mappate a 400 dal GlobalExceptionHandler.
     @PostMapping("/genera")
-    public ResponseEntity<F24GenerazioneResultDTO> genera(@RequestBody F24GeneraRequestDTO request) {
+    public ResponseEntity<?> genera(@RequestBody F24GeneraRequestDTO request) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        F24GenerazioneResultDTO result = f24Service.generaF24(tenantId, request.getAnno(), request.getMese());
-        return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        try {
+            F24GenerazioneResultDTO result = f24Service.generaF24(tenantId, request.getAnno(), request.getMese());
+            return ResponseEntity.status(HttpStatus.CREATED).body(result);
+        } catch (IllegalStateException e) {
+            // 422: F24 del periodo già pagato, non modificabile. Stesso trattamento
+            // dell'endpoint /ricalcola, a cui generaF24() ora delega quando l'F24 esiste.
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            // 400: nessuna ritenuta da versare per il periodo.
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
     }
 
     @GetMapping("/{id}")

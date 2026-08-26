@@ -352,7 +352,10 @@ CREATE TABLE tenant (
     administrative_email    VARCHAR(150)    NOT NULL,
     pec                     VARCHAR(150),
     phone                   VARCHAR(20),
-    legal_address           VARCHAR(300)    NOT NULL,
+    legal_address           VARCHAR(300)    NOT NULL,           -- via e civico della sede legale
+    cap                     VARCHAR(10),                        -- CAP sede legale (XML SDI: Sede/CAP)
+    comune                  VARCHAR(100),                       -- comune sede legale (XML SDI: Sede/Comune)
+    provincia               CHAR(2),                            -- sigla provincia sede legale (XML SDI: Sede/Provincia)
     activated_at            DATE,
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP       NOT NULL DEFAULT NOW()
@@ -582,6 +585,10 @@ CREATE TABLE fiscal_document (
     fk_documento_collegato_id INTEGER       REFERENCES fiscal_document(id) ON DELETE SET NULL,  -- collegamento ricevuta <-> fattura PM dello stesso booking
     fk_stato_documento_id   INTEGER         NOT NULL REFERENCES stato_documento(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'draft'
     sdi_identifier          VARCHAR(50),                        -- identificativo assegnato da SDI
+    sdi_progressivo         VARCHAR(20),                        -- ProgressivoInvio del file XML SDI (per tenant/anno)
+    sdi_file_path           VARCHAR(500),                       -- percorso del file XML generato in sdi/outgoing
+    sdi_sent_at             TIMESTAMP,                          -- data/ora generazione-invio del file SDI
+    sdi_error_msg           VARCHAR(500),                       -- messaggio d'errore in caso di stato 'error'
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_document_number_per_tenant UNIQUE (fk_tenant_id, document_number)
@@ -595,6 +602,22 @@ COMMENT ON TABLE fiscal_document IS
 CREATE TRIGGER trg_fiscal_document_updated_at
     BEFORE UPDATE ON fiscal_document
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- Progressivo invio SDI: contatore per tenant + anno usato nel ProgressivoInvio
+-- e nel nome file XML (IT{PIVA}_{PROGRESSIVO}.xml). Incrementato atomicamente
+-- con INSERT ... ON CONFLICT DO UPDATE ... RETURNING (SdiProgressivoDAO).
+CREATE TABLE sdi_progressivo (
+    id              SERIAL PRIMARY KEY,
+    fk_tenant_id    INTEGER         NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+    anno            INTEGER         NOT NULL,
+    ultimo_valore   INTEGER         NOT NULL DEFAULT 0,
+    updated_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_sdi_progressivo UNIQUE (fk_tenant_id, anno)
+);
+COMMENT ON TABLE sdi_progressivo IS
+    'Ultimo progressivo di invio SDI per tenant e anno. Garantisce unicità del '
+    'ProgressivoInvio anche con invii concorrenti.';
 
 
 -- Liquidazioni periodiche proprietari

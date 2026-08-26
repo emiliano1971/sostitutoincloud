@@ -9,7 +9,10 @@ export interface TenantSettingsDTO {
   administrativeEmail: string;
   pec?: string;
   phone?: string;
-  legalAddress: string;
+  legalAddress: string;   // solo via e civico
+  cap?: string;
+  comune?: string;
+  provincia?: string;
   // parametri fiscali
   withholdingRatePrimary: number;
   withholdingRateSecondary: number;

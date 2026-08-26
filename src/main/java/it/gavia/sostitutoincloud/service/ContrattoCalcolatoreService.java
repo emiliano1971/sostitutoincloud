@@ -72,23 +72,54 @@ public class ContrattoCalcolatoreService {
                 ? contractRuleDAO.findByPropertyId(propertyId)
                 : List.of();
 
-        // 9. Nessuna regola → fallback
+        // 9. Nessuna regola → fallback.
+        //    La commissione OTA del file di import, se presente, è un dato reale del canale:
+        //    usarla dà un netto proprietario molto più vicino al vero rispetto a ignorarla.
+        //    Pulizie e provvigione PM restano a zero: senza regole non sono deducibili.
         if (rules.isEmpty()) {
-            warnings.add("Nessuna regola di contratto trovata per l'immobile: usati valori di fallback");
-            BigDecimal ownerNet = grossAmount;
-            // Fallback ritenuta: aliquota dell'immobile (primaria se property assente), su base lorda.
-            BigDecimal withholding = round(grossAmount.multiply(aliquotaRitenuta).divide(CENTO));
-            log.info("ContrattoCalcolatore - tenant={} property={} canale={} gross={} ownerNet={} withholding={} (FALLBACK)",
-                    tenantId, propertyId, fkCanaleOtaId, grossAmount, ownerNet, withholding);
+            BigDecimal otaUsata = otaCommissionOverride != null
+                    && otaCommissionOverride.compareTo(BigDecimal.ZERO) > 0
+                    ? round(otaCommissionOverride)
+                    : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+
+            if (otaUsata.signum() > 0) {
+                warnings.add("Calcolo parziale: usata commissione OTA dal file (€" + otaUsata
+                        + "). Configurare le regole contratto per il calcolo completo.");
+            } else {
+                warnings.add("Nessuna regola di contratto trovata per l'immobile: usati valori di fallback");
+            }
+
+            // Nel fallback l'unico servizio riaddebitato è la commissione OTA: il totale
+            // della fattura PM coincide con essa, con IVA scorporata come nel calcolo completo.
+            BigDecimal lordoServizi = otaUsata;
+            BigDecimal imponibileFatturaPm;
+            BigDecimal ivaScorporata;
+            if (aliquotaIvaPm.signum() == 0) {
+                imponibileFatturaPm = lordoServizi;
+                ivaScorporata = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+            } else {
+                BigDecimal divisore = BigDecimal.ONE.add(aliquotaIvaPm);
+                imponibileFatturaPm = lordoServizi.signum() == 0
+                        ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                        : lordoServizi.divide(divisore, 2, RoundingMode.HALF_UP);
+                ivaScorporata = round(lordoServizi.subtract(imponibileFatturaPm));
+            }
+
+            BigDecimal ownerNet = round(grossAmount.subtract(lordoServizi));
+            // Ritenuta sul netto proprietario, non sul lordo ospite: la commissione OTA
+            // riaddebitata non è reddito del proprietario.
+            BigDecimal withholding = round(ownerNet.multiply(aliquotaRitenuta).divide(CENTO));
+            log.info("ContrattoCalcolatore - tenant={} property={} canale={} gross={} ota={} ownerNet={} withholding={} (FALLBACK)",
+                    tenantId, propertyId, fkCanaleOtaId, grossAmount, otaUsata, ownerNet, withholding);
             return ContrattoCalcoloResult.builder()
                     .grossAmount(grossAmount)
-                    .otaCommissionAmount(BigDecimal.ZERO)
+                    .otaCommissionAmount(otaUsata)
                     .cleaningAmount(BigDecimal.ZERO)
                     .pmFeeAmount(BigDecimal.ZERO)
-                    .imponibilePm(BigDecimal.ZERO)
-                    .imponibileFatturaPm(BigDecimal.ZERO)
-                    .ivaScorporata(BigDecimal.ZERO)
-                    .fatturaPmTotale(BigDecimal.ZERO)
+                    .imponibilePm(lordoServizi)
+                    .imponibileFatturaPm(imponibileFatturaPm)
+                    .ivaScorporata(ivaScorporata)
+                    .fatturaPmTotale(lordoServizi)
                     .ownerNetAmount(ownerNet)
                     .withholdingAmount(withholding)
                     .aliquotaRitenuta(round(aliquotaRitenuta))

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { getSettings, updateSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useLookup } from '@/contexts/LookupContext';
 
@@ -20,6 +21,7 @@ const TenantSettings = () => {
   const [companyForm, setCompanyForm] = useState({
     legalName: '', displayName: '', taxCode: '', vatNumber: '',
     administrativeEmail: '', pec: '', phone: '', legalAddress: '',
+    cap: '', comune: '', provincia: '',
   });
 
   useEffect(() => {
@@ -40,6 +42,9 @@ const TenantSettings = () => {
         pec: settings.pec ?? '',
         phone: settings.phone ?? '',
         legalAddress: settings.legalAddress ?? '',
+        cap: settings.cap ?? '',
+        comune: settings.comune ?? '',
+        provincia: settings.provincia ?? '',
       });
     }
   }, [settings]);
@@ -60,6 +65,24 @@ const TenantSettings = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Salvataggio della sezione dati aziendali: il comune è obbligatorio perché
+  // alimenta la Sede del CedentePrestatore nell'XML SDI.
+  const handleSaveCompany = () => {
+    if (!companyForm.legalAddress.trim()) {
+      showStatus({ type: 'error', message: 'Indirizzo obbligatorio' });
+      return;
+    }
+    if (!companyForm.cap.trim()) {
+      showStatus({ type: 'error', message: 'CAP obbligatorio' });
+      return;
+    }
+    if (!companyForm.comune.trim()) {
+      showStatus({ type: 'error', message: 'Comune obbligatorio' });
+      return;
+    }
+    handleSave(companyForm);
   };
 
   if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
@@ -125,11 +148,51 @@ const TenantSettings = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Indirizzo Sede Legale</Label>
-                <Input value={companyForm.legalAddress} onChange={e => setCompanyForm(f => ({ ...f, legalAddress: e.target.value }))} />
+                <Label>Indirizzo *</Label>
+                <Input
+                  value={companyForm.legalAddress}
+                  onChange={e => setCompanyForm(f => ({ ...f, legalAddress: e.target.value }))}
+                  placeholder="Via Roma 1"
+                />
+                <p className="text-xs text-muted-foreground">Solo via e numero civico</p>
+              </div>
+              {/* CAP / Comune / Provincia: valorizzano la Sede del CedentePrestatore nell'XML SDI */}
+              <div className="flex gap-4">
+                <div className="w-1/4 space-y-2">
+                  <Label>CAP *</Label>
+                  <Input
+                    value={companyForm.cap}
+                    onChange={e => setCompanyForm(f => ({ ...f, cap: e.target.value }))}
+                    placeholder="00100"
+                    className="font-mono"
+                    maxLength={10}
+                  />
+                </div>
+                <div className="w-2/4 space-y-2">
+                  <Label>Comune *</Label>
+                  <ComuneAutocomplete
+                    value={companyForm.comune}
+                    initialValue={companyForm.comune}
+                    placeholder="es. Roma"
+                    requireValidComune
+                    // Comune svuotato (testo non valido): anche la provincia derivata va azzerata.
+                    onChange={nome => setCompanyForm(f => ({ ...f, comune: nome, provincia: nome ? f.provincia : '' }))}
+                    onSelect={c => setCompanyForm(f => ({ ...f, comune: c.nome, provincia: c.siglaProvincia }))}
+                  />
+                </div>
+                <div className="w-1/4 space-y-2">
+                  <Label>Provincia</Label>
+                  <Input
+                    value={companyForm.provincia}
+                    readOnly
+                    tabIndex={-1}
+                    placeholder="dal comune"
+                    className="bg-muted text-muted-foreground cursor-not-allowed font-mono uppercase"
+                  />
+                </div>
               </div>
               <div className="flex justify-end">
-                <Button disabled={saving} onClick={() => handleSave(companyForm)}>
+                <Button disabled={saving} onClick={handleSaveCompany}>
                   {saving ? 'Salvataggio...' : 'Salva Modifiche'}
                 </Button>
               </div>

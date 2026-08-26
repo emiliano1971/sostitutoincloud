@@ -123,6 +123,23 @@ public class WithholdingLedgerDAO {
         return jdbcTemplate.queryForMap(sql, tenantId, ownerId, mese, anno);
     }
 
+    /**
+     * Canone e ritenuta dell'anno per un singolo immobile di un owner: alimenta il quadro
+     * "Locazioni brevi" della CU, che va dettagliato per immobile.
+     * Il ledger non ha la FK all'immobile, si passa dai booking di quella property.
+     */
+    public Map<String, Object> aggregaByOwnerPropertyAndAnno(Integer tenantId, Integer ownerId,
+                                                             Integer propertyId, Integer anno) {
+        log.debug("WithholdingLedgerDAO.aggregaByOwnerPropertyAndAnno() - tenantId={}, ownerId={}, propertyId={}, anno={}",
+                tenantId, ownerId, propertyId, anno);
+        String sql = "SELECT COALESCE(SUM(canone_locazione), 0) AS importo, " +
+                "COALESCE(SUM(ritenuta_amount), 0) AS ritenuta, COUNT(id) AS num_righe " +
+                "FROM withholding_ledger " +
+                "WHERE fk_tenant_id = ? AND fk_owner_id = ? AND periodo_anno = ? " +
+                "AND fk_booking_id IN (SELECT id FROM booking WHERE fk_property_id = ?)";
+        return jdbcTemplate.queryForMap(sql, tenantId, ownerId, anno, propertyId);
+    }
+
     /** fk_booking_id distinti delle ritenute di un owner nel periodo. */
     public List<Integer> findDistinctBookingIdsByOwnerAndPeriodo(Integer tenantId, Integer ownerId, Integer mese, Integer anno) {
         log.debug("WithholdingLedgerDAO.findDistinctBookingIdsByOwnerAndPeriodo() - tenantId={}, ownerId={}, mese={}, anno={}",

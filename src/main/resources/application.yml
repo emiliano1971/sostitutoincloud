@@ -9,3 +9,6 @@ app:
     base-path: /opt/sostitutoincloud/storage
     pdf-path: /opt/sostitutoincloud/storage/pdf
     templates-path: /opt/sostitutoincloud/storage/templates
+    sdi-outgoing-path: /opt/sostitutoincloud/storage/sdi/outgoing
+    sdi-incoming-path: /opt/sostitutoincloud/storage/sdi/incoming
+    sdi-elaborati-path: /opt/sostitutoincloud/storage/sdi/elaborati

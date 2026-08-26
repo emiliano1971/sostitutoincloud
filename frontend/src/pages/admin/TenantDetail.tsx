@@ -7,8 +7,14 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { ArrowLeft, Building2, BarChart3, Power, PowerOff, Edit, Loader2, AlertCircle } from 'lucide-react';
-import { getTenantById, updateTenantStatus, updateTenant, type TenantDetail as TenantDetailType } from '@/api/tenantApi';
+import { ArrowLeft, Building2, BarChart3, Power, PowerOff, Edit, Loader2, AlertCircle, Users, UserPlus } from 'lucide-react';
+import {
+  getTenantById, updateTenantStatus, updateTenant,
+  getTenantUsers, createTenantAdmin,
+  type TenantDetail as TenantDetailType,
+} from '@/api/tenantApi';
+import type { UtenteListItem } from '@/api/userApi';
+import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { useToast } from '@/hooks/use-toast';
 
 const statusColor: Record<string, string> = {
@@ -30,14 +36,20 @@ const TenantDetail = () => {
   const [editForm, setEditForm] = useState({
     legalName: '', displayName: '', taxCode: '', vatNumber: '',
     administrativeEmail: '', pec: '', phone: '', legalAddress: '',
+    cap: '', comune: '', provincia: '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [users, setUsers] = useState<UtenteListItem[]>([]);
+  const [showCreateAdmin, setShowCreateAdmin] = useState(false);
+  const [adminForm, setAdminForm] = useState({ email: '', firstName: '', lastName: '', password: '' });
+  const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    getTenantById(Number(id))
-      .then(setTenant)
+    Promise.all([getTenantById(Number(id)), getTenantUsers(Number(id))])
+      .then(([t, u]) => { setTenant(t); setUsers(u); })
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
   }, [id]);
@@ -91,6 +103,9 @@ const TenantDetail = () => {
       pec:                tenant.pec ?? '',
       phone:              tenant.phone ?? '',
       legalAddress:       tenant.legalAddress ?? '',
+      cap:                tenant.cap ?? '',
+      comune:             tenant.comune ?? '',
+      provincia:          tenant.provincia ?? '',
     });
     setEditError(null);
     setShowEdit(true);
@@ -100,7 +115,9 @@ const TenantDetail = () => {
     if (!editForm.legalName.trim())          { setEditError('Ragione sociale obbligatoria'); return; }
     if (!editForm.displayName.trim())        { setEditError('Nome display obbligatorio'); return; }
     if (!editForm.administrativeEmail.trim()){ setEditError('Email amministrativa obbligatoria'); return; }
-    if (!editForm.legalAddress.trim())       { setEditError('Indirizzo sede legale obbligatorio'); return; }
+    if (!editForm.legalAddress.trim())       { setEditError('Indirizzo obbligatorio'); return; }
+    if (!editForm.cap.trim())                { setEditError('CAP obbligatorio'); return; }
+    if (!editForm.comune.trim())             { setEditError('Comune obbligatorio'); return; }
     if (editForm.taxCode && editForm.taxCode.trim().length !== 16) {
       setEditError('Il codice fiscale deve avere esattamente 16 caratteri'); return;
     }
@@ -116,6 +133,9 @@ const TenantDetail = () => {
         pec:                editForm.pec.trim() || undefined,
         phone:              editForm.phone.trim() || undefined,
         legalAddress:       editForm.legalAddress.trim() || undefined,
+        cap:                editForm.cap.trim() || undefined,
+        comune:             editForm.comune.trim() || undefined,
+        provincia:          editForm.provincia.trim() || undefined,
       });
       setTenant(updated);
       setShowEdit(false);
@@ -124,6 +144,39 @@ const TenantDetail = () => {
       setEditError((err as Error).message);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleOpenCreateAdmin = () => {
+    setAdminForm({ email: '', firstName: '', lastName: '', password: '' });
+    setAdminError(null);
+    setShowCreateAdmin(true);
+  };
+
+  const handleCreateAdmin = async () => {
+    if (!adminForm.email.trim())       { setAdminError('Email obbligatoria'); return; }
+    if (!adminForm.firstName.trim())   { setAdminError('Nome obbligatorio'); return; }
+    if (!adminForm.lastName.trim())    { setAdminError('Cognome obbligatorio'); return; }
+    if (adminForm.password.length < 8) { setAdminError('La password deve avere almeno 8 caratteri'); return; }
+    setIsCreatingAdmin(true);
+    setAdminError(null);
+    try {
+      const created = await createTenantAdmin(tenant.id, {
+        email:     adminForm.email.trim(),
+        firstName: adminForm.firstName.trim(),
+        lastName:  adminForm.lastName.trim(),
+        password:  adminForm.password,
+      });
+      // Ricarica il dettaglio: usersCount cambia e la sezione passa alla lista utenti
+      const [t, u] = await Promise.all([getTenantById(tenant.id), getTenantUsers(tenant.id)]);
+      setTenant(t);
+      setUsers(u);
+      setShowCreateAdmin(false);
+      toast({ title: 'Utente admin creato', description: `${created.email} può ora accedere come amministratore.` });
+    } catch (err) {
+      setAdminError((err as Error).message);
+    } finally {
+      setIsCreatingAdmin(false);
     }
   };
 
@@ -178,7 +231,14 @@ const TenantDetail = () => {
                 <Separator />
               </>
             )}
-            <div className="flex justify-between"><span className="text-muted-foreground">Sede Legale</span><span className="text-right max-w-[60%]">{tenant.legalAddress}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Indirizzo</span><span className="text-right max-w-[60%]">{tenant.legalAddress}</span></div>
+            <Separator />
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">CAP / Comune / Provincia</span>
+              <span className="text-right max-w-[60%]">
+                {[tenant.cap, tenant.comune, tenant.provincia].filter(Boolean).join(' ') || '—'}
+              </span>
+            </div>
             <Separator />
             <div className="flex justify-between"><span className="text-muted-foreground">Creato il</span><span>{tenant.createdAt ? new Date(tenant.createdAt).toLocaleDateString('it-IT') : '—'}</span></div>
           </CardContent>
@@ -236,6 +296,47 @@ const TenantDetail = () => {
               )}
             </CardContent>
           </Card>
+
+          {/* Utente amministratore del tenant */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Users className="h-4 w-4" /> Utente Amministratore
+                </CardTitle>
+                {tenant.usersCount === 0 && (
+                  <Button size="sm" className="gap-1" onClick={handleOpenCreateAdmin}>
+                    <UserPlus className="h-3.5 w-3.5" /> Crea Admin
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {tenant.usersCount === 0 ? (
+                <p className="text-muted-foreground">
+                  Questo tenant non ha ancora utenti. Crea l'utente amministratore per abilitare il primo accesso.
+                </p>
+              ) : (
+                <>
+                  {users.map(u => (
+                    <div key={u.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate">{u.email}</span>
+                      <Badge
+                        variant="outline"
+                        className={u.attivo ? statusColor.active : statusColor.suspended}
+                      >
+                        {u.attivo ? 'attivo' : 'disattivo'}
+                      </Badge>
+                    </div>
+                  ))}
+                  <Separator />
+                  <p className="text-xs text-muted-foreground">
+                    Gestione utenti disponibile dopo il login come tenant_admin
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
 
@@ -285,8 +386,47 @@ const TenantDetail = () => {
               </div>
             </div>
             <div className="space-y-1">
-              <Label>Indirizzo Sede Legale *</Label>
-              <Input value={editForm.legalAddress} onChange={e => setEditForm(f => ({ ...f, legalAddress: e.target.value }))} />
+              <Label>Indirizzo *</Label>
+              <Input
+                value={editForm.legalAddress}
+                onChange={e => setEditForm(f => ({ ...f, legalAddress: e.target.value }))}
+                placeholder="Via Roma 1"
+              />
+              <p className="text-xs text-muted-foreground">Solo via e numero civico</p>
+            </div>
+            {/* CAP / Comune / Provincia: valorizzano la Sede del CedentePrestatore nell'XML SDI */}
+            <div className="flex gap-4">
+              <div className="w-1/4 space-y-1">
+                <Label>CAP *</Label>
+                <Input
+                  value={editForm.cap}
+                  onChange={e => setEditForm(f => ({ ...f, cap: e.target.value }))}
+                  className="font-mono"
+                  maxLength={10}
+                />
+              </div>
+              <div className="w-2/4 space-y-1">
+                <Label>Comune *</Label>
+                <ComuneAutocomplete
+                  value={editForm.comune}
+                  initialValue={editForm.comune}
+                  placeholder="es. Roma"
+                  requireValidComune
+                  // Comune svuotato (testo non valido): anche la provincia derivata va azzerata.
+                  onChange={nome => setEditForm(f => ({ ...f, comune: nome, provincia: nome ? f.provincia : '' }))}
+                  onSelect={c => setEditForm(f => ({ ...f, comune: c.nome, provincia: c.siglaProvincia }))}
+                />
+              </div>
+              <div className="w-1/4 space-y-1">
+                <Label>Provincia</Label>
+                <Input
+                  value={editForm.provincia}
+                  readOnly
+                  tabIndex={-1}
+                  placeholder="dal comune"
+                  className="bg-muted text-muted-foreground cursor-not-allowed font-mono uppercase"
+                />
+              </div>
             </div>
           </div>
 
@@ -295,6 +435,67 @@ const TenantDetail = () => {
             <Button onClick={handleSaveEdit} disabled={isSaving} className="gap-2">
               {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
               Salva
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog creazione utente amministratore */}
+      <Dialog open={showCreateAdmin} onOpenChange={setShowCreateAdmin}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Crea Utente Amministratore</DialogTitle>
+            <DialogDescription>
+              L'utente viene creato con ruolo tenant_admin e potrà gestire gli utenti di {tenant.displayName}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {adminError && (
+            <div className="rounded-md border border-destructive bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {adminError}
+            </div>
+          )}
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                value={adminForm.email}
+                onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Nome *</Label>
+                <Input
+                  value={adminForm.firstName}
+                  onChange={e => setAdminForm(f => ({ ...f, firstName: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Cognome *</Label>
+                <Input
+                  value={adminForm.lastName}
+                  onChange={e => setAdminForm(f => ({ ...f, lastName: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Password * (min 8 caratteri)</Label>
+              <Input
+                type="password"
+                value={adminForm.password}
+                onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateAdmin(false)} disabled={isCreatingAdmin}>Annulla</Button>
+            <Button onClick={handleCreateAdmin} disabled={isCreatingAdmin} className="gap-2">
+              {isCreatingAdmin && <Loader2 className="h-4 w-4 animate-spin" />}
+              Crea Admin
             </Button>
           </DialogFooter>
         </DialogContent>

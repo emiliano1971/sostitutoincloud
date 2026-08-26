@@ -112,6 +112,16 @@ public class SettlementService {
         return bolloEuro.multiply(BigDecimal.valueOf(100)).intValue();
     }
 
+    /**
+     * Quante prenotazioni con documenti emessi restano fuori dalle liquidazioni:
+     * alimenta l'avviso nella lista liquidazioni.
+     */
+    public Integer countDaLiquidare(Integer tenantId) {
+        Integer count = bookingDAO.countDaLiquidare(tenantId);
+        log.debug("SettlementService.countDaLiquidare() - tenantId={} count={}", tenantId, count);
+        return count;
+    }
+
     public List<SettlementListDTO> findByTenantId(Integer tenantId, Integer ownerId, String period) {
         List<Settlement> settlements = settlementDAO.findByTenantId(tenantId);
 

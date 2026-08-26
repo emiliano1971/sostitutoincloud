@@ -35,6 +35,10 @@ public class FiscalDocumentRowMapper implements RowMapper<FiscalDocument> {
                 .fkDocumentoCollegatoId(rs.getObject("fk_documento_collegato_id", Integer.class))
                 .fkStatoDocumentoId(rs.getInt("fk_stato_documento_id"))
                 .sdiIdentifier(rs.getString("sdi_identifier"))
+                .sdiProgressivo(rs.getString("sdi_progressivo"))
+                .sdiFilePath(rs.getString("sdi_file_path"))
+                .sdiSentAt(rs.getObject("sdi_sent_at", LocalDateTime.class))
+                .sdiErrorMsg(rs.getString("sdi_error_msg"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

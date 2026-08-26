@@ -17,6 +17,12 @@ import java.util.Optional;
 @Repository
 public class TenantDAO {
 
+    private static final String SELECT_ALL =
+            "SELECT id, legal_name, display_name, tax_code, vat_number, stato, " +
+            "administrative_email, pec, phone, legal_address, cap, comune, provincia, " +
+            "activated_at, created_at, updated_at " +
+            "FROM tenant";
+
     private final JdbcTemplate jdbcTemplate;
     private final TenantRowMapper tenantRowMapper = new TenantRowMapper();
 
@@ -25,10 +31,7 @@ public class TenantDAO {
     }
 
     public List<Tenant> findAll() {
-        String sql = "SELECT id, legal_name, display_name, tax_code, vat_number, stato, " +
-                     "administrative_email, pec, phone, legal_address, " +
-                     "activated_at, created_at, updated_at " +
-                     "FROM tenant ORDER BY id";
+        String sql = SELECT_ALL + " ORDER BY id";
         List<Tenant> result = jdbcTemplate.query(sql, tenantRowMapper);
         log.debug("TenantDAO.findAll() - trovati {} record", result.size());
         return result;
@@ -36,20 +39,14 @@ public class TenantDAO {
 
     public Optional<Tenant> findById(Integer id) {
         log.debug("TenantDAO.findById() - id={}", id);
-        String sql = "SELECT id, legal_name, display_name, tax_code, vat_number, stato, " +
-                     "administrative_email, pec, phone, legal_address, " +
-                     "activated_at, created_at, updated_at " +
-                     "FROM tenant WHERE id = ?";
+        String sql = SELECT_ALL + " WHERE id = ?";
         List<Tenant> result = jdbcTemplate.query(sql, tenantRowMapper, id);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
     }
 
     public Optional<Tenant> findByEmail(String email) {
         log.debug("TenantDAO.findByEmail() - email={}", email);
-        String sql = "SELECT id, legal_name, display_name, tax_code, vat_number, stato, " +
-                     "administrative_email, pec, phone, legal_address, " +
-                     "activated_at, created_at, updated_at " +
-                     "FROM tenant WHERE administrative_email = ?";
+        String sql = SELECT_ALL + " WHERE administrative_email = ?";
         List<Tenant> result = jdbcTemplate.query(sql, tenantRowMapper, email);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
     }
@@ -63,10 +60,7 @@ public class TenantDAO {
 
     public Optional<Tenant> findByTaxCode(String taxCode) {
         log.debug("TenantDAO.findByTaxCode() - taxCode={}", taxCode);
-        String sql = "SELECT id, legal_name, display_name, tax_code, vat_number, stato, " +
-                     "administrative_email, pec, phone, legal_address, " +
-                     "activated_at, created_at, updated_at " +
-                     "FROM tenant WHERE tax_code = ?";
+        String sql = SELECT_ALL + " WHERE tax_code = ?";
         List<Tenant> result = jdbcTemplate.query(sql, tenantRowMapper, taxCode);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
     }
@@ -74,8 +68,8 @@ public class TenantDAO {
     public Tenant insert(Tenant tenant) {
         String sql = "INSERT INTO tenant " +
                      "(legal_name, display_name, tax_code, vat_number, stato, " +
-                     "administrative_email, pec, phone, legal_address) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                     "administrative_email, pec, phone, legal_address, cap, comune, provincia) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -88,6 +82,9 @@ public class TenantDAO {
             ps.setObject(7, tenant.getPec());
             ps.setObject(8, tenant.getPhone());
             ps.setString(9, tenant.getLegalAddress());
+            ps.setObject(10, tenant.getCap());
+            ps.setObject(11, tenant.getComune());
+            ps.setObject(12, tenant.getProvincia());
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
@@ -111,7 +108,8 @@ public class TenantDAO {
         log.info("TenantDAO.update() - id={}", tenant.getId());
         String sql = "UPDATE tenant SET legal_name = ?, display_name = ?, tax_code = ?, " +
                      "vat_number = ?, administrative_email = ?, pec = ?, phone = ?, " +
-                     "legal_address = ?, updated_at = NOW() WHERE id = ?";
+                     "legal_address = ?, cap = ?, comune = ?, provincia = ?, " +
+                     "updated_at = NOW() WHERE id = ?";
         jdbcTemplate.update(sql,
                 tenant.getLegalName(),
                 tenant.getDisplayName(),
@@ -121,6 +119,9 @@ public class TenantDAO {
                 tenant.getPec(),
                 tenant.getPhone(),
                 tenant.getLegalAddress(),
+                tenant.getCap(),
+                tenant.getComune(),
+                tenant.getProvincia(),
                 tenant.getId());
         return findById(tenant.getId()).orElseThrow();
     }

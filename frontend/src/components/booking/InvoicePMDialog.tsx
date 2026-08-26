@@ -1,11 +1,12 @@
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FileText, Printer, Send, Download } from 'lucide-react';
+import { FileText, Printer, Send, Download, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
-import { aggiornaStatoDocumento, type DocumentGenerateResponse } from '@/api/documentApi';
+import { aggiornaStatoDocumento, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface InvoicePMDialogProps {
@@ -33,6 +34,8 @@ const statoDocLabels: Record<string, string> = {
 };
 
 const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, generatedDoc, existingDoc, isSaving, onEmetti, onSent }: InvoicePMDialogProps) => {
+  const [isDownloading, setIsDownloading] = useState(false);
+
   const handleInvia = async (documentId: number) => {
     try {
       await aggiornaStatoDocumento(documentId, 'sent_sdi');
@@ -87,6 +90,24 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
   // Semantica bottoni in base allo stato: 'doc_issued' = documenti già emessi (solo stampa/download),
   // altrimenti emissione (azione irreversibile).
   const isDocIssued = booking.booking_status === 'doc_issued';
+
+  // Il PDF server-side richiede l'id del documento fiscale già emesso.
+  const docId = existingDoc?.id ?? generatedDoc?.documentId;
+  const handleDownloadPdf = async () => {
+    if (!docId) return;
+    setIsDownloading(true);
+    try {
+      await downloadDocumentPdf(docId, invoiceNumber);
+    } catch (err) {
+      toast({
+        title: 'Errore download PDF',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   // Stampa in una finestra dedicata: window.print() sul dialog Radix (portal) stampa l'intera app.
   const handlePrint = () => {
@@ -262,10 +283,20 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
           {isDocIssued ? (
             // Documenti già emessi: azione ripetibile, solo stampa/download.
-            <Button className="gap-2" onClick={handlePrint}>
-              <Printer className="h-4 w-4" />
-              Stampa
-            </Button>
+            <>
+              <Button className="gap-2" onClick={handlePrint}>
+                <Printer className="h-4 w-4" />
+                Stampa
+              </Button>
+              {docId && (
+                <Button variant="outline" className="gap-2" onClick={handleDownloadPdf} disabled={isDownloading}>
+                  {isDownloading
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Download className="h-4 w-4" />}
+                  Scarica PDF
+                </Button>
+              )}
+            </>
           ) : existingDoc ? (
             <>
               <Button className="gap-2" disabled>

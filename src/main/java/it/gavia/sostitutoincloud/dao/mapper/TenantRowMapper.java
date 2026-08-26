@@ -25,6 +25,9 @@ public class TenantRowMapper implements RowMapper<Tenant> {
                 .pec(rs.getString("pec"))                                       // nullable
                 .phone(rs.getString("phone"))                                   // nullable
                 .legalAddress(rs.getString("legal_address"))
+                .cap(rs.getString("cap"))                                       // nullable
+                .comune(rs.getString("comune"))                                 // nullable
+                .provincia(rs.getString("provincia"))                           // nullable
                 .activatedAt(rs.getObject("activated_at", LocalDate.class))     // nullable DATE
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))

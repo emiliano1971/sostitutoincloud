@@ -19,6 +19,14 @@ public class BookingImportPreviewRowDTO {
     private String externalBookingId;
     private String guestName;
     private String guestTaxCode;   // CF ospite (calcolato o fornito), esposto in anteprima
+    // Anagrafica ospite dal file ospiti: serve a confirm() per persisterla sul booking
+    private String guestBirthDate;      // come nel file (ISO o dd/MM/yyyy), convertita in confirm()
+    private String guestSesso;          // normalizzato a M/F
+    private String guestBirthPlace;
+    private String guestBirthBelfiore;
+    private String guestDocType;
+    private String guestDocNumber;
+    private String guestCountry;
     private String propertyCode;
     private String propertyName;
     private Integer fkPropertyId;   // id immobile risolto (per dialog contratto inline in preview)

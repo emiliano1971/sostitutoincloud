@@ -56,11 +56,45 @@ const F24List = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filtro per stato in memoria, applicato dopo il caricamento e prima della render.
+  // Filtro periodo persistito nell'URL. L'F24 ha periodo_mese + periodo_anno,
+  // non una data singola: quindi due select invece dei preset a giorni.
+  const annoFilter = searchParams.get('anno') ?? '';
+  const meseFilter = searchParams.get('mese') ?? '';
+
+  // Filtri in memoria, applicati dopo il caricamento e prima della render.
   const filtered = useMemo(
-    () => (statoFilter === 'tutti' ? f24List : f24List.filter(f => f.stato === statoFilter)),
-    [f24List, statoFilter],
+    () => (statoFilter === 'tutti' ? f24List : f24List.filter(f => f.stato === statoFilter))
+      .filter(f => {
+        if (!annoFilter && !meseFilter) return true;
+        const annoOk = !annoFilter || String(f.periodoAnno) === annoFilter;
+        const meseOk = !meseFilter || String(f.periodoMese) === meseFilter;
+        return annoOk && meseOk;
+      }),
+    [f24List, statoFilter, annoFilter, meseFilter],
   );
+
+  // Solo gli anni effettivamente presenti nei dati, dal più recente.
+  const anniDisponibili = useMemo(
+    () => [...new Set(f24List.map(f => f.periodoAnno))].sort((a, b) => b - a),
+    [f24List],
+  );
+
+  const updateFilter = (key: string, value: string | null) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (value === null || value === '') next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+
+  const clearPeriodoFilter = () => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('anno'); next.delete('mese');
+      return next;
+    }, { replace: true });
+  };
 
   // Dialog genera
   const [generaOpen, setGeneraOpen] = useState(false);
@@ -174,6 +208,39 @@ const F24List = () => {
               <SelectItem value="error">Errore</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Filtro periodo: anni ricavati dai dati, mesi 1-12.
+              'tutti' è la sentinella per "nessun filtro": Radix non ammette value="". */}
+          <Select
+            value={annoFilter || 'tutti'}
+            onValueChange={v => updateFilter('anno', v === 'tutti' ? null : v)}
+          >
+            <SelectTrigger className="w-[140px]"><SelectValue placeholder="Anno" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tutti">Tutti gli anni</SelectItem>
+              {anniDisponibili.map(a => (
+                <SelectItem key={a} value={String(a)}>{a}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={meseFilter || 'tutti'}
+            onValueChange={v => updateFilter('mese', v === 'tutti' ? null : v)}
+          >
+            <SelectTrigger className="w-[150px]"><SelectValue placeholder="Mese" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tutti">Tutti i mesi</SelectItem>
+              {MESI.map((nome, i) => (
+                <SelectItem key={i + 1} value={String(i + 1)}>{nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {(annoFilter || meseFilter) && (
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="Azzera filtro periodo" onClick={clearPeriodoFilter}>
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+
           <Button onClick={() => setGeneraOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Genera F24

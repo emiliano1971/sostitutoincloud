@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { FileText, Loader2, AlertCircle } from 'lucide-react';
+import { FileText, Loader2, AlertCircle, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { getCuList, generaCuBatch, updateCuStatus, type CuListItem } from '@/api/cuApi';
+import { getCuList, generaCuBatch, updateCuStatus, downloadCuPdf, type CuListItem } from '@/api/cuApi';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -27,6 +27,7 @@ const CUList = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const reload = useCallback(() => {
     setIsLoading(true);
@@ -49,6 +50,21 @@ const CUList = () => {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleDownloadPdf = async (cu: CuListItem) => {
+    setDownloadingId(cu.id);
+    try {
+      await downloadCuPdf(cu.id, cu.taxYear, cu.ownerName);
+    } catch (err) {
+      toast({
+        title: 'Errore download PDF',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -111,6 +127,7 @@ const CUList = () => {
                   <TableHead>Stato</TableHead>
                   <TableHead>Generata il</TableHead>
                   <TableHead className="w-[160px]">Cambia stato</TableHead>
+                  <TableHead className="w-[110px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -129,6 +146,23 @@ const CUList = () => {
                           {STATI.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                    </TableCell>
+                    <TableCell>
+                      {/* Il PDF si può produrre solo da una CU non più in bozza */}
+                      {cu.stato !== 'draft' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => handleDownloadPdf(cu)}
+                          disabled={downloadingId === cu.id}
+                        >
+                          {downloadingId === cu.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Download className="h-3.5 w-3.5" />}
+                          PDF
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -5,6 +5,7 @@ import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
+import it.gavia.sostitutoincloud.dao.UtenteDAO;
 import it.gavia.sostitutoincloud.dto.admin.SuperAdminDashboardDTO;
 import it.gavia.sostitutoincloud.dto.admin.TenantSummaryDTO;
 import it.gavia.sostitutoincloud.dto.tenant.TenantCreateDTO;
@@ -34,6 +35,7 @@ public class TenantService {
     private final OwnerProfileDAO ownerProfileDAO;
     private final BookingDAO bookingDAO;
     private final TenantSettingsDAO tenantSettingsDAO;
+    private final UtenteDAO utenteDAO;
     private final AuditService auditService;
 
     public TenantService(TenantDAO tenantDAO,
@@ -41,12 +43,14 @@ public class TenantService {
                          OwnerProfileDAO ownerProfileDAO,
                          BookingDAO bookingDAO,
                          TenantSettingsDAO tenantSettingsDAO,
+                         UtenteDAO utenteDAO,
                          AuditService auditService) {
         this.tenantDAO = tenantDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
         this.bookingDAO = bookingDAO;
         this.tenantSettingsDAO = tenantSettingsDAO;
+        this.utenteDAO = utenteDAO;
         this.auditService = auditService;
     }
 
@@ -130,6 +134,9 @@ public class TenantService {
                 .pec(dto.getPec())
                 .phone(dto.getPhone())
                 .legalAddress(dto.getLegalAddress())
+                .cap(dto.getCap())
+                .comune(dto.getComune())
+                .provincia(dto.getProvincia())
                 .build();
         Tenant saved = tenantDAO.insert(tenant);
         tenantSettingsDAO.save(defaultSettings(saved.getId()));
@@ -157,6 +164,9 @@ public class TenantService {
                 .pec(dto.getPec() != null ? dto.getPec() : existing.getPec())
                 .phone(dto.getPhone() != null ? dto.getPhone() : existing.getPhone())
                 .legalAddress(dto.getLegalAddress() != null ? dto.getLegalAddress() : existing.getLegalAddress())
+                .cap(dto.getCap() != null ? dto.getCap() : existing.getCap())
+                .comune(dto.getComune() != null ? dto.getComune() : existing.getComune())
+                .provincia(dto.getProvincia() != null ? dto.getProvincia() : existing.getProvincia())
                 .build();
         Tenant updated = tenantDAO.update(toUpdate);
         auditService.log("tenant.update", "Tenant", updated.getId(),
@@ -239,12 +249,16 @@ public class TenantService {
                 .pec(t.getPec())
                 .phone(t.getPhone())
                 .legalAddress(t.getLegalAddress())
+                .cap(t.getCap())
+                .comune(t.getComune())
+                .provincia(t.getProvincia())
                 .activatedAt(t.getActivatedAt())
                 .createdAt(t.getCreatedAt())
                 .updatedAt(t.getUpdatedAt())
                 .propertiesCount(propertyDAO.findByTenantId(t.getId()).size())
                 .ownersCount(ownerProfileDAO.findByTenantId(t.getId()).size())
                 .bookingsCount(bookingDAO.findByTenantId(t.getId()).size())
+                .usersCount(utenteDAO.countActiveByTenantId(t.getId()))
                 .build();
     }
 }

@@ -50,6 +50,12 @@ public class PropertyDAO {
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_owner_id = ? ORDER BY id", propertyRowMapper, ownerId);
     }
 
+    public List<Property> findByOwnerAndTenant(Integer tenantId, Integer ownerId) {
+        log.debug("PropertyDAO.findByOwnerAndTenant() - tenantId={}, ownerId={}", tenantId, ownerId);
+        return jdbcTemplate.query(SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? ORDER BY id",
+                propertyRowMapper, tenantId, ownerId);
+    }
+
     public List<Property> findByPmUserId(Integer pmUserId) {
         log.debug("PropertyDAO.findByPmUserId() - pmUserId={}", pmUserId);
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_pm_user_id = ? ORDER BY id", propertyRowMapper, pmUserId);

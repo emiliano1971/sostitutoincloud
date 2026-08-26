@@ -262,6 +262,17 @@ public class BookingImportService {
                         .externalBookingId(row.getExternalBookingId())
                         .guestName(guestName)
                         .guestTaxCode(row.getGuestTaxCode())
+                        // Anagrafica ospite letta dal file ospiti: da persistere già all'import.
+                        // normalizzaSesso è idempotente: copre anche le righe di sessioni
+                        // create prima della normalizzazione in lettura.
+                        .guestBirthDate(parseDateSafe(row.getGuestBirthDate()))
+                        .guestSesso(normalizzaSesso(row.getGuestGender()))
+                        .guestBirthPlace(row.getGuestBirthPlace())
+                        // Il Belfiore non è nel tracciato: si ricava dal CF (posizioni 12-15).
+                        .guestBirthBelfiore(belfioreDaCf(row.getGuestTaxCode()))
+                        .guestDocType(row.getGuestDocType())
+                        .guestDocNumber(row.getGuestDocNumber())
+                        .guestCountry(row.getGuestCountry())
                         .checkinDate(row.getCheckinDate())
                         .checkoutDate(row.getCheckoutDate())
                         .nights(row.getNights())
@@ -424,7 +435,9 @@ public class BookingImportService {
                             .firstName(mapVal(gRow, gMap, "NOME"))
                             .lastName(mapVal(gRow, gMap, "COGNOME"))
                             .birthDate(mapVal(gRow, gMap, "DATA_NASCITA"))
-                            .gender(mapVal(gRow, gMap, "SESSO"))
+                            // Normalizzato subito a M/F: la colonna guest_sesso è CHAR(1) e
+                            // CodiceFiscaleService accetta solo M o F.
+                            .gender(normalizzaSesso(mapVal(gRow, gMap, "SESSO")))
                             .birthPlace(mapVal(gRow, gMap, "COMUNE_NASCITA"))
                             .docType(mapVal(gRow, gMap, "DOCUMENTO"))
                             .docNumber(mapVal(gRow, gMap, "NUM_DOCUMENTO"))
@@ -600,6 +613,15 @@ public class BookingImportService {
                     .externalBookingId(externalId)
                     .guestName(guestName)
                     .guestTaxCode(cfCalcolato)
+                    // Anagrafica ospite: propagata a confirm(), che la persiste sul booking.
+                    // Il Belfiore si ricava dal CF calcolato (posizioni 12-15).
+                    .guestBirthDate(dataNascita)
+                    .guestSesso(guest != null ? guest.getGender() : null)
+                    .guestBirthPlace(comuneNascita)
+                    .guestBirthBelfiore(belfioreDaCf(cfCalcolato))
+                    .guestDocType(guest != null ? guest.getDocType() : null)
+                    .guestDocNumber(numDocumento)
+                    .guestCountry(guest != null ? guest.getCountry() : null)
                     .propertyCode(struttura)
                     .propertyName(m.propertyName())
                     .fkPropertyId(m.propertyId())
@@ -920,6 +942,40 @@ public class BookingImportService {
 
     private LocalDate parseDate(String s) {
         try { return s.isBlank() ? null : LocalDate.parse(s); } catch (Exception e) { return null; }
+    }
+
+    /**
+     * Data anagrafica dal file ospiti: accetta tutti i formati di DATE_FORMATS
+     * (i file OTA usano dd/MM/yyyy) e non solleva eccezioni — un formato non
+     * riconosciuto lascia il campo vuoto senza far fallire l'import della riga.
+     */
+    private LocalDate parseDateSafe(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            return parseFlexibleDate(s);
+        } catch (Exception e) {
+            log.warn("BookingImportService - data anagrafica non riconosciuta: '{}'", s);
+            return null;
+        }
+    }
+
+    /**
+     * Sesso dal file ospiti → M/F. I tracciati OTA usano diciture testuali
+     * ("Uomo"/"Donna", "Male"/"Female"); la colonna guest_sesso è CHAR(1) e il
+     * calcolo del codice fiscale ammette solo M o F.
+     */
+    /** Codice Belfiore del comune di nascita: posizioni 12-15 del codice fiscale. */
+    private String belfioreDaCf(String cf) {
+        return cf != null && cf.trim().length() == 16 ? cf.trim().toUpperCase().substring(11, 15) : null;
+    }
+
+    private String normalizzaSesso(String v) {
+        if (v == null || v.isBlank()) return null;
+        String s = v.trim().toUpperCase();
+        if (s.startsWith("M") || s.startsWith("U")) return "M";   // Maschio, Male, Uomo
+        if (s.startsWith("F") || s.startsWith("D")) return "F";   // Femmina, Female, Donna
+        log.warn("BookingImportService - valore sesso non riconosciuto: '{}'", v);
+        return null;
     }
 
     private int parseIntOr(String s, int def) {

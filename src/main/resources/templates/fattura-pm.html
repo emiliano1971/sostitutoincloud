@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<!--
+  Template fattura PM — placeholder {NOME_CAMPO} sostituiti da DocumentPdfService
+  con String.replace(). NON è un template Thymeleaf.
+
+  NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox.
+  Le zone a più colonne usano display:table/table-cell (equivalente e supportato)
+  invece di display:flex, altrimenti i blocchi si impilerebbero in verticale.
+-->
+<style>
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    margin: 20px;
+    color: #333;
+  }
+  .header {
+    display: table;
+    width: 100%;
+    margin-bottom: 30px;
+    border-bottom: 2px solid #333;
+    padding-bottom: 15px;
+  }
+  .header-left {
+    display: table-cell;
+    width: 60%;
+    vertical-align: top;
+  }
+  .header-right {
+    display: table-cell;
+    width: 40%;
+    vertical-align: top;
+  }
+  .company-name {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+  .doc-title {
+    font-size: 20px;
+    font-weight: bold;
+    text-align: right;
+    color: #1a1a2e;
+  }
+  .doc-number {
+    font-size: 14px;
+    text-align: right;
+    color: #666;
+  }
+  .section {
+    margin-bottom: 20px;
+  }
+  .section-title {
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #666;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 3px;
+  }
+  .cols {
+    display: table;
+    width: 100%;
+    margin-bottom: 20px;
+  }
+  .col {
+    display: table-cell;
+    width: 33.33%;
+    vertical-align: top;
+    padding-right: 15px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+  }
+  th {
+    background: #f5f5f5;
+    padding: 8px;
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    color: #666;
+    border-bottom: 1px solid #ddd;
+  }
+  td {
+    padding: 8px;
+    border-bottom: 1px solid #eee;
+  }
+  .text-right { text-align: right; }
+  .totals {
+    margin-left: auto;
+    width: 300px;
+  }
+  .totals table td {
+    padding: 5px 8px;
+  }
+  .total-row {
+    font-weight: bold;
+    font-size: 13px;
+    border-top: 2px solid #333 !important;
+  }
+  .riga-note {
+    color: #666;
+    font-size: 9px;
+  }
+  .footer {
+    margin-top: 40px;
+    font-size: 9px;
+    color: #999;
+    border-top: 1px solid #eee;
+    padding-top: 10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- INTESTAZIONE -->
+<div class="header">
+  <div class="header-left">
+    <div class="company-name">{TENANT_LEGAL_NAME}</div>
+    <div>P.IVA: {TENANT_VAT_NUMBER}</div>
+    <div>C.F.: {TENANT_TAX_CODE}</div>
+    <div>{TENANT_LEGAL_ADDRESS}</div>
+    <div>PEC: {TENANT_PEC}</div>
+  </div>
+  <div class="header-right">
+    <div class="doc-title">FATTURA</div>
+    <div class="doc-number">{DOCUMENT_NUMBER}</div>
+    <div class="doc-number">Data: {ISSUE_DATE}</div>
+  </div>
+</div>
+
+<!-- DESTINATARIO + IMMOBILE + SOGGIORNO -->
+<div class="cols">
+  <div class="col">
+    <div class="section-title">Destinatario</div>
+    <div><strong>{RECIPIENT_NAME}</strong></div>
+    <div>C.F.: {RECIPIENT_TAX_CODE}</div>
+    <div>Prenotazione: {EXTERNAL_BOOKING_ID}</div>
+  </div>
+  <div class="col">
+    <div class="section-title">Immobile</div>
+    <div><strong>{PROPERTY_NAME}</strong></div>
+    <div>{PROPERTY_ADDRESS}</div>
+    <div>{PROPERTY_CITY}</div>
+  </div>
+  <div class="col">
+    <div class="section-title">Soggiorno</div>
+    <div>Check-in: {CHECKIN_DATE}</div>
+    <div>Check-out: {CHECKOUT_DATE}</div>
+    <div>Notti: {NIGHTS}</div>
+    <div>Ospiti: {GUESTS}</div>
+  </div>
+</div>
+
+<!-- RIGHE FATTURA -->
+<div class="section">
+  <div class="section-title">
+    Dettaglio Servizi
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Descrizione</th>
+        <th class="text-right">Imponibile</th>
+        <th class="text-right">IVA {ALIQUOTA_IVA}%</th>
+        <th class="text-right">Totale</th>
+      </tr>
+    </thead>
+    <tbody>
+      {RIGHE_FATTURA}
+    </tbody>
+  </table>
+</div>
+
+<!-- TOTALI -->
+<div class="totals">
+  <table>
+    <tr>
+      <td>Totale imponibile</td>
+      <td class="text-right">
+        {TOTAL_IMPONIBILE} &#8364;
+      </td>
+    </tr>
+    <tr>
+      <td>IVA {ALIQUOTA_IVA}%</td>
+      <td class="text-right">
+        {TOTAL_IVA} &#8364;
+      </td>
+    </tr>
+    <tr class="total-row">
+      <td>TOTALE FATTURA</td>
+      <td class="text-right">
+        {TOTAL_AMOUNT} &#8364;
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="footer">
+  Documento generato da Sostituto in Cloud
+</div>
+</body>
+</html>

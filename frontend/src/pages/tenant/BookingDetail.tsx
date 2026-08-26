@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, FileText, Receipt, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil } from 'lucide-react';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil } from 'lucide-react';
 import GuestEditDialog from '@/components/GuestEditDialog';
 import { getBookingById, type BookingDetail as BookingDetailType } from '@/api/bookingApi';
 import { generateDocument, type DocumentGenerateResponse } from '@/api/documentApi';
@@ -307,14 +307,32 @@ const BookingDetail = () => {
       </Card>
 
       {/* Status */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <FileText className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
-            <p className="text-xs text-muted-foreground">Documento</p>
-            <Badge variant="outline" className="mt-1">{getLabelByCodice(lookups?.statiDocumento ?? [], booking.documentStatus)}</Badge>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Un riquadro per documento fiscale: cliccabile se il documento è stato emesso.
+            Stesso pattern della card Liquidazione. */}
+        {[
+          { label: 'Fattura PM', doc: existingInvoice, icon: FileText },
+          { label: 'Ricevuta Owner', doc: existingReceipt, icon: ReceiptText },
+        ].map(({ label, doc, icon: Icon }) => (
+          <Card
+            key={label}
+            className={doc ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
+            onClick={doc ? () => navigate(`/documents/${doc.id}`) : undefined}
+          >
+            <CardContent className="p-4 text-center">
+              <Icon className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <Badge variant="outline" className="mt-1">
+                {doc
+                  ? getLabelByCodice(lookups?.statiDocumento ?? [], doc.statoDocumento)
+                  : 'Da emettere'}
+              </Badge>
+              {doc && (
+                <p className="mt-1 font-mono text-[11px] text-muted-foreground">{doc.documentNumber}</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
         <Card>
           <CardContent className="p-4 text-center">
             <CreditCard className="h-5 w-5 mx-auto text-muted-foreground mb-2" />

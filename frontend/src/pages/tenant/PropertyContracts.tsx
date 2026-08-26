@@ -23,7 +23,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 
 type CostRuleType = 'pulizie' | 'commissione_ota' | 'cambio_biancheria' | 'commissione_pm' | 'provvigione_proprietario';
-type CalcMode = 'fisso' | 'percentuale' | 'fisso_per_notte' | 'fisso_per_persona' | 'percentuale_lordo' | 'rimanenza';
+type CalcMode = 'fisso' /*| 'percentuale'*/ | 'fisso_per_notte' | 'fisso_per_persona' | 'percentuale_lordo' | 'rimanenza';
 
 interface CanaleOtaDTO {
   id: number;
@@ -43,33 +43,33 @@ const ruleTypeLabels: Record<CostRuleType, string> = {
   provvigione_proprietario: 'Provvigione Proprietario',
 };
 
+// Unica fonte delle label delle modalità di calcolo lato client (usata dal select).
+// Allineata a PropertyContractService.CALC_MODE_LABELS, che alimenta i badge della lista.
 const calcModeLabels: Record<CalcMode, string> = {
   fisso: 'Importo Fisso (€)',
-  percentuale: 'Percentuale sul Lordo (%)',
-  fisso_per_notte: 'Fisso per Notte (€)',
-  fisso_per_persona: 'Fisso per Persona (€)',
+  fisso_per_notte: 'Fisso per Notte (€/notte)',
+  fisso_per_persona: 'Fisso per Persona (€/persona)',
+  /*percentuale: 'Percentuale (%)',*/
   percentuale_lordo: 'Percentuale sul Lordo (%)',
-  rimanenza: '⇒ Rimanenza automatica',
+  rimanenza: 'Rimanenza automatica',
 };
 
-const allowedCalcModes: Record<CostRuleType, { value: CalcMode; label: string }[]> = {
-  pulizie: [{ value: 'fisso', label: 'Importo Fisso (€)' }],
-  commissione_ota: [{ value: 'percentuale', label: 'Percentuale sul Lordo (%)' }],
-  cambio_biancheria: [
-    { value: 'fisso_per_persona', label: 'Fisso per Persona (€)' },
-    { value: 'fisso', label: 'Importo Fisso Totale (€)' },
-  ],
-  commissione_pm: [
-    { value: 'fisso_per_notte', label: 'Fisso per Notte (€)' },
-    { value: 'percentuale_lordo', label: 'Percentuale sul Lordo (%)' },
-    { value: 'rimanenza', label: '⇒ Rimanenza (assorbe il resto)' },
-  ],
-  provvigione_proprietario: [
-    { value: 'percentuale_lordo', label: 'Percentuale sul Lordo (%)' },
-    { value: 'fisso_per_notte', label: 'Fisso per Notte (€)' },
-    { value: 'rimanenza', label: '⇒ Rimanenza (assorbe il resto)' },
-  ],
-};
+// Ordine di presentazione nel select. 'Rimanenza' è esclusa da qui perché
+// ammessa solo per alcuni tipi di voce (vedi calcModesForType).
+const calcModeOrder: CalcMode[] = [
+  'fisso',
+  'fisso_per_notte',
+  'fisso_per_persona',
+  /*'percentuale',*/
+  'percentuale_lordo',
+];
+
+// La rimanenza è ammessa solo su Commissione PM / Provvigione Proprietario:
+// stesso vincolo applicato dal backend (PropertyContractService.TIPI_RIMANENZA_AMMESSA).
+const tipiRimanenzaAmmessa: CostRuleType[] = ['commissione_pm', 'provvigione_proprietario'];
+
+const calcModesForType = (tipo: CostRuleType): CalcMode[] =>
+  tipiRimanenzaAmmessa.includes(tipo) ? [...calcModeOrder, 'rimanenza'] : calcModeOrder;
 
 const PropertyContracts = () => {
   const { id } = useParams();
@@ -216,6 +216,31 @@ const PropertyContracts = () => {
       isRemainder,
       ordine: editingRule ? editingRule.ordine : rules.length,
     };
+
+    // Avviso duplicati: stessa combinazione tipo voce + canale OTA.
+    // Solo in inserimento — in modifica la regola stessa risulterebbe duplicata di sé.
+    if (!editingRule) {
+      const duplicato = rules.find(r =>
+        r.tipo === payload.tipo &&
+        (r.fkCanaleOtaId ?? null) === (payload.fkCanaleOtaId ?? null)
+      );
+      if (duplicato) {
+        const labelTipo = ruleTypeLabels[newType];
+        // Il canale si ricava dal payload: newOtaChannelId può contenere una selezione
+        // precedente anche dopo il cambio di tipo, il payload invece è già normalizzato.
+        const canaleNome = payload.fkCanaleOtaId
+          ? otaChannels.find(o => o.id === payload.fkCanaleOtaId)?.nome
+          : undefined;
+        const conferma = window.confirm(
+          `Esiste già una voce "${labelTipo}" ` +
+          (canaleNome
+            ? `per il canale ${canaleNome}. `
+            : `senza canale specifico. `) +
+          `Vuoi inserirne un'altra?`
+        );
+        if (!conferma) return;
+      }
+    }
 
     setIsSaving(true);
     try {
@@ -445,8 +470,10 @@ const PropertyContracts = () => {
               <Label>Tipo di Costo</Label>
               <Select value={newType} onValueChange={(v: CostRuleType) => {
                 setNewType(v);
-                const modes = allowedCalcModes[v];
-                if (modes.length > 0) setNewCalcMode(modes[0].value);
+                // Mantiene la modalità già scelta se resta ammessa: cambia solo quando
+                // era 'rimanenza' e il nuovo tipo non la consente.
+                const modes = calcModesForType(v);
+                if (!modes.includes(newCalcMode)) setNewCalcMode(modes[0]);
               }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -495,8 +522,8 @@ const PropertyContracts = () => {
               <Select value={newCalcMode} onValueChange={(v: CalcMode) => setNewCalcMode(v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {allowedCalcModes[newType].map(m => (
-                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  {calcModesForType(newType).map(m => (
+                    <SelectItem key={m} value={m}>{calcModeLabels[m]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

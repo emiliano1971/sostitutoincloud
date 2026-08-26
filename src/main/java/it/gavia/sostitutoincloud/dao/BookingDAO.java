@@ -116,12 +116,15 @@ public class BookingDAO {
         String sql = "INSERT INTO booking (" +
                 "fk_tenant_id, fk_property_id, fk_owner_id, fk_canale_ota_id, fk_scenario_fiscale_id, " +
                 "external_booking_id, guest_name, guest_tax_code, " +
+                // Anagrafica ospite: va scritta già in fase di import, non solo con updateGuestData().
+                "guest_birth_date, guest_sesso, guest_birth_place, guest_birth_belfiore, " +
+                "guest_doc_type, guest_doc_number, guest_country, " +
                 "checkin_date, checkout_date, nights, guests, " +
                 "gross_amount, ota_commission_amount, cleaning_amount, pm_fee_amount, " +
                 "owner_net_amount, withholding_amount, aliquota_ritenuta, tourist_tax_amount, " +
                 "tourist_tax_included_in_gross, tourist_tax_collection, " +
                 "fk_stato_prenotazione_id, payment_status, settlement_status" +
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -133,23 +136,30 @@ public class BookingDAO {
             ps.setObject(6, booking.getExternalBookingId());
             ps.setString(7, booking.getGuestName());
             ps.setObject(8, booking.getGuestTaxCode());
-            ps.setObject(9, booking.getCheckinDate());
-            ps.setObject(10, booking.getCheckoutDate());
-            ps.setObject(11, booking.getNights());
-            ps.setObject(12, booking.getGuests());
-            ps.setObject(13, booking.getGrossAmount());
-            ps.setObject(14, booking.getOtaCommissionAmount());
-            ps.setObject(15, booking.getCleaningAmount());
-            ps.setObject(16, booking.getPmFeeAmount());
-            ps.setObject(17, booking.getOwnerNetAmount());
-            ps.setObject(18, booking.getWithholdingAmount());
-            ps.setObject(19, booking.getAliquotaRitenuta());
-            ps.setObject(20, booking.getTouristTaxAmount());
-            ps.setBoolean(21, Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()));
-            ps.setObject(22, booking.getTouristTaxCollection(), Types.OTHER);
-            ps.setObject(23, booking.getFkStatoPrenotazioneId());
-            ps.setObject(24, booking.getPaymentStatus(), Types.OTHER);
-            ps.setObject(25, booking.getSettlementStatus(), Types.OTHER);
+            ps.setObject(9, booking.getGuestBirthDate());
+            ps.setObject(10, booking.getGuestSesso());
+            ps.setObject(11, booking.getGuestBirthPlace());
+            ps.setObject(12, booking.getGuestBirthBelfiore());
+            ps.setObject(13, booking.getGuestDocType());
+            ps.setObject(14, booking.getGuestDocNumber());
+            ps.setObject(15, booking.getGuestCountry());
+            ps.setObject(16, booking.getCheckinDate());
+            ps.setObject(17, booking.getCheckoutDate());
+            ps.setObject(18, booking.getNights());
+            ps.setObject(19, booking.getGuests());
+            ps.setObject(20, booking.getGrossAmount());
+            ps.setObject(21, booking.getOtaCommissionAmount());
+            ps.setObject(22, booking.getCleaningAmount());
+            ps.setObject(23, booking.getPmFeeAmount());
+            ps.setObject(24, booking.getOwnerNetAmount());
+            ps.setObject(25, booking.getWithholdingAmount());
+            ps.setObject(26, booking.getAliquotaRitenuta());
+            ps.setObject(27, booking.getTouristTaxAmount());
+            ps.setBoolean(28, Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()));
+            ps.setObject(29, booking.getTouristTaxCollection(), Types.OTHER);
+            ps.setObject(30, booking.getFkStatoPrenotazioneId());
+            ps.setObject(31, booking.getPaymentStatus(), Types.OTHER);
+            ps.setObject(32, booking.getSettlementStatus(), Types.OTHER);
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
@@ -202,6 +212,21 @@ public class BookingDAO {
         log.debug("BookingDAO.countByTenantIdAndStatoPrenotazioneId() - tenantId={}, statoId={}", tenantId, statoId);
         String sql = "SELECT COUNT(*) FROM booking WHERE fk_tenant_id = ? AND fk_stato_prenotazione_id = ?";
         Integer count = jdbcTemplate.queryForObject(sql, Integer.class, tenantId, statoId);
+        return count != null ? count : 0;
+    }
+
+    /**
+     * Prenotazioni con documenti già emessi ('doc_issued') non ancora incluse in alcuna
+     * liquidazione: sono quelle che il prossimo calcolo dovrebbe raccogliere.
+     * Lo stato è risolto per codice sulla lookup, non per id.
+     */
+    public Integer countDaLiquidare(Integer tenantId) {
+        log.debug("BookingDAO.countDaLiquidare() - tenantId={}", tenantId);
+        String sql = "SELECT COUNT(*) FROM booking b " +
+                "JOIN stato_prenotazione sp ON sp.id = b.fk_stato_prenotazione_id " +
+                "WHERE b.fk_tenant_id = ? AND sp.codice = 'doc_issued' " +
+                "AND NOT EXISTS (SELECT 1 FROM settlement_booking sb WHERE sb.fk_booking_id = b.id)";
+        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, tenantId);
         return count != null ? count : 0;
     }
 }

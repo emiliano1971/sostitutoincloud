@@ -1,4 +1,5 @@
 import { get, post, put, patch } from '@/lib/apiClient';
+import type { UtenteListItem } from '@/api/userApi';
 
 export interface TenantListItem {
   id: number;
@@ -10,6 +11,9 @@ export interface TenantListItem {
   administrativeEmail: string;
   phone?: string;
   legalAddress: string;
+  cap?: string;
+  comune?: string;
+  provincia?: string;
   activatedAt?: string;
   createdAt: string;
   propertiesCount: number;
@@ -20,6 +24,7 @@ export interface TenantListItem {
 export interface TenantDetail extends TenantListItem {
   pec?: string;
   updatedAt: string;
+  usersCount: number;
 }
 
 export interface TenantCreateRequest {
@@ -31,6 +36,9 @@ export interface TenantCreateRequest {
   pec?: string;
   phone?: string;
   legalAddress: string;
+  cap?: string;
+  comune?: string;
+  provincia?: string;
 }
 
 export async function getTenants(): Promise<TenantListItem[]> {
@@ -58,10 +66,32 @@ export interface TenantUpdateRequest {
   pec?: string;
   phone?: string;
   legalAddress?: string;
+  cap?: string;
+  comune?: string;
+  provincia?: string;
 }
 
 export async function updateTenant(id: number, data: TenantUpdateRequest): Promise<TenantDetail> {
   return put<TenantDetail>(`/admin/tenants/${id}`, data);
+}
+
+export interface TenantAdminCreateRequest {
+  email: string;
+  firstName: string;
+  lastName: string;
+  password: string;
+}
+
+/** Crea il primo utente amministratore del tenant — il ruolo tenant_admin è forzato dal backend. */
+export async function createTenantAdmin(
+  tenantId: number,
+  data: TenantAdminCreateRequest,
+): Promise<UtenteListItem> {
+  return post<UtenteListItem>(`/admin/tenants/${tenantId}/users`, data);
+}
+
+export async function getTenantUsers(tenantId: number): Promise<UtenteListItem[]> {
+  return get<UtenteListItem[]>(`/admin/tenants/${tenantId}/users`);
 }
 
 export interface TenantSummary {

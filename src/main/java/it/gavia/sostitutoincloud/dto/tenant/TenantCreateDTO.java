@@ -17,4 +17,8 @@ public class TenantCreateDTO {
     private String pec;
     private String phone;
     private String legalAddress;
+    // Sede legale scomposta per l'XML SDI
+    private String cap;
+    private String comune;
+    private String provincia;
 }

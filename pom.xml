@@ -138,6 +138,25 @@
             <version>3.0.3</version>
         </dependency>
 
+        <!-- ── PDF da HTML (fattura PM / ricevuta owner) ──
+             NB: si usa il fork at.datenwort (1.1.4) e NON com.openhtmltopdf:1.0.10.
+             Motivo: 1.0.10 è compilato contro PDFBox 2.0.24, mentre qui PDFBox è 3.0.3
+             (serve a F24PdfService, che usa org.apache.pdfbox.Loader, API solo di PDFBox 3).
+             Maven risolve una sola versione di org.apache.pdfbox:pdfbox → 3.0.3, quindi
+             openhtmltopdf 1.0.10 romperebbe a runtime. Il fork 1.1.4 usa PDFBox 3.0.0,
+             mantiene gli stessi package/API (com.openhtmltopdf.pdfboxout.PdfRendererBuilder)
+             ed è compatibile con 3.0.3. -->
+        <dependency>
+            <groupId>at.datenwort.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-pdfbox</artifactId>
+            <version>1.1.4</version>
+        </dependency>
+        <dependency>
+            <groupId>at.datenwort.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-slf4j</artifactId>
+            <version>1.1.4</version>
+        </dependency>
+
         <!-- ── .env → Spring Environment (credenziali DB) ── -->
         <dependency>
             <groupId>me.paulschwarz</groupId>

@@ -1,4 +1,5 @@
-import { get, post, patch } from '@/lib/apiClient';
+import { get, post, patch, getToken } from '@/lib/apiClient';
+import { getConfig } from '@/config/AppConfig';
 
 export interface CuListItem {
   id: number;
@@ -50,4 +51,42 @@ export async function generaCuBatch(taxYear: number): Promise<CuGeneraBatchRespo
 
 export async function updateCuStatus(id: number, stato: string): Promise<CuListItem> {
   return patch<CuListItem>(`/cu/${id}/status`, { stato });
+}
+
+/**
+ * Scarica il PDF della CU (GET /api/cu/{id}/pdf) e avvia il download nel browser.
+ * Non usa apiClient perché la risposta è un blob, non JSON.
+ */
+export async function downloadCuPdf(id: number, anno: number, ownerName: string): Promise<void> {
+  const base = getConfig().apiBaseUrl;
+  const token = getToken();
+  const res = await fetch(`${base}/cu/${id}/pdf`, {
+    headers: {
+      'Accept': 'application/pdf',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    let message = `Errore ${res.status} durante la generazione del PDF`;
+    try {
+      const json = await res.json();
+      if (json.message) message = json.message;
+    } catch { /* body non JSON */ }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    // Nome leggibile lato utente: il backend usa il CF, qui il nome del proprietario.
+    link.download = `CU_${anno}_${(ownerName ?? '').replace(/[^A-Za-z0-9]+/g, '_') || 'proprietario'}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

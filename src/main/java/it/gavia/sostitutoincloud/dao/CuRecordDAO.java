@@ -63,6 +63,19 @@ public class CuRecordDAO {
         return jdbcTemplate.query(sql, cuRecordRowMapper, tenantId, ownerId);
     }
 
+    /**
+     * CU di un proprietario per un anno: la coppia owner+anno è unica per tenant,
+     * quindi al massimo un record.
+     */
+    public Optional<CuRecord> findByTenantOwnerYear(Integer tenantId, Integer ownerId, Integer taxYear) {
+        log.debug("CuRecordDAO.findByTenantOwnerYear() - tenantId={}, ownerId={}, taxYear={}",
+                tenantId, ownerId, taxYear);
+        String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? AND tax_year = ? "
+                + "ORDER BY id LIMIT 1";
+        List<CuRecord> result = jdbcTemplate.query(sql, cuRecordRowMapper, tenantId, ownerId, taxYear);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
     public List<CuRecord> findByTenantIdAndTaxYear(Integer tenantId, Integer taxYear) {
         log.debug("CuRecordDAO.findByTenantIdAndTaxYear() - tenantId={}, taxYear={}", tenantId, taxYear);
         String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND tax_year = ? ORDER BY id";

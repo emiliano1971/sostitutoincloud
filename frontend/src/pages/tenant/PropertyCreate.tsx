@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, Building2, Hash, Globe, Save, Loader2 } from 'lucide-react';
+import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { getOwners, type OwnerListItem } from '@/api/ownerApi';
 import { createProperty } from '@/api/propertyApi';
 import { useToast } from '@/hooks/use-toast';
@@ -119,11 +120,25 @@ const PropertyCreate = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Città *</Label>
-                <Input value={form.city} onChange={e => update('city', e.target.value)} placeholder="es. Roma" />
+                <ComuneAutocomplete
+                  value={form.city}
+                  placeholder="es. Roma"
+                  requireValidComune
+                  // Città svuotata (testo non valido): anche la regione derivata va azzerata.
+                  onChange={nome => setForm(prev => ({ ...prev, city: nome, region: nome ? prev.region : '' }))}
+                  onSelect={c => setForm(prev => ({ ...prev, city: c.nome, region: c.regione }))}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Regione</Label>
-                <Input value={form.region} onChange={e => update('region', e.target.value)} placeholder="es. Lazio" />
+                <Input
+                  value={form.region}
+                  readOnly
+                  tabIndex={-1}
+                  placeholder="dal comune"
+                  className="bg-muted text-muted-foreground cursor-not-allowed"
+                />
+                <p className="text-xs text-muted-foreground">Compilata automaticamente dal comune selezionato</p>
               </div>
             </div>
           </CardContent>

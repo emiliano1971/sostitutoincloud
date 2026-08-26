@@ -68,6 +68,10 @@ const BookingsList = () => {
   const dateTo = searchParams.get('dateTo') ?? '';
   const datePreset = searchParams.get('preset') ?? '';
   const [qInput, setQInput] = useState(searchParams.get('q') ?? '');
+  // Input date locali: scrivere l'URL a ogni keystroke rimonterebbe il valore
+  // mentre l'utente digita l'anno a mano, azzerando il campo. L'URL si aggiorna onBlur.
+  const [dateFromInput, setDateFromInput] = useState(dateFrom);
+  const [dateToInput, setDateToInput] = useState(dateTo);
   const [allBookings, setAllBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +96,10 @@ const BookingsList = () => {
 
   // Riallinea l'input al valore URL (refresh / back-forward).
   useEffect(() => { setQInput(search); }, [search]);
+
+  // Riallinea gli input date quando l'URL cambia dall'esterno (preset, X, back/forward).
+  useEffect(() => { setDateFromInput(dateFrom); }, [dateFrom]);
+  useEffect(() => { setDateToInput(dateTo); }, [dateTo]);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -319,15 +327,27 @@ const BookingsList = () => {
               <span className="text-sm text-muted-foreground">Dal</span>
               <Input
                 type="date"
-                value={dateFrom}
-                onChange={e => { updateFilter('dateFrom', e.target.value || null); updateFilter('preset', null); }}
+                value={dateFromInput}
+                onChange={e => setDateFromInput(e.target.value)}
+                onBlur={e => {
+                  if (e.target.value !== dateFrom) {
+                    updateFilter('dateFrom', e.target.value || null);
+                    updateFilter('preset', null);
+                  }
+                }}
                 className="w-[150px]"
               />
               <span className="text-sm text-muted-foreground">Al</span>
               <Input
                 type="date"
-                value={dateTo}
-                onChange={e => { updateFilter('dateTo', e.target.value || null); updateFilter('preset', null); }}
+                value={dateToInput}
+                onChange={e => setDateToInput(e.target.value)}
+                onBlur={e => {
+                  if (e.target.value !== dateTo) {
+                    updateFilter('dateTo', e.target.value || null);
+                    updateFilter('preset', null);
+                  }
+                }}
                 className="w-[150px]"
               />
               {(dateFrom || dateTo) && (

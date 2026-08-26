@@ -55,6 +55,11 @@ public class TenantSettingsService {
                     .pec(dto.getPec() != null ? dto.getPec() : tenant.getPec())
                     .phone(dto.getPhone() != null ? dto.getPhone() : tenant.getPhone())
                     .legalAddress(dto.getLegalAddress() != null ? dto.getLegalAddress() : tenant.getLegalAddress())
+                    // Sede scomposta: da riportare sempre, altrimenti l'UPDATE del DAO
+                    // azzererebbe cap/comune/provincia non presenti nel builder.
+                    .cap(dto.getCap() != null ? dto.getCap() : tenant.getCap())
+                    .comune(dto.getComune() != null ? dto.getComune() : tenant.getComune())
+                    .provincia(dto.getProvincia() != null ? dto.getProvincia() : tenant.getProvincia())
                     .build();
             tenant = tenantDAO.update(toUpdate);
         }
@@ -158,7 +163,10 @@ public class TenantSettingsService {
                 || dto.getAdministrativeEmail() != null
                 || dto.getPec() != null
                 || dto.getPhone() != null
-                || dto.getLegalAddress() != null;
+                || dto.getLegalAddress() != null
+                || dto.getCap() != null
+                || dto.getComune() != null
+                || dto.getProvincia() != null;
     }
 
     private TenantSettings defaultSettings(Integer tenantId) {
@@ -193,6 +201,9 @@ public class TenantSettingsService {
                 .pec(tenant.getPec())
                 .phone(tenant.getPhone())
                 .legalAddress(tenant.getLegalAddress())
+                .cap(tenant.getCap())
+                .comune(tenant.getComune())
+                .provincia(tenant.getProvincia())
                 .withholdingRatePrimary(s.getWithholdingRatePrimary())
                 .withholdingRateSecondary(s.getWithholdingRateSecondary())
                 .codiceTributoF24(s.getCodiceTributoF24())

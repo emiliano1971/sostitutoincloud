@@ -19,7 +19,10 @@ public class TenantSettingsUpdateDTO {
     private String administrativeEmail;
     private String pec;
     private String phone;
-    private String legalAddress;
+    private String legalAddress;   // solo via e civico
+    private String cap;
+    private String comune;
+    private String provincia;
 
     // Parametri fiscali
     private BigDecimal withholdingRatePrimary;

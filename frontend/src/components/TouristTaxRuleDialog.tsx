@@ -139,7 +139,9 @@ const TouristTaxRuleDialog = ({ open, onClose, onSaved, regola }: TouristTaxRule
               <Label className="text-xs">Comune *</Label>
               <ComuneAutocomplete
                 value={comune}
-                onChange={(nome) => setComune(nome)}
+                requireValidComune
+                // Comune svuotato (testo non valido): azzera anche provincia e regione derivate.
+                onChange={(nome) => { setComune(nome); if (!nome) { setProvincia(''); setRegione(''); } }}
                 onSelect={(c) => { setComune(c.nome); setProvincia(c.siglaProvincia); setRegione(c.regione); }}
                 placeholder="Cerca comune…"
               />

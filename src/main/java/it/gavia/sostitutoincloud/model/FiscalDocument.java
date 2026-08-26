@@ -37,6 +37,11 @@ public class FiscalDocument {
     private Integer fkDocumentoCollegatoId;
     private Integer fkStatoDocumentoId;
     private String sdiIdentifier;
+    // Invio SDI (migration 010)
+    private String sdiProgressivo;
+    private String sdiFilePath;
+    private LocalDateTime sdiSentAt;
+    private String sdiErrorMsg;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

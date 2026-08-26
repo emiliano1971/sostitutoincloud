@@ -1,11 +1,12 @@
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Receipt, Printer, Send, Download } from 'lucide-react';
+import { Receipt, Printer, Send, Download, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
-import type { DocumentGenerateResponse } from '@/api/documentApi';
+import { downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface ReceiptOwnerDialogProps {
@@ -31,6 +32,7 @@ const statoDocLabels: Record<string, string> = {
 };
 
 const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, generatedDoc, existingDoc, isSaving, onEmetti }: ReceiptOwnerDialogProps) => {
+  const [isDownloading, setIsDownloading] = useState(false);
   const receiptNumber = existingDoc?.documentNumber
     ?? generatedDoc?.documentNumber
     ?? `RIC-${new Date().getFullYear()}-${String(booking.booking_id).padStart(4, '0')}`;
@@ -55,6 +57,24 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
   // Semantica bottoni in base allo stato: 'doc_issued' = documenti già emessi (solo stampa/download),
   // altrimenti emissione (azione irreversibile).
   const isDocIssued = booking.booking_status === 'doc_issued';
+
+  // Il PDF server-side richiede l'id del documento fiscale già emesso.
+  const docId = existingDoc?.id ?? generatedDoc?.documentId;
+  const handleDownloadPdf = async () => {
+    if (!docId) return;
+    setIsDownloading(true);
+    try {
+      await downloadDocumentPdf(docId, receiptNumber);
+    } catch (err) {
+      toast({
+        title: 'Errore download PDF',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   // Stampa in una finestra dedicata: window.print() sul dialog Radix (portal) stampa l'intera app.
   const handlePrint = () => {
@@ -226,10 +246,20 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
           {isDocIssued ? (
             // Documenti già emessi: azione ripetibile, solo stampa/download.
-            <Button className="gap-2" onClick={handlePrint}>
-              <Printer className="h-4 w-4" />
-              Stampa
-            </Button>
+            <>
+              <Button className="gap-2" onClick={handlePrint}>
+                <Printer className="h-4 w-4" />
+                Stampa
+              </Button>
+              {docId && (
+                <Button variant="outline" className="gap-2" onClick={handleDownloadPdf} disabled={isDownloading}>
+                  {isDownloading
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Download className="h-4 w-4" />}
+                  Scarica PDF
+                </Button>
+              )}
+            </>
           ) : existingDoc ? (
             <Button className="gap-2" disabled>
               <Receipt className="h-4 w-4" />

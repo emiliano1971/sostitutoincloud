@@ -44,6 +44,20 @@ public class UserManagementService {
         if (!"pm_user".equals(dto.getRuolo()) && !"owner_user".equals(dto.getRuolo())) {
             throw new IllegalArgumentException("Ruolo non valido: ammessi solo pm_user o owner_user");
         }
+        return createInternal(tenantId, dto, dto.getRuolo());
+    }
+
+    /**
+     * Crea l'utente amministratore di un tenant — usato dal super_admin
+     * (POST /api/admin/tenants/{tenantId}/users) per il primo accesso di un tenant nuovo.
+     * Il ruolo è forzato a tenant_admin e NON passa da create(), che ammette solo
+     * pm_user/owner_user: così un tenant_admin non può crearne altri da /api/users.
+     */
+    public UtenteListDTO createTenantAdmin(Integer tenantId, UtenteCreateDTO dto) {
+        return createInternal(tenantId, dto, "tenant_admin");
+    }
+
+    private UtenteListDTO createInternal(Integer tenantId, UtenteCreateDTO dto, String ruolo) {
         // Valida email univoca
         if (dto.getEmail() == null || dto.getEmail().isBlank()) {
             throw new IllegalArgumentException("Email obbligatoria");
@@ -62,7 +76,7 @@ public class UserManagementService {
         }
 
         Integer fkOwnerId = null;
-        if ("owner_user".equals(dto.getRuolo())) {
+        if ("owner_user".equals(ruolo)) {
             if (dto.getFkOwnerId() == null) {
                 throw new IllegalArgumentException("Proprietario obbligatorio per un utente owner_user");
             }
@@ -84,7 +98,7 @@ public class UserManagementService {
                 .firstName(dto.getFirstName())
                 .lastName(dto.getLastName())
                 .passwordHash(passwordEncoder.encode(dto.getPassword()))
-                .ruolo(dto.getRuolo())
+                .ruolo(ruolo)
                 .attivo(true)
                 .fkOwnerId(fkOwnerId)
                 .build();

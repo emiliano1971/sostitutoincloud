@@ -24,10 +24,15 @@ public class TenantDetailDTO {
     private String pec;
     private String phone;
     private String legalAddress;
+    // Sede legale scomposta per l'XML SDI
+    private String cap;
+    private String comune;
+    private String provincia;
     private LocalDate activatedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Integer propertiesCount;
     private Integer ownersCount;
     private Integer bookingsCount;
+    private Integer usersCount;   // utenti attivi del tenant
 }

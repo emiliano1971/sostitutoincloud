@@ -30,6 +30,7 @@ import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
+import it.gavia.sostitutoincloud.util.TenantAddressUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -488,7 +489,8 @@ public class BookingService {
                 .tenantLegalName(tenant != null ? tenant.getLegalName() : null)
                 .tenantVatNumber(tenant != null ? tenant.getVatNumber() : null)
                 .tenantTaxCode(tenant != null ? tenant.getTaxCode() : null)
-                .tenantLegalAddress(tenant != null ? tenant.getLegalAddress() : null)
+                // Indirizzo completo (via + CAP/comune/provincia) per l'anteprima fattura PM
+                .tenantLegalAddress(TenantAddressUtils.indirizzoCompleto(tenant))
                 .tenantPec(tenant != null ? tenant.getPec() : null)
                 // documenti fiscali associati alla prenotazione
                 .documenti(mapDocumenti(b.getId(), maps))

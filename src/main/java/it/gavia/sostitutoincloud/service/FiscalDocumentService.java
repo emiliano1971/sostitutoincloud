@@ -3,6 +3,9 @@ package it.gavia.sostitutoincloud.service;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.CuRecordDAO;
+import it.gavia.sostitutoincloud.dao.F24RecordDAO;
+import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.SdiEsitoDAO;
@@ -21,6 +24,7 @@ import it.gavia.sostitutoincloud.model.SdiEsito;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
+import it.gavia.sostitutoincloud.util.TenantAddressUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
@@ -48,6 +52,9 @@ public class FiscalDocumentService {
     private final SdiEsitoDAO sdiEsitoDAO;
     private final TenantDAO tenantDAO;
     private final OwnerProfileDAO ownerProfileDAO;
+    private final WithholdingLedgerDAO withholdingLedgerDAO;
+    private final F24RecordDAO f24RecordDAO;
+    private final CuRecordDAO cuRecordDAO;
 
     public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
                                   BookingDAO bookingDAO,
@@ -57,7 +64,13 @@ public class FiscalDocumentService {
                                   StatoDocumentoDAO statoDocumentoDAO,
                                   SdiEsitoDAO sdiEsitoDAO,
                                   TenantDAO tenantDAO,
-                                  OwnerProfileDAO ownerProfileDAO) {
+                                  OwnerProfileDAO ownerProfileDAO,
+                                  WithholdingLedgerDAO withholdingLedgerDAO,
+                                  F24RecordDAO f24RecordDAO,
+                                  CuRecordDAO cuRecordDAO) {
+        this.withholdingLedgerDAO = withholdingLedgerDAO;
+        this.f24RecordDAO = f24RecordDAO;
+        this.cuRecordDAO = cuRecordDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
@@ -204,9 +217,14 @@ public class FiscalDocumentService {
                             .statoDocumento(stato != null ? stato.getCodice() : null)
                             .sdiIdentifier(d.getSdiIdentifier())
                             .sdiEsito(sdiEsito != null ? sdiEsito.getCodice() : null)
+                            .sdiProgressivo(d.getSdiProgressivo())
+                            .sdiFilePath(d.getSdiFilePath())
+                            .sdiSentAt(d.getSdiSentAt())
+                            .sdiErrorMsg(d.getSdiErrorMsg())
                             .propertyName(property != null ? property.getDisplayName() : null)
                             .channelName(canale != null ? canale.getNome() : null)
                             .fkBookingId(d.getFkBookingId())
+                            .externalBookingId(booking != null ? booking.getExternalBookingId() : null)
                             .fkOwnerId(d.getFkOwnerId())
                             .ownerName(ownerDisplayName(owner))
                             .createdAt(d.getCreatedAt())
@@ -266,6 +284,10 @@ public class FiscalDocumentService {
                 .statoDocumento(stato != null ? stato.getCodice() : null)
                 .sdiIdentifier(doc.getSdiIdentifier())
                 .sdiEsito(sdiEsito != null ? sdiEsito.getCodice() : null)
+                .sdiProgressivo(doc.getSdiProgressivo())
+                .sdiFilePath(doc.getSdiFilePath())
+                .sdiSentAt(doc.getSdiSentAt())
+                .sdiErrorMsg(doc.getSdiErrorMsg())
                 .propertyName(property != null ? property.getDisplayName() : null)
                 .channelName(canale != null ? canale.getNome() : null)
                 .fkBookingId(doc.getFkBookingId())
@@ -279,12 +301,57 @@ public class FiscalDocumentService {
                 .tenantLegalName(tenant != null ? tenant.getLegalName() : null)
                 .tenantVatNumber(tenant != null ? tenant.getVatNumber() : null)
                 .tenantTaxCode(tenant != null ? tenant.getTaxCode() : null)
-                .tenantLegalAddress(tenant != null ? tenant.getLegalAddress() : null)
+                // Indirizzo completo (via + CAP/comune/provincia): la card Emittente lo mostra
+                // su una riga, come il PDF.
+                .tenantLegalAddress(TenantAddressUtils.indirizzoCompleto(tenant))
                 .tenantPec(tenant != null ? tenant.getPec() : null)
                 .build();
 
+        // F24 e CU riguardano la ritenuta, quindi solo la ricevuta owner.
+        if (tipo != null && !Boolean.TRUE.equals(tipo.getRichiedeIva())) {
+            popolaF24(detail, doc);
+            popolaCu(detail, doc, tenantId);
+            log.debug("FiscalDocumentService: f24RecordId={} cuRecordId={} per doc={}",
+                    detail.getF24RecordId(), detail.getCuRecordId(), documentId);
+        }
+
         log.info("FiscalDocumentService.findById() - tenantId={}, documentId={}", tenantId, documentId);
         return Optional.of(detail);
+    }
+
+    /**
+     * Versamento F24 in cui è finita la ritenuta della ricevuta: si passa dalla riga
+     * di withholding_ledger collegata al documento.
+     */
+    private void popolaF24(DocumentDetailDTO detail, FiscalDocument doc) {
+        withholdingLedgerDAO.findByFiscalDocumentId(doc.getId()).ifPresent(wl -> {
+            if (wl.getFkF24RecordId() == null) {
+                return;   // ritenuta registrata ma non ancora inclusa in un F24
+            }
+            f24RecordDAO.findById(wl.getFkF24RecordId()).ifPresent(f24 -> {
+                detail.setF24RecordId(f24.getId());
+                detail.setF24Periodo(String.format("%02d/%d", f24.getPeriodoMese(), f24.getPeriodoAnno()));
+                detail.setF24Stato(f24.getStato());
+                detail.setF24Pagato("paid".equals(f24.getStato()));
+            });
+        });
+    }
+
+    /**
+     * CU del proprietario per l'anno della ricevuta. Serve l'owner denormalizzato sul
+     * documento: sui documenti che non l'hanno la CU non è determinabile.
+     */
+    private void popolaCu(DocumentDetailDTO detail, FiscalDocument doc, Integer tenantId) {
+        if (doc.getFkOwnerId() == null || doc.getIssueDate() == null) {
+            return;
+        }
+        Integer anno = doc.getIssueDate().getYear();
+        cuRecordDAO.findByTenantOwnerYear(tenantId, doc.getFkOwnerId(), anno).ifPresent(cu -> {
+            detail.setCuRecordId(cu.getId());
+            detail.setCuTaxYear(cu.getTaxYear());
+            detail.setCuStato(cu.getStato());
+            detail.setCuConsegnata("delivered".equals(cu.getStato()) || "sent".equals(cu.getStato()));
+        });
     }
 
     /**

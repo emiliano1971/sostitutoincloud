@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<!--
+  Template ricevuta owner — placeholder {NOME_CAMPO} sostituiti da DocumentPdfService
+  con String.replace(). NON è un template Thymeleaf.
+
+  Differenze rispetto a fattura-pm.html:
+  - titolo RICEVUTA
+  - intestazione = dati del proprietario (locatore), non del PM
+  - destinatario = dati del PM
+  - nessuna colonna IVA (canone fuori campo IVA)
+  - totali con ritenuta d'acconto
+
+  NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox:
+  le zone a più colonne usano display:table/table-cell.
+-->
+<style>
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    margin: 20px;
+    color: #333;
+  }
+  .header {
+    display: table;
+    width: 100%;
+    margin-bottom: 30px;
+    border-bottom: 2px solid #333;
+    padding-bottom: 15px;
+  }
+  .header-left {
+    display: table-cell;
+    width: 60%;
+    vertical-align: top;
+  }
+  .header-right {
+    display: table-cell;
+    width: 40%;
+    vertical-align: top;
+  }
+  .company-name {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+  .doc-title {
+    font-size: 20px;
+    font-weight: bold;
+    text-align: right;
+    color: #1a1a2e;
+  }
+  .doc-number {
+    font-size: 14px;
+    text-align: right;
+    color: #666;
+  }
+  .section {
+    margin-bottom: 20px;
+  }
+  .section-title {
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: #666;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 3px;
+  }
+  .cols {
+    display: table;
+    width: 100%;
+    margin-bottom: 20px;
+  }
+  .col {
+    display: table-cell;
+    width: 33.33%;
+    vertical-align: top;
+    padding-right: 15px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 15px;
+  }
+  th {
+    background: #f5f5f5;
+    padding: 8px;
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    color: #666;
+    border-bottom: 1px solid #ddd;
+  }
+  td {
+    padding: 8px;
+    border-bottom: 1px solid #eee;
+  }
+  .text-right { text-align: right; }
+  .totals {
+    margin-left: auto;
+    width: 300px;
+  }
+  .totals table td {
+    padding: 5px 8px;
+  }
+  .total-row {
+    font-weight: bold;
+    font-size: 13px;
+    border-top: 2px solid #333 !important;
+  }
+  .riga-note {
+    color: #666;
+    font-size: 9px;
+  }
+  .note {
+    margin-top: 20px;
+    font-size: 9px;
+    color: #666;
+    line-height: 1.5;
+  }
+  .footer {
+    margin-top: 40px;
+    font-size: 9px;
+    color: #999;
+    border-top: 1px solid #eee;
+    padding-top: 10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- INTESTAZIONE — dati del proprietario (locatore) -->
+<div class="header">
+  <div class="header-left">
+    <div class="company-name">{OWNER_NAME}</div>
+    <div>C.F.: {OWNER_TAX_CODE}</div>
+  </div>
+  <div class="header-right">
+    <div class="doc-title">RICEVUTA</div>
+    <div class="doc-number">{DOCUMENT_NUMBER}</div>
+    <div class="doc-number">Data: {ISSUE_DATE}</div>
+  </div>
+</div>
+
+<!-- DESTINATARIO (PM) + IMMOBILE + SOGGIORNO -->
+<div class="cols">
+  <div class="col">
+    <div class="section-title">Destinatario</div>
+    <div><strong>{TENANT_LEGAL_NAME}</strong></div>
+    <div>P.IVA: {TENANT_VAT_NUMBER}</div>
+    <div>C.F.: {TENANT_TAX_CODE}</div>
+    <div>{TENANT_LEGAL_ADDRESS}</div>
+  </div>
+  <div class="col">
+    <div class="section-title">Immobile</div>
+    <div><strong>{PROPERTY_NAME}</strong></div>
+    <div>{PROPERTY_ADDRESS}</div>
+    <div>{PROPERTY_CITY}</div>
+  </div>
+  <div class="col">
+    <div class="section-title">Soggiorno</div>
+    <div>Ospite: {GUEST_NAME}</div>
+    <div>Check-in: {CHECKIN_DATE}</div>
+    <div>Check-out: {CHECKOUT_DATE}</div>
+    <div>Notti: {NIGHTS}</div>
+    <div>Ospiti: {GUESTS}</div>
+  </div>
+</div>
+
+<!-- RIGHE RICEVUTA — nessuna colonna IVA -->
+<div class="section">
+  <div class="section-title">
+    Dettaglio
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Descrizione</th>
+        <th class="text-right">Importo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {RIGHE_RICEVUTA}
+    </tbody>
+  </table>
+</div>
+
+<!-- TOTALI — con ritenuta d'acconto -->
+<div class="totals">
+  <table>
+    <tr>
+      <td>Canone lordo</td>
+      <td class="text-right">
+        {CANONE_LORDO} &#8364;
+      </td>
+    </tr>
+    <tr>
+      <td>Ritenuta {ALIQUOTA_RITENUTA}%</td>
+      <td class="text-right" style="color:red">
+        -{RITENUTA} &#8364;
+      </td>
+    </tr>
+    <tr>
+      <td>Marca da bollo</td>
+      <td class="text-right">
+        {BOLLO} &#8364;
+      </td>
+    </tr>
+    <tr class="total-row">
+      <td>NETTO A PAGARE</td>
+      <td class="text-right">
+        {NETTO_PAGARE} &#8364;
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div class="note">
+  Operazione fuori campo IVA — canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017,
+  soggetto a cedolare secca (art. 3 D.Lgs. 23/2011).<br/>
+  Ritenuta d'acconto trattenuta e versata dal sostituto d'imposta.<br/>
+  La marca da bollo è indicata a fini informativi e non è scalata dal netto a pagare.
+</div>
+
+<div class="footer">
+  Documento generato da Sostituto in Cloud
+</div>
+</body>
+</html>

@@ -51,9 +51,20 @@ public class F24Service {
     }
 
     public F24GenerazioneResultDTO generaF24(Integer tenantId, Integer anno, Integer mese) {
-        // 1. Un solo F24 per tenant/periodo
-        if (!f24RecordDAO.findByTenantAndPeriodo(tenantId, anno, mese).isEmpty()) {
-            throw new IllegalStateException("F24 già generato per periodo " + mese + "/" + anno);
+        // 1. Un solo F24 per tenant/periodo. Se esiste già:
+        //    - pagato   → intoccabile
+        //    - altrimenti → si ricalcola, agganciando le ritenute del periodo non ancora incluse
+        //      (es. prenotazioni importate dopo la prima generazione), senza crearne un secondo.
+        List<F24Record> esistenti = f24RecordDAO.findByTenantAndPeriodo(tenantId, anno, mese);
+        if (!esistenti.isEmpty()) {
+            F24Record esistente = esistenti.get(0);
+            if (STATO_PAID.equals(esistente.getStato())) {
+                throw new IllegalStateException("F24 già pagato per periodo " + mese + "/" + anno
+                        + " — impossibile modificare");
+            }
+            log.info("F24Service.generaF24() - F24 {} già presente per {}/{} (stato={}): ricalcolo",
+                    esistente.getId(), mese, anno, esistente.getStato());
+            return ricalcola(tenantId, esistente.getId());
         }
 
         // 2. Ritenute da versare del periodo

@@ -42,6 +42,10 @@ public class Tenant {
     private String phone;
 
     private String legalAddress;
+    // Sede legale scomposta (migration 011) — usata dall'XML SDI
+    private String cap;
+    private String comune;
+    private String provincia;
 
     /** Data attivazione — nullable finché in stato draft */
     private LocalDate activatedAt;

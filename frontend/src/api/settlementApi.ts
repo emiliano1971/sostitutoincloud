@@ -77,3 +77,8 @@ export async function updateSettlementStatus(
 ): Promise<SettlementListItem> {
   return patch<SettlementListItem>(`/settlements/${id}/status`, { stato });
 }
+
+/** Prenotazioni con documenti emessi non ancora incluse in una liquidazione. */
+export async function getCountDaLiquidare(): Promise<{ count: number }> {
+  return get<{ count: number }>('/settlements/da-liquidare');
+}

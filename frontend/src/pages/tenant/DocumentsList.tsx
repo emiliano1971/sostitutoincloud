@@ -4,9 +4,11 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { getDocuments, type DocumentListItem } from '@/api/documentApi';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { getDocuments, elaboraRisposteSdi, type DocumentListItem } from '@/api/documentApi';
+import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 const statusColors: Record<string, string> = {
@@ -53,10 +55,26 @@ const DocumentsList = () => {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string>('issueDate');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [isProcessingSdi, setIsProcessingSdi] = useState(false);
+  const [sdiDettagli, setSdiDettagli] = useState<string[] | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const { toast } = useToast();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Filtro per data emissione persistito nell'URL, stesso pattern di BookingsList.
+  const dateFrom = searchParams.get('dateFrom') ?? '';
+  const dateTo = searchParams.get('dateTo') ?? '';
+  const datePreset = searchParams.get('preset') ?? '';
   const ownerIdParam = searchParams.get('ownerId');
   const ownerIdFilter = ownerIdParam ? parseInt(ownerIdParam) : null;
+  // Input date locali: scrivere l'URL a ogni keystroke rimonterebbe il valore
+  // mentre l'utente digita l'anno a mano, azzerando il campo. L'URL si aggiorna onBlur.
+  const [dateFromInput, setDateFromInput] = useState(dateFrom);
+  const [dateToInput, setDateToInput] = useState(dateTo);
+
+  // Riallinea gli input date quando l'URL cambia dall'esterno (preset, X, back/forward).
+  useEffect(() => { setDateFromInput(dateFrom); }, [dateFrom]);
+  useEffect(() => { setDateToInput(dateTo); }, [dateTo]);
 
   const handleSort = (key: string) => {
     if (key === sortKey) {
@@ -74,15 +92,82 @@ const DocumentsList = () => {
       .then(setDocs)
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
-  }, [statusFilter]);
+  }, [statusFilter, reloadKey]);
 
-  const filtered = docs.filter(d =>
-    (search === '' ||
-      d.documentNumber.toLowerCase().includes(search.toLowerCase()) ||
-      d.recipientName.toLowerCase().includes(search.toLowerCase()) ||
-      (d.ownerName ?? '').toLowerCase().includes(search.toLowerCase()))
-    && (ownerIdFilter == null || d.fkOwnerId === ownerIdFilter)
-  );
+  const updateFilter = (key: string, value: string | null) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (value === null || value === '') next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+
+  const applyPreset = (preset: string) => {
+    const oggi = new Date();
+    const fmt = (d: Date) => d.toISOString().split('T')[0];
+    let from = '', to = '';
+    switch (preset) {
+      case 'ieri': { const d = new Date(oggi); d.setDate(oggi.getDate() - 1); from = fmt(d); to = fmt(d); break; }
+      case '3gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 3); from = fmt(d); to = fmt(oggi); break; }
+      case '7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 7); from = fmt(d); to = fmt(oggi); break; }
+      case '14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 14); from = fmt(d); to = fmt(oggi); break; }
+      default: preset = '';
+    }
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (preset) next.set('preset', preset); else next.delete('preset');
+      if (from) next.set('dateFrom', from); else next.delete('dateFrom');
+      if (to) next.set('dateTo', to); else next.delete('dateTo');
+      return next;
+    }, { replace: true });
+  };
+
+  const clearDateFilter = () => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('dateFrom'); next.delete('dateTo'); next.delete('preset');
+      return next;
+    }, { replace: true });
+  };
+
+  // Legge le ricevute SDI da incoming/: aggiorna gli stati e ricarica la lista.
+  const handleElaboraRisposte = async () => {
+    setIsProcessingSdi(true);
+    try {
+      const r = await elaboraRisposteSdi();
+      const parti = [`${r.accettati} accettati`, `${r.scartati} scartati`];
+      if (r.metadati > 0) parti.push(`${r.metadati} metadati`);
+      if (r.errori > 0) parti.push(`${r.errori} errori`);
+      toast({ title: `Elaborati ${r.elaborati}`, description: parti.join(', ') });
+      if (r.dettagli && r.dettagli.length > 0) setSdiDettagli(r.dettagli);
+      setReloadKey(k => k + 1);
+    } catch (err) {
+      toast({
+        title: 'Errore elaborazione risposte SDI',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessingSdi(false);
+    }
+  };
+
+  const filtered = docs
+    .filter(d =>
+      (search === '' ||
+        d.documentNumber.toLowerCase().includes(search.toLowerCase()) ||
+        d.recipientName.toLowerCase().includes(search.toLowerCase()) ||
+        (d.ownerName ?? '').toLowerCase().includes(search.toLowerCase()))
+      && (ownerIdFilter == null || d.fkOwnerId === ownerIdFilter)
+    )
+    // Filtro data emissione: confronto lessicografico su ISO yyyy-MM-dd
+    .filter(d => {
+      if (!dateFrom && !dateTo) return true;
+      const from = dateFrom || '0000-01-01';
+      const to = dateTo || '9999-12-31';
+      return d.issueDate >= from && d.issueDate <= to;
+    });
 
   const ownerFilterName = ownerIdFilter != null
     ? (docs.find(d => d.fkOwnerId === ownerIdFilter)?.ownerName ?? `owner #${ownerIdFilter}`)
@@ -90,8 +175,11 @@ const DocumentsList = () => {
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      const valA = (a as Record<string, unknown>)[sortKey];
-      const valB = (b as Record<string, unknown>)[sortKey];
+      // Indicizzazione con keyof: DocumentListItem è una interface e quindi non ha
+      // index signature implicita — il cast a Record<string, unknown> darebbe TS2352
+      // sui type checker che applicano l'assegnabilità (es. servizio TS di IntelliJ).
+      const valA = a[sortKey as keyof DocumentListItem];
+      const valB = b[sortKey as keyof DocumentListItem];
       const dir = sortDir === 'asc' ? 1 : -1;
       if (valA == null) return 1;
       if (valB == null) return -1;
@@ -127,6 +215,73 @@ const DocumentsList = () => {
                 <SelectItem value="rejected">Rifiutato</SelectItem>
               </SelectContent>
             </Select>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleElaboraRisposte}
+              disabled={isProcessingSdi}
+              title="Legge le ricevute SDI ricevute e aggiorna lo stato dei documenti"
+            >
+              {isProcessingSdi
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <RefreshCw className="h-4 w-4" />}
+              {isProcessingSdi ? 'Elaborazione…' : 'Verifica risposte SDI'}
+            </Button>
+          </div>
+
+          {/* Seconda riga: filtro per data emissione */}
+          <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Dal</span>
+              <Input
+                type="date"
+                value={dateFromInput}
+                onChange={e => setDateFromInput(e.target.value)}
+                onBlur={e => {
+                  if (e.target.value !== dateFrom) {
+                    updateFilter('dateFrom', e.target.value || null);
+                    updateFilter('preset', null);
+                  }
+                }}
+                className="w-[150px]"
+              />
+              <span className="text-sm text-muted-foreground">Al</span>
+              <Input
+                type="date"
+                value={dateToInput}
+                onChange={e => setDateToInput(e.target.value)}
+                onBlur={e => {
+                  if (e.target.value !== dateTo) {
+                    updateFilter('dateTo', e.target.value || null);
+                    updateFilter('preset', null);
+                  }
+                }}
+                className="w-[150px]"
+              />
+              {(dateFrom || dateTo) && (
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Azzera filtro date" onClick={clearDateFilter}>
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {[
+                { key: 'ieri', label: 'Ieri' },
+                { key: '3gg', label: '3gg' },
+                { key: '7gg', label: '7gg' },
+                { key: '14gg', label: '14gg' },
+              ].map(p => (
+                <Button
+                  key={p.key}
+                  variant={datePreset === p.key ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => applyPreset(p.key)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -141,7 +296,12 @@ const DocumentsList = () => {
             type="button"
             className="text-muted-foreground hover:text-foreground"
             title="Rimuovi filtro proprietario"
-            onClick={() => navigate('/documents')}
+            // Rimuove solo ownerId: gli altri filtri (date, preset) restano nell'URL.
+            onClick={() => setSearchParams(prev => {
+              const next = new URLSearchParams(prev);
+              next.delete('ownerId');
+              return next;
+            }, { replace: true })}
           >
             <X className="h-4 w-4" />
           </button>
@@ -182,7 +342,23 @@ const DocumentsList = () => {
               <TableBody>
                 {sorted.slice(0, 20).map(d => (
                   <TableRow key={d.id}>
-                    <TableCell className="font-mono text-xs">{d.documentNumber}</TableCell>
+                    <TableCell>
+                      {/* Numero documento + id prenotazione collegata, cliccabile.
+                          stopPropagation: la riga potrebbe diventare cliccabile in futuro. */}
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-mono text-sm">{d.documentNumber}</span>
+                        {d.fkBookingId && d.externalBookingId && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); navigate(`/bookings/${d.fkBookingId}`); }}
+                            className="text-xs text-primary hover:underline text-left font-mono truncate max-w-[140px]"
+                            title={d.externalBookingId}
+                          >
+                            {d.externalBookingId}
+                          </button>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell><Badge variant="outline" className="text-xs">{d.documentType}</Badge></TableCell>
                     <TableCell className="text-sm font-medium">{d.recipientName}</TableCell>
                     <TableCell className="text-sm">
@@ -203,7 +379,7 @@ const DocumentsList = () => {
                     <TableCell className="text-sm">{d.issueDate}</TableCell>
                     <TableCell className="text-right font-medium">€{d.totalAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</TableCell>
                     <TableCell><Badge variant="outline" className={statusColors[d.statoDocumento]}>{d.statoDocumento}</Badge></TableCell>
-                    <TableCell><Button variant="ghost" size="icon" className="h-7 w-7" onClick={eventvo => navigate(`/documents/${d.id}`)}><Eye className="h-3.5 w-3.5" /></Button></TableCell>
+                    <TableCell><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/documents/${d.id}`)}><Eye className="h-3.5 w-3.5" /></Button></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -211,8 +387,29 @@ const DocumentsList = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Dettagli dell'elaborazione SDI: scarti, mancate consegne, file ignorati */}
+      <Dialog open={sdiDettagli !== null} onOpenChange={open => { if (!open) setSdiDettagli(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Esiti da verificare</DialogTitle>
+            <DialogDescription>
+              Risposte SDI che richiedono attenzione. Le consegne andate a buon fine non sono elencate.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="space-y-2 text-sm max-h-[60vh] overflow-y-auto">
+            {(sdiDettagli ?? []).map((d, i) => (
+              <li key={i} className="flex items-start gap-2 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 text-destructive shrink-0" />
+                <span className="break-words">{d}</span>
+              </li>
+            ))}
+          </ul>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 export default DocumentsList;
+

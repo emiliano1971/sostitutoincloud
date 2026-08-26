@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, Building2, Mail, Save, Loader2 } from 'lucide-react';
+import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { createTenant } from '@/api/tenantApi';
 import { useToast } from '@/hooks/use-toast';
 
@@ -24,6 +25,9 @@ const TenantCreate = () => {
     pec: '',
     phone: '',
     legalAddress: '',
+    cap: '',
+    comune: '',
+    provincia: '',
   });
 
   const update = (field: string, value: string) => {
@@ -39,7 +43,9 @@ const TenantCreate = () => {
     if (form.vatNumber.trim() && form.vatNumber.trim().length !== 11) return 'La Partita IVA deve avere esattamente 11 cifre';
     if (!form.administrativeEmail.trim()) return 'Email amministrativa obbligatoria';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.administrativeEmail.trim())) return 'Formato email non valido';
-    if (!form.legalAddress.trim()) return 'Indirizzo sede legale obbligatorio';
+    if (!form.legalAddress.trim()) return 'Indirizzo obbligatorio';
+    if (!form.cap.trim()) return 'CAP obbligatorio';
+    if (!form.comune.trim()) return 'Comune obbligatorio';
     return null;
   };
 
@@ -61,6 +67,9 @@ const TenantCreate = () => {
         pec:                form.pec.trim() || undefined,
         phone:              form.phone.trim() || undefined,
         legalAddress:       form.legalAddress.trim(),
+        cap:                form.cap.trim() || undefined,
+        comune:             form.comune.trim() || undefined,
+        provincia:          form.provincia.trim() || undefined,
       });
       toast({ title: 'Tenant creato', description: `${form.displayName} è stato creato con successo.` });
       navigate('/admin/tenants');
@@ -129,9 +138,47 @@ const TenantCreate = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Indirizzo Sede Legale *</Label>
-              <Input value={form.legalAddress} onChange={e => update('legalAddress', e.target.value)} placeholder="Via Roma 1, 00100 Roma RM" />
+              <Label>Indirizzo *</Label>
+              <Input value={form.legalAddress} onChange={e => update('legalAddress', e.target.value)} placeholder="Via Roma 1" />
+              <p className="text-xs text-muted-foreground">Solo via e numero civico</p>
             </div>
+            {/* CAP / Comune / Provincia: valorizzano la Sede del CedentePrestatore nell'XML SDI */}
+            <div className="flex gap-4">
+              <div className="w-1/4 space-y-2">
+                <Label>CAP *</Label>
+                <Input
+                  value={form.cap}
+                  onChange={e => update('cap', e.target.value)}
+                  placeholder="00100"
+                  className="font-mono"
+                  maxLength={10}
+                />
+              </div>
+              <div className="w-2/4 space-y-2">
+                <Label>Comune *</Label>
+                <ComuneAutocomplete
+                  value={form.comune}
+                  placeholder="es. Roma"
+                  requireValidComune
+                  // Comune svuotato (testo non valido): anche la provincia derivata va azzerata.
+                  onChange={nome => setForm(prev => ({ ...prev, comune: nome, provincia: nome ? prev.provincia : '' }))}
+                  onSelect={c => setForm(prev => ({ ...prev, comune: c.nome, provincia: c.siglaProvincia }))}
+                />
+              </div>
+              <div className="w-1/4 space-y-2">
+                <Label>Provincia</Label>
+                <Input
+                  value={form.provincia}
+                  readOnly
+                  tabIndex={-1}
+                  placeholder="dal comune"
+                  className="bg-muted text-muted-foreground cursor-not-allowed font-mono uppercase"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              CAP, comune e provincia compongono la sede legale nell'XML SDI: la provincia è compilata automaticamente dal comune.
+            </p>
           </CardContent>
         </Card>
 

@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, AlertCircle, Plus, Filter, CheckCircle2, ThumbsUp } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Loader2, AlertCircle, Plus, Filter, CheckCircle2, ThumbsUp, Info, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   getSettlements, calcolaSettlements, updateSettlementStatus,
   type SettlementListItem, type SettlementCalcolaResult,
+  getCountDaLiquidare,
 } from '@/api/settlementApi';
 
 const statusColors: Record<string, string> = {
@@ -36,6 +38,22 @@ const MESI = [
 
 const fmtEuro = (v: number) => `€${v.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
 
+/**
+ * Intestazione di colonna con icona informativa e tooltip esplicativo.
+ * `inline-flex` con `justify-end` per restare allineata a destra come le celle importi.
+ */
+const HeaderConTooltip = ({ label, testo }: { label: string; testo: string }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="inline-flex items-center justify-end gap-1 cursor-help">
+        {label}
+        <Info className="h-3 w-3 text-muted-foreground" aria-label={testo} />
+      </span>
+    </TooltipTrigger>
+    <TooltipContent className="max-w-xs text-xs">{testo}</TooltipContent>
+  </Tooltip>
+);
+
 const SettlementsList = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -51,12 +69,19 @@ const SettlementsList = () => {
   const [calcolando, setCalcolando] = useState(false);
   const [risultato, setRisultato] = useState<SettlementCalcolaResult | null>(null);
 
+  // Prenotazioni con documenti emessi ancora fuori dalle liquidazioni.
+  const [daLiquidare, setDaLiquidare] = useState(0);
+
   const reload = () => {
     setIsLoading(true);
     getSettlements()
       .then(setSettlements)
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
+    // L'avviso è informativo: se il conteggio non arriva non blocca la pagina.
+    getCountDaLiquidare()
+      .then(r => setDaLiquidare(r.count))
+      .catch(() => setDaLiquidare(0));
   };
 
   useEffect(reload, []);
@@ -125,6 +150,20 @@ const SettlementsList = () => {
         </div>
       </div>
 
+      {/* Prenotazioni con ricevuta emessa ma senza liquidazione: si aggiorna a ogni reload(),
+          quindi anche dopo "Calcola liquidazioni". */}
+      {daLiquidare > 0 && (
+        <div className="flex items-start gap-3 rounded-md border border-orange-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-orange-500" />
+          <span>
+            <strong>{daLiquidare}</strong>{' '}
+            {daLiquidare === 1 ? 'prenotazione' : 'prenotazioni'} con ricevuta emessa non ancora{' '}
+            {daLiquidare === 1 ? 'liquidata' : 'liquidate'}. Usa "Calcola liquidazioni" per
+            {daLiquidare === 1 ? ' includerla' : ' includerle'} nel prossimo settlement.
+          </span>
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -148,9 +187,27 @@ const SettlementsList = () => {
                   <TableHead>Proprietario</TableHead>
                   <TableHead>Periodo</TableHead>
                   <TableHead className="text-right">Prenotazioni</TableHead>
-                  <TableHead className="text-right">Lordo €</TableHead>
-                  <TableHead className="text-right">Ritenuta €</TableHead>
-                  <TableHead className="text-right">Netto €</TableHead>
+                  {/* Le colonne importi usano nomi interni: il tooltip mappa ciascuna
+                      sul rigo corrispondente della CU, per evitare fraintendimenti
+                      con la nozione di "lordo" dell'Agenzia delle Entrate. */}
+                  <TableHead className="text-right">
+                    <HeaderConTooltip
+                      label="Lordo €"
+                      testo="Canone di locazione netto (corrisponde all'Imponibile - rigo 8 della CU). Il lordo AdE (rigo 4) include anche la ritenuta."
+                    />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <HeaderConTooltip
+                      label="Ritenuta €"
+                      testo="Ritenuta a titolo d'acconto operata dal sostituto d'imposta (rigo 9 della CU)."
+                    />
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <HeaderConTooltip
+                      label="Netto €"
+                      testo="Importo netto da pagare al proprietario (Imponibile - Ritenuta)."
+                    />
+                  </TableHead>
                   <TableHead>Stato</TableHead>
                   <TableHead className="w-24">Azioni</TableHead>
                 </TableRow>

@@ -23,6 +23,7 @@ public class FiscalDocumentDAO {
             "total_amount, vat_amount, aliquota_iva, imponibile, ritenuta_amount, bollo_amount, " +
             "canone_locazione, fk_documento_collegato_id, " +
             "fk_stato_documento_id, sdi_identifier, " +
+            "sdi_progressivo, sdi_file_path, sdi_sent_at, sdi_error_msg, " +
             "created_at, updated_at FROM fiscal_document";
 
     private final JdbcTemplate jdbcTemplate;
@@ -179,5 +180,63 @@ public class FiscalDocumentDAO {
         log.debug("FiscalDocumentDAO.updateStato() - id={}, statoId={}", id, fkStatoDocumentoId);
         jdbcTemplate.update("UPDATE fiscal_document SET fk_stato_documento_id = ?, updated_at = NOW() WHERE id = ?",
                 fkStatoDocumentoId, id);
+    }
+
+    /**
+     * Registra l'esito positivo della generazione del file XML SDI e porta il documento
+     * in stato 'sent_sdi'.
+     * NB: lo stato è la FK fk_stato_documento_id (lookup stato_documento), non una colonna
+     * varchar: l'id viene risolto per codice nella stessa istruzione.
+     */
+    public void updateSdiInfo(Integer id, String sdiProgressivo, String sdiFilePath) {
+        String sql = "UPDATE fiscal_document SET sdi_progressivo = ?, sdi_file_path = ?, " +
+                "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'sent_sdi'), " +
+                "sdi_sent_at = NOW(), sdi_error_msg = NULL, updated_at = NOW() WHERE id = ?";
+        jdbcTemplate.update(sql, sdiProgressivo, sdiFilePath, id);
+        log.info("FiscalDocumentDAO.updateSdiInfo() - id={} prog={}", id, sdiProgressivo);
+    }
+
+    public Optional<FiscalDocument> findBySdiProgressivo(String progressivo) {
+        log.debug("FiscalDocumentDAO.findBySdiProgressivo() - progressivo={}", progressivo);
+        List<FiscalDocument> result = jdbcTemplate.query(
+                SELECT_ALL + " WHERE sdi_progressivo = ? ORDER BY id LIMIT 1",
+                fiscalDocumentRowMapper, progressivo);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /**
+     * Esito positivo SDI (ricevuta di consegna): porta il documento in stato 'accepted'
+     * e azzera l'eventuale messaggio d'errore precedente.
+     * NB: la data di consegna non ha una colonna dedicata su fiscal_document — viene
+     * solo tracciata nel log e nell'audit.
+     */
+    public void updateSdiAccepted(Integer id, String dataConsegna) {
+        String sql = "UPDATE fiscal_document SET " +
+                "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'accepted'), " +
+                "sdi_error_msg = NULL, updated_at = NOW() WHERE id = ?";
+        jdbcTemplate.update(sql, id);
+        log.info("FiscalDocumentDAO.updateSdiAccepted() - id={} dataConsegna={}", id, dataConsegna);
+    }
+
+    /**
+     * Documento scartato dallo SDI: stato 'rejected' con l'elenco degli errori restituiti.
+     */
+    public void updateSdiRejected(Integer id, String errorMsg) {
+        String sql = "UPDATE fiscal_document SET " +
+                "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'rejected'), " +
+                "sdi_error_msg = ?, updated_at = NOW() WHERE id = ?";
+        jdbcTemplate.update(sql, errorMsg, id);
+        log.info("FiscalDocumentDAO.updateSdiRejected() - id={} errori={}", id, errorMsg);
+    }
+
+    /**
+     * Registra il fallimento della generazione/invio SDI portando il documento in stato 'error'.
+     */
+    public void updateSdiError(Integer id, String errorMsg) {
+        String sql = "UPDATE fiscal_document SET " +
+                "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'error'), " +
+                "sdi_error_msg = ?, updated_at = NOW() WHERE id = ?";
+        jdbcTemplate.update(sql, errorMsg, id);
+        log.warn("FiscalDocumentDAO.updateSdiError() - id={} error={}", id, errorMsg);
     }
 }

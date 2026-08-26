@@ -72,6 +72,14 @@ public class UtenteDAO {
         return result;
     }
 
+    public int countActiveByTenantId(Integer tenantId) {
+        log.debug("UtenteDAO.countActiveByTenantId() - tenantId={}", tenantId);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM utente WHERE fk_tenant_id = ? AND attivo = true",
+                Integer.class, tenantId);
+        return count != null ? count : 0;
+    }
+
     public boolean existsByEmail(String email) {
         log.debug("UtenteDAO.existsByEmail() - email={}", email);
         Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM utente WHERE email = ?", Integer.class, email);

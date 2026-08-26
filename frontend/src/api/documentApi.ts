@@ -1,4 +1,5 @@
-import { get, post, patch } from '@/lib/apiClient';
+import { get, post, patch, getToken } from '@/lib/apiClient';
+import { getConfig } from '@/config/AppConfig';
 
 export interface DocumentListItem {
   id: number;
@@ -12,9 +13,23 @@ export interface DocumentListItem {
   statoDocumento: string;
   sdiIdentifier?: string;
   sdiEsito?: string;
+  sdiProgressivo?: string;
+  sdiFilePath?: string;
+  sdiSentAt?: string;
+  sdiErrorMsg?: string;
+  // Versamento F24 della ritenuta e CU dell'anno (solo ricevuta owner)
+  f24RecordId?: number;
+  f24Periodo?: string;
+  f24Stato?: string;
+  f24Pagato?: boolean;
+  cuRecordId?: number;
+  cuTaxYear?: number;
+  cuStato?: string;
+  cuConsegnata?: boolean;
   propertyName?: string;
   channelName?: string;
   fkBookingId?: number;
+  externalBookingId?: string;
   fkOwnerId?: number;
   ownerName?: string;
   createdAt: string;
@@ -106,4 +121,109 @@ export async function generateDocument(
 
 export async function aggiornaStatoDocumento(id: number, stato: string): Promise<void> {
   await patch<void>(`/documents/${id}/stato`, { stato });
+}
+
+/**
+ * Scarica il file XML archiviato di un invio SDI (GET /api/sdi/download/{progressivo}).
+ * Come downloadDocumentPdf non usa apiClient: la risposta è un blob, non JSON.
+ */
+export async function downloadSdiXml(progressivo: string): Promise<void> {
+  const base = getConfig().apiBaseUrl;
+  const token = getToken();
+  const res = await fetch(`${base}/sdi/download/${encodeURIComponent(progressivo)}`, {
+    headers: {
+      'Accept': 'application/xml',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    let message = `Errore ${res.status} durante il download del file XML`;
+    try {
+      const json = await res.json();
+      if (json.message) message = json.message;
+    } catch { /* body non JSON */ }
+    throw new Error(message);
+  }
+
+  // Il nome file arriva dal Content-Disposition; fallback sul progressivo.
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  const fileName = match ? match[1] : `${progressivo}.xml`;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+export interface SdiElaborazioneResult {
+  elaborati: number;
+  accettati: number;
+  scartati: number;
+  metadati: number;
+  errori: number;
+  dettagli: string[];
+}
+
+/** Elabora le risposte SDI presenti in incoming/ (POST /api/sdi/elabora-risposte). */
+export async function elaboraRisposteSdi(): Promise<SdiElaborazioneResult> {
+  return post<SdiElaborazioneResult>('/sdi/elabora-risposte', {});
+}
+
+export interface SdiInvioResponse {
+  message: string;
+  filePath: string;
+  progressivo: string;
+}
+
+/** Genera il file XML SDI della fattura PM (POST /api/documents/{id}/sdi). */
+export async function inviaSdi(id: number): Promise<SdiInvioResponse> {
+  return post<SdiInvioResponse>(`/documents/${id}/sdi`, {});
+}
+
+/**
+ * Scarica il PDF del documento generato server-side e avvia il download nel browser.
+ * Non usa apiClient perché la risposta è un blob, non JSON.
+ */
+export async function downloadDocumentPdf(id: number, documentNumber: string): Promise<void> {
+  const base = getConfig().apiBaseUrl;
+  const token = getToken();
+  const res = await fetch(`${base}/documents/${id}/pdf`, {
+    headers: {
+      'Accept': 'application/pdf',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    // In caso di errore il backend risponde JSON con il campo message
+    let message = `Errore ${res.status} durante la generazione del PDF`;
+    try {
+      const json = await res.json();
+      if (json.message) message = json.message;
+    } catch { /* body non JSON */ }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${documentNumber}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
