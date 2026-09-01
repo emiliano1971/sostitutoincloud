@@ -76,6 +76,9 @@ const DocumentsList = () => {
   const datePreset = searchParams.get('preset') ?? '';
   const ownerIdParam = searchParams.get('ownerId');
   const ownerIdFilter = ownerIdParam ? parseInt(ownerIdParam) : null;
+  // Filtro per tipo documento: i valori sono i codice della lookup tipo_documento
+  // ('fattura' | 'ricevuta' | 'nota_credito'), come restituiti da documentType.
+  const tipoFilter = searchParams.get('tipo') ?? '';
   // Input date locali: scrivere l'URL a ogni keystroke rimonterebbe il valore
   // mentre l'utente digita l'anno a mano, azzerando il campo. L'URL si aggiorna onBlur.
   const [dateFromInput, setDateFromInput] = useState(dateFrom);
@@ -175,6 +178,10 @@ const DocumentsList = () => {
       const from = dateFrom || '0000-01-01';
       const to = dateTo || '9999-12-31';
       return d.issueDate >= from && d.issueDate <= to;
+    })
+    .filter(d => {
+      if (!tipoFilter) return true;
+      return d.documentType === tipoFilter;
     });
 
   const ownerFilterName = ownerIdFilter != null
@@ -223,6 +230,25 @@ const DocumentsList = () => {
                 <SelectItem value="rejected">Rifiutato</SelectItem>
               </SelectContent>
             </Select>
+            {/* Filtro tipo documento: in memoria, persistito nell'URL (?tipo=fattura).
+                Stesso stile pill dei preset date. "Tutti" include anche le note di credito. */}
+            <div className="flex items-center gap-2">
+              {[
+                { key: '', label: 'Tutti' },
+                { key: 'fattura', label: 'Fatture' },
+                { key: 'ricevuta', label: 'Ricevute' },
+              ].map(t => (
+                <Button
+                  key={t.key || 'tutti'}
+                  variant={tipoFilter === t.key ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => updateFilter('tipo', t.key)}
+                >
+                  {t.label}
+                </Button>
+              ))}
+            </div>
             <Button
               variant="outline"
               className="gap-2"

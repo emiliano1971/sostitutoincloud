@@ -128,7 +128,6 @@ public class DocumentGenerationService {
                 ? settings.getWithholdingRatePrimary().divide(CENTO, 4, RoundingMode.HALF_UP)
                 : settings.getWithholdingRateSecondary().divide(CENTO, 4, RoundingMode.HALF_UP);
         boolean forfettario = REGIME_FORFETTARIO.equals(settings.getRegimeFiscalePm());
-        boolean bolloAddebitato = Boolean.TRUE.equals(settings.getBolloAddebitatoCliente());
 
         SplitEconomicoDTO split = booking.getSplitEconomico();
         BigDecimal gross = nz(split.getGrossAmount());
@@ -159,8 +158,12 @@ public class DocumentGenerationService {
                             : gross.subtract(otaCommission).subtract(cleaning).subtract(pmFee))
                     .setScale(2, RoundingMode.HALF_UP);
             bollo = canone.compareTo(bolloSoglia) > 0 ? bolloImporto : BigDecimal.ZERO.setScale(2);
-            // Se il bollo non è addebitato all'ospite resta salvato (tracciabilità) ma non somma al totale.
-            importoTotale = (bolloAddebitato ? canone.add(bollo) : canone).setScale(2, RoundingMode.HALF_UP);
+            // Il bollo resta salvato per tracciabilità e compare nel dettaglio come voce
+            // informativa, ma NON concorre al total_amount: non fa parte del compenso del
+            // proprietario. Coerente con DocumentPdfService (netto = canone - ritenuta, bollo
+            // non scalato) e con SettlementService.
+            // NB: tenant_settings.bollo_addebitato_cliente non incide più su questo calcolo.
+            importoTotale = canone.setScale(2, RoundingMode.HALF_UP);
             ritenuta = canone.multiply(aliquotaRitenuta).setScale(2, RoundingMode.HALF_UP);
             imponibile = canone;
             iva = BigDecimal.ZERO.setScale(2);
