@@ -14,6 +14,7 @@ spring:
 app:
   base-url: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud # https://testpms.siv.cloud.it:8443/sostitutoincloud
   mail:
+    from: sostitutoincloud-test@gaviatech.it
     # Frontend e backend sono sulla stessa origine: coincide con app.base-url.
     reset-link-base-url: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud
   cors:

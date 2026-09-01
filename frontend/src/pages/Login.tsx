@@ -132,7 +132,7 @@ const Login = () => {
                 </form>
 
                 {/* Account disponibili — nascosti in produzione */}
-                {getConfig().environment !== 'prod' && (
+                {getConfig().environment === 'local' && (
                   <div className="mt-6 pt-4 border-t">
                     <p className="text-xs text-muted-foreground mb-3 font-medium">Account disponibili:</p>
                     <div className="space-y-1.5">
