@@ -5,7 +5,7 @@ server:
 
 spring:
   mail:
-    host: localhost
+    host: gaviatech-it.mail.protection.outlook.com
     port: 25
     properties:
       mail.smtp.auth: false
