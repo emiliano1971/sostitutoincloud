@@ -8,7 +8,8 @@
       project.build.directory      cartella target/
       project.build.outputDirectory cartella target/classes/
       deploy.env                   profilo attivo (local | test | prod)
-      db.properties.source         file properties DB per ambiente
+      db.properties                file properties DB unico (credenziali da variabili
+                                   d'ambiente DB_URL / DB_USERNAME / DB_PASSWORD)
       log4j.source                 file Log4j2 (sempre log4j2.xml)
 -->
 <project name="sostitutoincloud-deploy" default="deploy">

@@ -451,7 +451,8 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-antrun-plugin</artifactId>
                         <executions>
-                            <execution>
+                            <!-- Non serve più — db.properties è già il nome corretto del file sorgente. -->
+                            <!--execution>
                                 <id>rename-db-properties</id>
                                 <phase>prepare-package</phase>
                                 <goals><goal>run</goal></goals>
@@ -462,7 +463,7 @@
                                               overwrite="true"/>
                                     </target>
                                 </configuration>
-                            </execution>
+                            </execution-->
                             <execution>
                                 <id>rename-config-json</id>
                                 <phase>prepare-package</phase>
