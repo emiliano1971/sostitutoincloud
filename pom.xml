@@ -78,6 +78,18 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- ── Mail: JavaMailSender → Postfix locale (localhost:25) → relay Office 365 ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <!-- ── JWT ── -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

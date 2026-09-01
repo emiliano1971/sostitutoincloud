@@ -382,6 +382,10 @@ CREATE TABLE utente (
     ruolo           user_role       NOT NULL,
     attivo          BOOLEAN         NOT NULL DEFAULT TRUE,
     last_login      TIMESTAMP,
+    -- Recupero password via email (migration 012)
+    reset_token             VARCHAR(64),                        -- 64 hex, NULL quando non c'è reset in corso
+    reset_token_expires_at  TIMESTAMP,                          -- scadenza da app.mail.reset-token-expiry-minutes
+    must_change_password    BOOLEAN NOT NULL DEFAULT FALSE,     -- predisposizione cambio obbligatorio al primo accesso
     created_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP       NOT NULL DEFAULT NOW()
 );
@@ -899,6 +903,10 @@ CREATE INDEX idx_utente_fk_tenant_id
 CREATE INDEX idx_utente_ruolo
     ON utente(ruolo);
     -- filtro per ruolo in gestione utenti
+CREATE INDEX idx_utente_reset_token
+    ON utente(reset_token)
+    WHERE reset_token IS NOT NULL;
+    -- lookup del token di reset password; parziale, i token sono pochi e transitori
 
 -- stato_prenotazione / stato_documento / regime_fiscale
 CREATE INDEX idx_stato_prenotazione_attivo

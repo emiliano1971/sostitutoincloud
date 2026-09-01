@@ -14,6 +14,15 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLookup } from '@/contexts/LookupContext';
 import { useToast } from '@/hooks/use-toast';
 
+// Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
+// nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
+const toLocalISO = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const g = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${g}`;
+};
+
 const statusColors: Record<string, string> = {
   imported: 'bg-muted text-muted-foreground',                                        // grigio
   enriched: 'bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300',      // blu
@@ -101,7 +110,7 @@ const BookingsList = () => {
   useEffect(() => { setDateFromInput(dateFrom); }, [dateFrom]);
   useEffect(() => { setDateToInput(dateTo); }, [dateTo]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalISO(new Date());
 
   useEffect(() => {
     getSettings().then(setSettings).catch(() => { /* soglia di fallback se i settings non caricano */ });
@@ -131,18 +140,18 @@ const BookingsList = () => {
       b.externalBookingId.toLowerCase().includes(search.toLowerCase()) ||
       (b.ownerName ?? '').toLowerCase().includes(search.toLowerCase())
     )
-    // Filtro date check-in/check-out: include il booking se il periodo si sovrappone al range
+    // Filtro date sul solo check-in: include il booking se la data di arrivo cade nel range.
     .filter(b => {
       if (!dateFrom && !dateTo) return true;
       const from = dateFrom || '0000-01-01';
       const to = dateTo || '9999-12-31';
-      return b.checkinDate <= to && b.checkoutDate >= from;
+      return b.checkinDate >= from && b.checkinDate <= to;
     })
     // Filtro stato multi-check ("da_completare" è una combinazione, gestito a parte)
     .filter(b => {
       if (statiSelezionati.size === 0) return true;
       if (statiSelezionati.has('da_completare')) {
-        const oggi = new Date().toISOString().split('T')[0];
+        const oggi = toLocalISO(new Date());
         return b.checkoutDate <= oggi && !['doc_issued', 'settled', 'cancelled'].includes(b.statoPrenotazione);
       }
       return statiSelezionati.has(b.statoPrenotazione);
@@ -163,15 +172,15 @@ const BookingsList = () => {
     setSelectedIds(allSelected ? new Set() : new Set(visible.map(b => b.id)));
   };
 
+  // Preset in avanti: il filtro agisce sulla data di check-in, che è tipicamente futura.
   const applyPreset = (preset: string) => {
     const oggi = new Date();
-    const fmt = (d: Date) => d.toISOString().split('T')[0];
     let from = '', to = '';
     switch (preset) {
-      case 'ieri': { const d = new Date(oggi); d.setDate(oggi.getDate() - 1); from = fmt(d); to = fmt(d); break; }
-      case '3gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 3); from = fmt(d); to = fmt(oggi); break; }
-      case '7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 7); from = fmt(d); to = fmt(oggi); break; }
-      case '14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 14); from = fmt(d); to = fmt(oggi); break; }
+      case 'oggi': { from = toLocalISO(oggi); to = toLocalISO(oggi); break; }
+      case '+7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() + 7); from = toLocalISO(oggi); to = toLocalISO(d); break; }
+      case '+14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() + 14); from = toLocalISO(oggi); to = toLocalISO(d); break; }
+      case '+30gg': { const d = new Date(oggi); d.setDate(oggi.getDate() + 30); from = toLocalISO(oggi); to = toLocalISO(d); break; }
       default: preset = '';
     }
     setSearchParams(prev => {
@@ -331,8 +340,15 @@ const BookingsList = () => {
                 onChange={e => setDateFromInput(e.target.value)}
                 onBlur={e => {
                   if (e.target.value !== dateFrom) {
-                    updateFilter('dateFrom', e.target.value || null);
-                    updateFilter('preset', null);
+                    // Una sola setSearchParams: due updateFilter consecutivi si annullerebbero
+                    // (react-router passa allo updater il searchParams del render corrente).
+                    setSearchParams(prev => {
+                      const next = new URLSearchParams(prev);
+                      if (e.target.value) next.set('dateFrom', e.target.value);
+                      else next.delete('dateFrom');
+                      next.delete('preset');
+                      return next;
+                    }, { replace: true });
                   }
                 }}
                 className="w-[150px]"
@@ -344,8 +360,13 @@ const BookingsList = () => {
                 onChange={e => setDateToInput(e.target.value)}
                 onBlur={e => {
                   if (e.target.value !== dateTo) {
-                    updateFilter('dateTo', e.target.value || null);
-                    updateFilter('preset', null);
+                    setSearchParams(prev => {
+                      const next = new URLSearchParams(prev);
+                      if (e.target.value) next.set('dateTo', e.target.value);
+                      else next.delete('dateTo');
+                      next.delete('preset');
+                      return next;
+                    }, { replace: true });
                   }
                 }}
                 className="w-[150px]"
@@ -358,10 +379,10 @@ const BookingsList = () => {
             </div>
             <div className="flex items-center gap-2">
               {[
-                { key: 'ieri', label: 'Ieri' },
-                { key: '3gg', label: '3gg' },
-                { key: '7gg', label: '7gg' },
-                { key: '14gg', label: '14gg' },
+                { key: 'oggi', label: 'Oggi' },
+                { key: '+7gg', label: '+7gg' },
+                { key: '+14gg', label: '+14gg' },
+                { key: '+30gg', label: '+30gg' },
               ].map(p => (
                 <Button
                   key={p.key}

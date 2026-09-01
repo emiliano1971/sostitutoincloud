@@ -13,9 +13,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { getUsers, createUser, updateUserStatus, deleteUser, type UtenteListItem } from '@/api/userApi';
+import {
+  getUsers, createUser, updateUser, updateUserStatus, deleteUser, type UtenteListItem,
+} from '@/api/userApi';
 import { getOwners, type OwnerListItem } from '@/api/ownerApi';
 
 const emptyForm = { firstName: '', lastName: '', email: '', password: '', ruolo: 'pm_user', fkOwnerId: '' };
@@ -41,6 +43,10 @@ const UsersList = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   const [toDelete, setToDelete] = useState<UtenteListItem | null>(null);
+
+  const [editingUser, setEditingUser] = useState<UtenteListItem | null>(null);
+  const [editForm, setEditForm] = useState({ email: '', firstName: '', lastName: '' });
+  const [editError, setEditError] = useState('');
 
   const load = () => {
     setIsLoading(true);
@@ -90,6 +96,39 @@ const UsersList = () => {
       load();
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openEdit = (u: UtenteListItem) => {
+    setEditingUser(u);
+    setEditForm({ email: u.email, firstName: u.firstName, lastName: u.lastName });
+    setEditError('');
+  };
+
+  const updateEdit = (field: keyof typeof editForm, value: string) =>
+    setEditForm(prev => ({ ...prev, [field]: value }));
+
+  const handleSaveEdit = async () => {
+    if (!editingUser) return;
+    if (!editForm.firstName.trim() || !editForm.lastName.trim() || !editForm.email.trim()) {
+      setEditError('Nome, cognome ed email sono obbligatori.');
+      return;
+    }
+    if (!editForm.email.includes('@')) {
+      setEditError('Email non valida.');
+      return;
+    }
+    setEditError('');
+    setIsSaving(true);
+    try {
+      await updateUser(editingUser.id, editForm);
+      toast({ title: 'Utente aggiornato', description: `${editForm.firstName} ${editForm.lastName} è stato modificato.` });
+      setEditingUser(null);
+      load();
+    } catch (err) {
+      setEditError((err as Error).message);
     } finally {
       setIsSaving(false);
     }
@@ -151,7 +190,7 @@ const UsersList = () => {
                   <TableHead>Ruolo</TableHead>
                   <TableHead>Scope</TableHead>
                   <TableHead>Stato</TableHead>
-                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="w-20"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -174,12 +213,22 @@ const UsersList = () => {
                       </TableCell>
                       <TableCell>
                         {!isAdmin && (
-                          <Button
-                            variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                            onClick={() => setToDelete(u)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost" size="icon" className="h-7 w-7"
+                              title="Modifica utente"
+                              onClick={() => openEdit(u)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                              title="Elimina utente"
+                              onClick={() => setToDelete(u)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -249,6 +298,54 @@ const UsersList = () => {
             <Button onClick={handleInvite} disabled={isSaving} className="gap-2">
               {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
               Invita
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Modifica Utente */}
+      <Dialog open={!!editingUser} onOpenChange={open => { if (!open) setEditingUser(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Modifica utente</DialogTitle>
+            <DialogDescription>{editingUser?.email}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="editFirstName">Nome *</Label>
+                <Input
+                  id="editFirstName" value={editForm.firstName}
+                  onChange={e => updateEdit('firstName', e.target.value)} disabled={isSaving}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="editLastName">Cognome *</Label>
+                <Input
+                  id="editLastName" value={editForm.lastName}
+                  onChange={e => updateEdit('lastName', e.target.value)} disabled={isSaving}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="editEmail">Email *</Label>
+              <Input
+                id="editEmail" type="email" value={editForm.email}
+                onChange={e => updateEdit('email', e.target.value)} disabled={isSaving}
+              />
+            </div>
+            {editError && (
+              <div className="flex items-start gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{editError}</span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingUser(null)} disabled={isSaving}>Annulla</Button>
+            <Button onClick={handleSaveEdit} disabled={isSaving} className="gap-2">
+              {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Salva
             </Button>
           </DialogFooter>
         </DialogContent>

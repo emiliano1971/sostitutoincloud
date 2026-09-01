@@ -278,7 +278,7 @@ public class SdiXmlService {
                 .append("\" xmlns=\"").append(NAMESPACE).append("\">\n");
 
         // ── HEADER ──
-        x.append("  <FatturaElettronicaHeader>\n");
+        x.append("  <FatturaElettronicaHeader xmlns=\"\">\n");
         x.append("    <DatiTrasmissione>\n");
         x.append("      <IdTrasmittente>\n");
         x.append("        <IdPaese>IT</IdPaese>\n");
@@ -371,7 +371,7 @@ public class SdiXmlService {
         x.append("  </FatturaElettronicaHeader>\n");
 
         // ── BODY ──
-        x.append("  <FatturaElettronicaBody>\n");
+        x.append("  <FatturaElettronicaBody xmlns=\"\">\n");
         x.append("    <DatiGenerali>\n");
         x.append("      <DatiGeneraliDocumento>\n");
         x.append("        <TipoDocumento>TD01</TipoDocumento>\n");

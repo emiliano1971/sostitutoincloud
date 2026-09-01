@@ -3,8 +3,19 @@ server:
   servlet:
     context-path: /sostitutoincloud
 
+spring:
+  mail:
+    host: localhost
+    port: 25
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+
 app:
   base-url: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud # https://testpms.siv.cloud.it:8443/sostitutoincloud
+  mail:
+    # Frontend e backend sono sulla stessa origine: coincide con app.base-url.
+    reset-link-base-url: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud
   cors:
     allowed-origins: https://sostitutoincloud-test.intranet.gavia.tech/sostitutoincloud  # https://testpms.siv.cloud.it:8443
   security:

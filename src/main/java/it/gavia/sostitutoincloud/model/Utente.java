@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,6 +21,11 @@ public class Utente {
     private String email;
     private String firstName;
     private String lastName;
+    /**
+     * Mai popolato da UtenteRowMapper: l'hash non entra nel model.
+     * Per verificare la password corrente usare UtenteDAO.findPasswordHashById().
+     */
+    @JsonIgnore
     private String passwordHash;
     private String ruolo;
     private Boolean attivo;
@@ -27,4 +33,17 @@ public class Utente {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Integer fkOwnerId;
+
+    /**
+     * Token di reset password (64 hex). @JsonIgnore obbligatorio: TestController
+     * (@Profile local, path /api/public/test) serializza Utente grezzo su un endpoint
+     * non autenticato — senza questo il token sarebbe leggibile da chiunque.
+     */
+    @JsonIgnore
+    private String resetToken;
+
+    @JsonIgnore
+    private LocalDateTime resetTokenExpiresAt;
+
+    private Boolean mustChangePassword;
 }

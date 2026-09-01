@@ -12,3 +12,6 @@ app:
     sdi-outgoing-path: /opt/sostitutoincloud/storage/sdi/outgoing
     sdi-incoming-path: /opt/sostitutoincloud/storage/sdi/incoming
     sdi-elaborati-path: /opt/sostitutoincloud/storage/sdi/elaborati
+  mail:
+    from: emiliano.zerbinati@gaviatech.it
+    reset-token-expiry-minutes: 60

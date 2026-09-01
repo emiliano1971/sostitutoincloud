@@ -4,6 +4,7 @@ import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.UtenteDAO;
 import it.gavia.sostitutoincloud.dto.user.UtenteCreateDTO;
 import it.gavia.sostitutoincloud.dto.user.UtenteListDTO;
+import it.gavia.sostitutoincloud.dto.user.UtenteUpdateDTO;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Utente;
 import lombok.extern.log4j.Log4j2;
@@ -109,6 +110,56 @@ public class UserManagementService {
         auditService.log("user.create", "Utente", saved.getId(),
                 "Creato utente " + saved.getEmail() + " ruolo " + saved.getRuolo());
         return toListDTO(saved);
+    }
+
+    /**
+     * Modifica dei dati anagrafici. I tre campi sono tutti obbligatori: le colonne
+     * email/first_name/last_name sono NOT NULL, un body parziale scriverebbe NULL.
+     * Lo stato attivo/inattivo si cambia con updateStatus(), non da qui.
+     */
+    public UtenteListDTO update(Integer tenantId, Integer utenteId, UtenteUpdateDTO dto) {
+        Utente utente = utenteDAO.findById(utenteId)
+                .filter(u -> tenantId.equals(u.getFkTenantId()))
+                .orElseThrow(() -> new IllegalArgumentException("Utente non trovato: id=" + utenteId));
+        if ("tenant_admin".equals(utente.getRuolo())) {
+            throw new IllegalArgumentException("Non è possibile modificare l'amministratore del tenant");
+        }
+
+        String email = dto.getEmail() == null ? null : dto.getEmail().trim();
+        String firstName = dto.getFirstName() == null ? null : dto.getFirstName().trim();
+        String lastName = dto.getLastName() == null ? null : dto.getLastName().trim();
+
+        if (email == null || email.isBlank()) {
+            throw new IllegalArgumentException("Email obbligatoria");
+        }
+        if (firstName == null || firstName.isBlank() || lastName == null || lastName.isBlank()) {
+            throw new IllegalArgumentException("Nome e cognome obbligatori");
+        }
+        if (!isValidEmail(email)) {
+            throw new IllegalArgumentException("Email non valida");
+        }
+        // Unicità verificata solo se l'email cambia: altrimenti l'utente stesso
+        // sarebbe un duplicato di se stesso.
+        if (!email.equalsIgnoreCase(utente.getEmail()) && utenteDAO.existsByEmail(email)) {
+            throw new IllegalArgumentException("Email già registrata");
+        }
+
+        Utente updated = utenteDAO.update(utenteId, email, firstName, lastName);
+        log.info("UserManagementService.update() - id={} tenantId={}", utenteId, tenantId);
+        String descrizione = email.equalsIgnoreCase(utente.getEmail())
+                ? "Modificato utente " + updated.getEmail()
+                : "Modificato utente " + utente.getEmail() + " → " + updated.getEmail();
+        auditService.log("user.update", "Utente", updated.getId(), descrizione);
+        return toListDTO(updated);
+    }
+
+    /** Controllo di forma minimo: una @ non iniziale e un punto nel dominio. */
+    private boolean isValidEmail(String email) {
+        int at = email.indexOf('@');
+        return at > 0
+                && email.indexOf('.', at) > at + 1
+                && !email.endsWith(".")
+                && !email.contains(" ");
     }
 
     public UtenteListDTO updateStatus(Integer tenantId, Integer utenteId, Boolean attivo) {

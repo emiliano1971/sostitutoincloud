@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,10 @@ import appLogoIcon from '@/assets/logo-icon.png';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import loginBg from '@/assets/login-bg.jpg';
 import { toast } from '@/hooks/use-toast';
+import { getConfig } from '@/config/AppConfig';
 
 const Login = () => {
-  const [email, setEmail] = useState('admin@casavacanze.it');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const { login, isLoading } = useAuth();
@@ -122,29 +123,38 @@ const Login = () => {
                       'Accedi'
                     )}
                   </Button>
+
+                  <div className="text-center">
+                    <Link to="/forgot-password" className="text-xs text-muted-foreground hover:text-foreground">
+                      Password dimenticata?
+                    </Link>
+                  </div>
                 </form>
 
-                {/* Account disponibili */}
-                <div className="mt-6 pt-4 border-t">
-                  <p className="text-xs text-muted-foreground mb-3 font-medium">Account disponibili:</p>
-                  <div className="space-y-1.5">
-                    {[
-                      { email: 'admin@casavacanze.it', role: 'Tenant Admin' },
-                      { email: 'proprietario@email.it', role: 'Proprietario' },
-                    ].map(acc => (
-                      <button
-                        key={acc.email}
-                        type="button"
-                        onClick={() => { setEmail(acc.email); setPassword('atena'); }}
-                        className="w-full flex items-center justify-between p-2 rounded-md text-xs hover:bg-muted transition-colors"
-                        disabled={isLoading}
-                      >
-                        <span className="text-muted-foreground font-mono">{acc.email}</span>
-                        <span className="text-primary font-medium">{acc.role}</span>
-                      </button>
-                    ))}
+                {/* Account disponibili — nascosti in produzione */}
+                {getConfig().environment !== 'prod' && (
+                  <div className="mt-6 pt-4 border-t">
+                    <p className="text-xs text-muted-foreground mb-3 font-medium">Account disponibili:</p>
+                    <div className="space-y-1.5">
+                      {[
+                        { email: 'superadmin@sostitutoincloud.it', role: 'Super Admin', password: 'atena' },
+                        { email: 'admin@casavacanze.it', role: 'Tenant Admin', password: 'atena2026' },
+                        { email: 'proprietario@email.it', role: 'Proprietario', password: 'atena' },
+                      ].map(acc => (
+                        <button
+                          key={acc.email}
+                          type="button"
+                          onClick={() => { setEmail(acc.email); setPassword(acc.password); }}
+                          className="w-full flex items-center justify-between p-2 rounded-md text-xs hover:bg-muted transition-colors"
+                          disabled={isLoading}
+                        >
+                          <span className="text-muted-foreground font-mono">{acc.email}</span>
+                          <span className="text-primary font-medium">{acc.role}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             </TabsContent>
 

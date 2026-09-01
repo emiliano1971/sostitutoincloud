@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { NavLink } from '@/components/NavLink';
-import { LayoutDashboard, CalendarDays, FileText, Receipt, Award, LogOut, Cloud } from 'lucide-react';
+import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
+import { LayoutDashboard, CalendarDays, FileText, Receipt, Award, LogOut, Cloud, KeyRound } from 'lucide-react';
 
 const ownerNav = [
   { title: 'Dashboard', url: '/owner', icon: LayoutDashboard },
@@ -13,6 +15,7 @@ const ownerNav = [
 
 export function OwnerLayout() {
   const { user, logout } = useAuth();
+  const [changePwdOpen, setChangePwdOpen] = useState(false);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -24,11 +27,16 @@ export function OwnerLayout() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground hidden sm:inline">{user?.first_name} {user?.last_name}</span>
-          <button onClick={logout} className="text-muted-foreground hover:text-destructive">
+          <button onClick={() => setChangePwdOpen(true)} className="text-muted-foreground hover:text-foreground" title="Cambia password">
+            <KeyRound className="h-4 w-4" />
+          </button>
+          <button onClick={logout} className="text-muted-foreground hover:text-destructive" title="Esci">
             <LogOut className="h-4 w-4" />
           </button>
         </div>
       </header>
+
+      <ChangePasswordDialog open={changePwdOpen} onOpenChange={setChangePwdOpen} />
 
       {/* Content */}
       <main className="flex-1 overflow-auto p-4 pb-20">

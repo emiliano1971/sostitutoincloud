@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -7,10 +8,11 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { NavLink } from '@/components/NavLink';
 import { RoleSwitcher } from '@/components/RoleSwitcher';
+import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
 import {
   LayoutDashboard, Building2, Users, Home, FileText, CalendarDays,
   Upload, GitMerge, Receipt, CreditCard, Award, ScrollText,
-  Settings, LogOut, ChevronDown, BookOpen, Globe, MapPin,
+  Settings, LogOut, ChevronDown, BookOpen, Globe, MapPin, KeyRound,
 } from 'lucide-react';
 import appLogo from '@/assets/logo-icon.png';
 
@@ -55,6 +57,7 @@ export function AppSidebar() {
   const { user, logout } = useAuth();
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
+  const [changePwdOpen, setChangePwdOpen] = useState(false);
 
   if (!user) return null;
 
@@ -147,10 +150,15 @@ export function AppSidebar() {
             </div>
           </div>
         )}
+        <SidebarMenuButton onClick={() => setChangePwdOpen(true)} className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent">
+          <KeyRound className="h-4 w-4" />
+          {!collapsed && <span className="text-xs">Cambia password</span>}
+        </SidebarMenuButton>
         <SidebarMenuButton onClick={logout} className="text-sidebar-foreground/50 hover:text-destructive hover:bg-sidebar-accent">
           <LogOut className="h-4 w-4" />
           {!collapsed && <span className="text-xs">Esci</span>}
         </SidebarMenuButton>
+        <ChangePasswordDialog open={changePwdOpen} onOpenChange={setChangePwdOpen} />
       </SidebarFooter>
     </Sidebar>
   );

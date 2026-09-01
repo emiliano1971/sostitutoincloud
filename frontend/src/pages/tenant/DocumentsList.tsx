@@ -11,6 +11,15 @@ import { getDocuments, elaboraRisposteSdi, type DocumentListItem } from '@/api/d
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
+// Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
+// nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
+const toLocalISO = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const g = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${g}`;
+};
+
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
   ready: 'bg-primary/10 text-primary',
@@ -105,13 +114,12 @@ const DocumentsList = () => {
 
   const applyPreset = (preset: string) => {
     const oggi = new Date();
-    const fmt = (d: Date) => d.toISOString().split('T')[0];
     let from = '', to = '';
     switch (preset) {
-      case 'ieri': { const d = new Date(oggi); d.setDate(oggi.getDate() - 1); from = fmt(d); to = fmt(d); break; }
-      case '3gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 3); from = fmt(d); to = fmt(oggi); break; }
-      case '7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 7); from = fmt(d); to = fmt(oggi); break; }
-      case '14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 14); from = fmt(d); to = fmt(oggi); break; }
+      case 'ieri': { const d = new Date(oggi); d.setDate(oggi.getDate() - 1); from = toLocalISO(d); to = toLocalISO(d); break; }
+      case '3gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 3); from = toLocalISO(d); to = toLocalISO(oggi); break; }
+      case '7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 7); from = toLocalISO(d); to = toLocalISO(oggi); break; }
+      case '14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 14); from = toLocalISO(d); to = toLocalISO(oggi); break; }
       default: preset = '';
     }
     setSearchParams(prev => {
@@ -239,8 +247,15 @@ const DocumentsList = () => {
                 onChange={e => setDateFromInput(e.target.value)}
                 onBlur={e => {
                   if (e.target.value !== dateFrom) {
-                    updateFilter('dateFrom', e.target.value || null);
-                    updateFilter('preset', null);
+                    // Una sola setSearchParams: due updateFilter consecutivi si annullerebbero
+                    // (react-router passa allo updater il searchParams del render corrente).
+                    setSearchParams(prev => {
+                      const next = new URLSearchParams(prev);
+                      if (e.target.value) next.set('dateFrom', e.target.value);
+                      else next.delete('dateFrom');
+                      next.delete('preset');
+                      return next;
+                    }, { replace: true });
                   }
                 }}
                 className="w-[150px]"
@@ -252,8 +267,13 @@ const DocumentsList = () => {
                 onChange={e => setDateToInput(e.target.value)}
                 onBlur={e => {
                   if (e.target.value !== dateTo) {
-                    updateFilter('dateTo', e.target.value || null);
-                    updateFilter('preset', null);
+                    setSearchParams(prev => {
+                      const next = new URLSearchParams(prev);
+                      if (e.target.value) next.set('dateTo', e.target.value);
+                      else next.delete('dateTo');
+                      next.delete('preset');
+                      return next;
+                    }, { replace: true });
                   }
                 }}
                 className="w-[150px]"

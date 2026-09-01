@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.Types;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,9 +18,12 @@ import java.util.Optional;
 @Repository
 public class UtenteDAO {
 
+    // Le 3 colonne di reset password sono obbligatorie qui: UtenteRowMapper le legge
+    // sempre, quindi ogni query che usa il mapper deve averle nel ResultSet.
     private static final String SELECT_COLS =
             "SELECT id, fk_tenant_id, email, first_name, last_name, ruolo, attivo, " +
-            "last_login, created_at, updated_at, fk_owner_id FROM utente";
+            "last_login, created_at, updated_at, fk_owner_id, " +
+            "reset_token, reset_token_expires_at, must_change_password FROM utente";
 
     private final JdbcTemplate jdbcTemplate;
     private final UtenteRowMapper utenteRowMapper = new UtenteRowMapper();
@@ -108,6 +112,15 @@ public class UtenteDAO {
         return findById(id).orElseThrow();
     }
 
+    /** Modifica dei soli dati anagrafici: ruolo, stato e password restano invariati. */
+    public Utente update(Integer id, String email, String firstName, String lastName) {
+        log.info("UtenteDAO.update() - id={} email={}", id, email);
+        jdbcTemplate.update(
+                "UPDATE utente SET email = ?, first_name = ?, last_name = ?, updated_at = NOW() WHERE id = ?",
+                email, firstName, lastName, id);
+        return findById(id).orElseThrow();
+    }
+
     public Utente updateStatus(Integer id, Boolean attivo) {
         log.info("UtenteDAO.updateStatus() - id={} attivo={}", id, attivo);
         jdbcTemplate.update("UPDATE utente SET attivo = ?, updated_at = NOW() WHERE id = ?", attivo, id);
@@ -117,5 +130,47 @@ public class UtenteDAO {
     public void delete(Integer id) {
         log.info("UtenteDAO.delete() - id={}", id);
         jdbcTemplate.update("DELETE FROM utente WHERE id = ?", id);
+    }
+
+    // ── Reset / cambio password ────────────────────────────────────────────────
+
+    public Optional<Utente> findByResetToken(String token) {
+        log.debug("UtenteDAO.findByResetToken()");
+        List<Utente> result = jdbcTemplate.query(SELECT_COLS + " WHERE reset_token = ?", utenteRowMapper, token);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /**
+     * L'hash non passa da UtenteRowMapper (non deve entrare nel model né finire
+     * serializzato): si legge solo qui, per la verifica della password corrente.
+     */
+    public Optional<String> findPasswordHashById(Integer id) {
+        log.debug("UtenteDAO.findPasswordHashById() - id={}", id);
+        List<String> result = jdbcTemplate.query(
+                "SELECT password_hash FROM utente WHERE id = ?",
+                (rs, rowNum) -> rs.getString("password_hash"), id);
+        return result.isEmpty() ? Optional.empty() : Optional.ofNullable(result.get(0));
+    }
+
+    public void saveResetToken(Integer id, String token, LocalDateTime expiresAt) {
+        log.info("UtenteDAO.saveResetToken() - id={} expiresAt={}", id, expiresAt);
+        jdbcTemplate.update(
+                "UPDATE utente SET reset_token = ?, reset_token_expires_at = ?, updated_at = NOW() WHERE id = ?",
+                token, expiresAt, id);
+    }
+
+    public void clearResetToken(Integer id) {
+        log.info("UtenteDAO.clearResetToken() - id={}", id);
+        jdbcTemplate.update(
+                "UPDATE utente SET reset_token = NULL, reset_token_expires_at = NULL, updated_at = NOW() WHERE id = ?",
+                id);
+    }
+
+    public void updatePassword(Integer id, String hashedPassword) {
+        log.info("UtenteDAO.updatePassword() - id={}", id);
+        jdbcTemplate.update(
+                "UPDATE utente SET password_hash = ?, must_change_password = false, " +
+                "reset_token = NULL, reset_token_expires_at = NULL, updated_at = NOW() WHERE id = ?",
+                hashedPassword, id);
     }
 }

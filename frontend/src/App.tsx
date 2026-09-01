@@ -7,6 +7,8 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { OwnerLayout } from "@/components/OwnerLayout";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 // Admin pages
@@ -109,6 +111,10 @@ function AppRoutes() {
         <Route path="settlements" element={<OwnerSettlements />} />
         <Route path="cu" element={<OwnerCU />} />
       </Route>
+
+      {/* Rotte pubbliche: recupero password (senza auth) */}
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route path="/guest/documents" element={<GuestDocuments />} />
       <Route path="*" element={<NotFound />} />

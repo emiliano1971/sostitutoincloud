@@ -513,6 +513,27 @@ mvn -Plocal test
 
 ```
 
+### Credenziali test
+
+Utente di sviluppo locale per le chiamate curl autenticate (tutte le API sotto
+`/api/**` richiedono un JWT Bearer):
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8081/sostitutoincloud/api/public/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@casavacanze.it","password":"atena2026"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# poi in ogni chiamata:
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8081/sostitutoincloud/api/bookings
+```
+
+Regole per Claude:
+- Ogni volta che serve autenticarsi per i test curl, ottenere il TOKEN con questo
+  snippet PRIMA delle chiamate — mai inventare né riusare token vecchi
+- Credenziali valide SOLO in locale — non usarle in test e prod
+
 ## Struttura cartelle target
 progetto/
 ├── CLAUDE.md

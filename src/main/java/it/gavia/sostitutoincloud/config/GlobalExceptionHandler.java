@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -36,6 +37,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleNotImplemented(UnsupportedOperationException ex) {
         log.warn("UnsupportedOperationException: {}", ex.getMessage());
         return errorResponse(HttpStatus.NOT_IMPLEMENTED, ex.getMessage());
+    }
+
+    /**
+     * Path inesistente: la richiesta arriva al resource handler degli static,
+     * che solleva NoResourceFoundException. Senza questo handler finiva su
+     * handleGeneric(Exception) e rispondeva 500 invece di 404.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResourceFound(NoResourceFoundException ex) {
+        log.warn("NoResourceFoundException: {}", ex.getResourcePath());
+        return errorResponse(HttpStatus.NOT_FOUND, "Risorsa non trovata: " + ex.getResourcePath());
     }
 
     @ExceptionHandler(Exception.class)
