@@ -51,7 +51,9 @@ public class SpaController {
             "/admin/**",
             "/owner",
             "/owner/**",
-            "/login"
+            "/login",
+            "/forgot-password",
+            "/reset-password"
     })
     public String forward() {
         log.debug("[SpaController] forward verso /index.html");
