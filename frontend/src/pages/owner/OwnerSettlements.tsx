@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Receipt } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { getSettlements, type SettlementListItem } from '@/api/settlementApi';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Loader2, AlertCircle } from 'lucide-react';
+import { getOwnerSettlements } from '@/api/ownerApi';
+import type { SettlementListItem } from '@/api/settlementApi';
 
 const statusColors: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
@@ -12,58 +13,96 @@ const statusColors: Record<string, string> = {
   paid: 'bg-success/10 text-success',
 };
 
+const statusLabels: Record<string, string> = {
+  pending: 'In attesa',
+  calculated: 'Calcolata',
+  approved: 'Approvata',
+  paid: 'Pagata',
+};
+
+const fmtEuro = (v?: number) =>
+  `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const OwnerSettlements = () => {
-  const { user } = useAuth();
-  const ownerId = user?.owner_id ? parseInt(user.owner_id) : undefined;
   const [settlements, setSettlements] = useState<SettlementListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!ownerId) return;
-    getSettlements({ ownerId })
+    setLoading(true);
+    // /api/owner/settlements ricava il proprietario dal token: nessun ownerId dal client.
+    getOwnerSettlements()
       .then(setSettlements)
-      .catch(() => setError('Errore nel caricamento delle liquidazioni'))
+      .catch(err => setError(err instanceof Error ? err.message : 'Errore nel caricamento delle liquidazioni'))
       .finally(() => setLoading(false));
-  }, [ownerId]);
+  }, []);
 
-  if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
-  if (error) return <div className="p-6 text-destructive">{error}</div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span>Caricamento liquidazioni…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-16 text-destructive gap-2">
+        <AlertCircle className="h-5 w-5" />
+        <span>{error}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Liquidazioni</h1>
-      <p className="text-sm text-muted-foreground">{settlements.length} liquidazioni</p>
-
-      <div className="space-y-3">
-        {settlements.map(s => (
-          <Card key={s.id}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="flex gap-3">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <Receipt className="h-4 w-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-sm">Periodo {s.period}</p>
-                    <p className="text-xs text-muted-foreground">{s.bookingsCount} prenotazioni</p>
-                    {s.paymentDate && <p className="text-xs text-muted-foreground">Pagato il {s.paymentDate}</p>}
-                    <Badge variant="outline" className={`mt-1.5 text-[10px] ${statusColors[s.stato] ?? ''}`}>{s.stato}</Badge>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-sm">€{s.netAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</p>
-                  <p className="text-[10px] text-muted-foreground">netto</p>
-                  <p className="text-[10px] text-destructive mt-0.5">-€{s.withholdingAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })} rit.</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {settlements.length === 0 && (
-          <Card><CardContent className="p-8 text-center text-muted-foreground">Nessuna liquidazione</CardContent></Card>
-        )}
+      <div>
+        <h1 className="text-2xl font-bold">Liquidazioni</h1>
+        <p className="text-sm text-muted-foreground">{settlements.length} liquidazioni</p>
       </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {settlements.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">Nessuna liquidazione</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Periodo</TableHead>
+                    <TableHead className="text-right">N. Prenotazioni</TableHead>
+                    <TableHead className="text-right">Lordo</TableHead>
+                    <TableHead className="text-right">Ritenuta</TableHead>
+                    <TableHead className="text-right">Netto</TableHead>
+                    <TableHead>Stato</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {settlements.map(s => (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-medium whitespace-nowrap">{s.period}</TableCell>
+                      <TableCell className="text-right">{s.bookingsCount}</TableCell>
+                      {/* totalAmount è il canone del periodo, base della ritenuta */}
+                      <TableCell className="text-right">{fmtEuro(s.totalAmount)}</TableCell>
+                      <TableCell className="text-right text-destructive">
+                        {(s.withholdingAmount ?? 0) > 0 ? `-${fmtEuro(s.withholdingAmount)}` : fmtEuro(0)}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">{fmtEuro(s.netAmount)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`text-xs ${statusColors[s.stato] ?? ''}`}>
+                          {statusLabels[s.stato] ?? s.stato}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

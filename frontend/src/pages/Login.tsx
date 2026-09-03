@@ -28,23 +28,24 @@ const Login = () => {
     e.preventDefault();
     setError('');
     try {
-      await login(email, password);
+      // login() restituisce l'utente: il redirect usa il ruolo reale e non deve
+      // attendere il re-render del context.
+      const utente = await login(email, password);
       toast({ title: 'Accesso effettuato', description: 'Benvenuto in Sostituto in Cloud' });
-      const roleRoutes: Record<string, string> = {
-        super_admin: '/admin',
-        tenant_admin: '/dashboard',
-        pm_user: '/dashboard',
-        owner_user: '/owner',
-      };
-      // Role is set after login — read from auth context via navigate
-      // Use a small workaround: re-read the role from response is not needed
-      // since AuthProvider sets user, App.tsx handles redirect on next render.
-      // But we need to navigate immediately, so we use role from email heuristic
-      // that will be overridden by the real user.role once re-render occurs.
-      navigate(
-        email === 'proprietario@email.it' ? '/owner' : '/dashboard',
-        { replace: true }
-      );
+      switch (utente.role) {
+        case 'super_admin':
+          navigate('/admin', { replace: true });
+          break;
+        case 'tenant_admin':
+        case 'pm_user':
+          navigate('/dashboard', { replace: true });
+          break;
+        case 'owner_user':
+          navigate('/owner', { replace: true });
+          break;
+        default:
+          navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Errore durante il login';
       setError(msg === 'UNAUTHORIZED' ? 'Credenziali non valide' : msg);

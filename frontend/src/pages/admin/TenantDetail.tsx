@@ -24,6 +24,17 @@ const statusColor: Record<string, string> = {
   closed:    'bg-destructive/10 text-destructive border-destructive/20',
 };
 
+// Ruolo utente: etichetta breve e colore. Per un ruolo non previsto si mostra il
+// codice grezzo in grigio — la lista non contiene mai super_admin, escluso dalla
+// query in UtenteDAO.findByTenantId().
+const roleBadge: Record<string, { label: string; className: string }> = {
+  tenant_admin: { label: 'Admin', className: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-900' },
+  pm_user:      { label: 'PM',    className: 'bg-muted text-muted-foreground' },
+  owner_user:   { label: 'Owner', className: 'bg-success/10 text-success border-success/20' },
+};
+
+const FALLBACK_ROLE_CLASS = 'bg-muted text-muted-foreground';
+
 const TenantDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -320,10 +331,18 @@ const TenantDetail = () => {
                 <>
                   {users.map(u => (
                     <div key={u.id} className="flex items-center justify-between gap-2">
-                      <span className="truncate">{u.email}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="truncate">{u.email}</span>
+                        <Badge
+                          variant="outline"
+                          className={`shrink-0 text-xs ${roleBadge[u.ruolo]?.className ?? FALLBACK_ROLE_CLASS}`}
+                        >
+                          {roleBadge[u.ruolo]?.label ?? u.ruolo}
+                        </Badge>
+                      </div>
                       <Badge
                         variant="outline"
-                        className={u.attivo ? statusColor.active : statusColor.suspended}
+                        className={`shrink-0 ${u.attivo ? statusColor.active : statusColor.suspended}`}
                       >
                         {u.attivo ? 'attivo' : 'disattivo'}
                       </Badge>

@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import type { UserRole } from "@/types";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { OwnerLayout } from "@/components/OwnerLayout";
 import Login from "./pages/Login";
@@ -52,9 +53,33 @@ import OwnerCU from "./pages/owner/OwnerCU";
 import GuestDocuments from "./pages/GuestDocuments";
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+// Rotta iniziale per ruolo: destinazione del redirect quando un utente prova ad
+// accedere a un gruppo di rotte che non gli appartiene.
+const HOME_BY_ROLE: Record<UserRole, string> = {
+  super_admin: '/admin',
+  tenant_admin: '/dashboard',
+  pm_user: '/dashboard',
+  owner_user: '/owner',
+};
+
+/**
+ * Autenticazione + appartenenza del ruolo al gruppo di rotte.
+ *
+ * `allow` elenca i ruoli ammessi per il gruppo: un owner_user che digita /bookings
+ * a mano finisce su /owner, non nel back-office del tenant. È il corrispettivo lato
+ * client delle regole per ruolo di SecurityConfig — la difesa vera resta quella,
+ * qui si evita solo di mostrare pagine che l'utente non può popolare.
+ */
+function ProtectedRoute({ children, allow }: { children: React.ReactNode; allow: UserRole[] }) {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  // Al reload la sessione è ancora in verifica (/auth/me): senza questa attesa
+  // isAuthenticated è false e si finirebbe su /login perdendo la pagina corrente.
+  if (isLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  const role = user?.role;
+  if (role && !allow.includes(role)) {
+    return <Navigate to={HOME_BY_ROLE[role] ?? '/dashboard'} replace />;
+  }
   return <>{children}</>;
 }
 
@@ -66,7 +91,7 @@ function AppRoutes() {
       <Route path="/login" element={isAuthenticated ? <Navigate to={user?.role === 'super_admin' ? '/admin' : user?.role === 'owner_user' ? '/owner' : '/dashboard'} replace /> : <Login />} />
 
       {/* Super Admin */}
-      <Route path="/admin" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+      <Route path="/admin" element={<ProtectedRoute allow={['super_admin']}><DashboardLayout /></ProtectedRoute>}>
         <Route index element={<SuperAdminDashboard />} />
         <Route path="tenants" element={<TenantsList />} />
         <Route path="tenants/new" element={<TenantCreate />} />
@@ -75,7 +100,7 @@ function AppRoutes() {
       </Route>
 
       {/* Tenant Admin / PM */}
-      <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+      <Route path="/" element={<ProtectedRoute allow={['tenant_admin', 'pm_user']}><DashboardLayout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<TenantDashboard />} />
         <Route path="bookings" element={<BookingsList />} />
@@ -104,7 +129,7 @@ function AppRoutes() {
       </Route>
 
       {/* Owner */}
-      <Route path="/owner" element={<ProtectedRoute><OwnerLayout /></ProtectedRoute>}>
+      <Route path="/owner" element={<ProtectedRoute allow={['owner_user']}><OwnerLayout /></ProtectedRoute>}>
         <Route index element={<OwnerDashboard />} />
         <Route path="bookings" element={<OwnerBookings />} />
         <Route path="documents" element={<OwnerDocuments />} />

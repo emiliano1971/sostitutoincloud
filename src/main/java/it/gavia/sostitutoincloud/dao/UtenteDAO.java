@@ -60,17 +60,24 @@ public class UtenteDAO {
         return result;
     }
 
+    /** Cast {@code ?::user_role} necessario come in findByTenantIdAndRuolo(). */
     public List<Utente> findByRuolo(String ruolo) {
         log.debug("UtenteDAO.findByRuolo() - ruolo={}", ruolo);
-        List<Utente> result = jdbcTemplate.query(SELECT_COLS + " WHERE ruolo = ? ORDER BY id", utenteRowMapper, ruolo);
+        List<Utente> result = jdbcTemplate.query(
+                SELECT_COLS + " WHERE ruolo = ?::user_role ORDER BY id", utenteRowMapper, ruolo);
         log.debug("UtenteDAO.findByRuolo() - trovati {} record", result.size());
         return result;
     }
 
+    /**
+     * NB il cast {@code ?::user_role}: utente.ruolo è un enum PostgreSQL (user_role) e il
+     * driver invia il parametro come varchar, per cui il confronto senza cast fallisce con
+     * "operator does not exist: user_role = character varying" (SQLState 42883).
+     */
     public List<Utente> findByTenantIdAndRuolo(Integer tenantId, String ruolo) {
         log.debug("UtenteDAO.findByTenantIdAndRuolo() - tenantId={}, ruolo={}", tenantId, ruolo);
         List<Utente> result = jdbcTemplate.query(
-                SELECT_COLS + " WHERE fk_tenant_id = ? AND ruolo = ? ORDER BY id",
+                SELECT_COLS + " WHERE fk_tenant_id = ? AND ruolo = ?::user_role ORDER BY id",
                 utenteRowMapper, tenantId, ruolo);
         log.debug("UtenteDAO.findByTenantIdAndRuolo() - trovati {} record", result.size());
         return result;

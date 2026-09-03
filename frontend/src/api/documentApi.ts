@@ -204,11 +204,27 @@ export async function inviaSdi(id: number): Promise<SdiInvioResponse> {
 /**
  * Scarica il PDF del documento generato server-side e avvia il download nel browser.
  * Non usa apiClient perché la risposta è un blob, non JSON.
+ *
+ * Back-office del tenant: /api/documents/** è precluso a owner_user. Dal portale
+ * proprietario si usa downloadOwnerDocumentPdf().
  */
 export async function downloadDocumentPdf(id: number, documentNumber: string): Promise<void> {
+  return scaricaDocumentoPdf(`/documents/${id}/pdf`, documentNumber);
+}
+
+/**
+ * Scarica il PDF di una propria ricevuta dal portale proprietario
+ * (GET /api/owner/documents/{id}/pdf). Il backend verifica che il documento sia una
+ * ricevuta dell'owner del token.
+ */
+export async function downloadOwnerDocumentPdf(id: number, documentNumber: string): Promise<void> {
+  return scaricaDocumentoPdf(`/owner/documents/${id}/pdf`, documentNumber);
+}
+
+async function scaricaDocumentoPdf(path: string, documentNumber: string): Promise<void> {
   const base = getConfig().apiBaseUrl;
   const token = getToken();
-  const res = await fetch(`${base}/documents/${id}/pdf`, {
+  const res = await fetch(`${base}${path}`, {
     headers: {
       'Accept': 'application/pdf',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),

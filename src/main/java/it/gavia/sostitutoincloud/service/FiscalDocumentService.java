@@ -35,6 +35,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,6 +46,9 @@ import java.util.stream.Collectors;
 public class FiscalDocumentService {
 
     private static final BigDecimal IVA_22 = new BigDecimal("0.22");
+
+    /** Codice della lookup tipo_documento per la ricevuta owner (il dominio la chiama ricevuta_owner). */
+    private static final String CODICE_RICEVUTA = "ricevuta";
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final BookingDAO bookingDAO;
@@ -255,6 +259,42 @@ public class FiscalDocumentService {
         log.info("FiscalDocumentService.findByTenantId() - tenantId={}, ownerId={}, risultati={}",
                 tenantId, ownerId, result.size());
         return result;
+    }
+
+    /**
+     * Ricevute owner di un singolo proprietario — portale owner.
+     *
+     * <p>L'ownerId arriva dal token, non dal client. Riusa findByTenantId() con il filtro
+     * per owner già presente, così la mappatura verso DocumentListDTO (immobile, canale,
+     * codici di stato) resta in un solo posto, e tiene solo le ricevute: le fatture PM
+     * sono documenti del property manager, non del proprietario.
+     *
+     * <p>NB il codice della lookup è {@code ricevuta}: {@code ricevuta_owner} è il termine
+     * di dominio e non esiste in tipo_documento.
+     */
+    public List<DocumentListDTO> findRicevuteByOwner(Integer tenantId, Integer ownerId) {
+        List<DocumentListDTO> result = findByTenantId(tenantId, null, null, ownerId, 0, Integer.MAX_VALUE)
+                .stream()
+                .filter(d -> CODICE_RICEVUTA.equals(d.getDocumentType()))
+                .sorted(Comparator.comparing(DocumentListDTO::getIssueDate,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
+        log.info("FiscalDocumentService.findRicevuteByOwner() - tenantId={} ownerId={} {} ricevute",
+                tenantId, ownerId, result.size());
+        return result;
+    }
+
+    /**
+     * Il documento è una ricevuta del proprietario indicato? Usato per autorizzare il
+     * download del PDF dal portale owner, dove findById() da solo non basta: filtra per
+     * tenant ma non per proprietario.
+     */
+    public boolean isRicevutaDellOwner(Integer tenantId, Integer ownerId, Integer documentId) {
+        boolean mia = findRicevuteByOwner(tenantId, ownerId).stream()
+                .anyMatch(d -> documentId.equals(d.getId()));
+        log.debug("FiscalDocumentService.isRicevutaDellOwner() - ownerId={} documentId={} esito={}",
+                ownerId, documentId, mia);
+        return mia;
     }
 
     public Optional<DocumentDetailDTO> findById(Integer tenantId, Integer documentId) {

@@ -1,57 +1,96 @@
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { useAuth } from '@/contexts/AuthContext';
-import { getBookings, type BookingListItem } from '@/api/bookingApi';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Loader2, AlertCircle } from 'lucide-react';
+import { getOwnerBookings } from '@/api/ownerApi';
+import type { BookingListItem } from '@/api/bookingApi';
+
+const fmtEuro = (v?: number) =>
+  `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('it-IT') : '—');
 
 const OwnerBookings = () => {
-  const { user } = useAuth();
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getBookings()
-      .then(all => {
-        const ownerFullName = `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim();
-        setBookings(all.filter(b => b.ownerName === ownerFullName));
-      })
-      .catch(() => setError('Errore nel caricamento delle prenotazioni'))
+    setLoading(true);
+    // Nessun filtro lato client: /api/owner/bookings restituisce già solo le
+    // prenotazioni del proprietario autenticato.
+    getOwnerBookings()
+      .then(setBookings)
+      .catch(err => setError(err instanceof Error ? err.message : 'Errore nel caricamento delle prenotazioni'))
       .finally(() => setLoading(false));
-  }, [user]);
+  }, []);
 
-  if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
-  if (error) return <div className="p-6 text-destructive">{error}</div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span>Caricamento prenotazioni…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-16 text-destructive gap-2">
+        <AlertCircle className="h-5 w-5" />
+        <span>{error}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Prenotazioni</h1>
-      <p className="text-sm text-muted-foreground">{bookings.length} prenotazioni</p>
-
-      <div className="space-y-3">
-        {bookings.map(b => (
-          <Card key={b.id}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-medium text-sm">{b.guestName}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{b.propertyName}</p>
-                  <p className="text-xs text-muted-foreground">{b.checkinDate} → {b.checkoutDate} · {b.nights} notti</p>
-                  <Badge variant="outline" className="mt-2 text-[10px]">{b.channelName}</Badge>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-sm">€{b.ownerNetAmount.toLocaleString('it-IT')}</p>
-                  <p className="text-[10px] text-muted-foreground">netto</p>
-                  <Badge variant="outline" className="mt-1 text-[10px]">{b.statoPrenotazione}</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {bookings.length === 0 && (
-          <Card><CardContent className="p-8 text-center text-muted-foreground">Nessuna prenotazione</CardContent></Card>
-        )}
+      <div>
+        <h1 className="text-2xl font-bold">Prenotazioni</h1>
+        <p className="text-sm text-muted-foreground">{bookings.length} prenotazioni</p>
       </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {bookings.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">Nessuna prenotazione</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Immobile</TableHead>
+                    <TableHead>Check-in</TableHead>
+                    <TableHead>Check-out</TableHead>
+                    <TableHead className="text-right">Notti</TableHead>
+                    <TableHead className="text-right">Lordo</TableHead>
+                    <TableHead className="text-right">Netto</TableHead>
+                    <TableHead>Stato</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {bookings.map(b => (
+                    <TableRow key={b.id}>
+                      <TableCell className="font-mono text-xs">{b.externalBookingId}</TableCell>
+                      <TableCell className="text-sm">{b.propertyName}</TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">{fmtDate(b.checkinDate)}</TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">{fmtDate(b.checkoutDate)}</TableCell>
+                      <TableCell className="text-right">{b.nights}</TableCell>
+                      <TableCell className="text-right">{fmtEuro(b.grossAmount)}</TableCell>
+                      <TableCell className="text-right font-medium">{fmtEuro(b.ownerNetAmount)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">{b.statoPrenotazione}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

@@ -22,7 +22,9 @@ interface AuthContextType {
   user: UserContext | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Restituisce l'utente autenticato: serve al chiamante per il redirect per ruolo,
+   *  che altrimenti dovrebbe attendere il re-render con lo stato aggiornato. */
+  login: (email: string, password: string) => Promise<UserContext>;
   logout: () => void;
   switchRole: (role: UserRole) => void;
 }
@@ -58,12 +60,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .finally(() => setIsLoading(false));
   }, []);
 
-  const login = useCallback(async (email: string, password: string): Promise<void> => {
+  const login = useCallback(async (email: string, password: string): Promise<UserContext> => {
     setIsLoading(true);
     try {
       const response = await post<LoginResponse>('/public/login', { email, password });
       setToken(response.token);
-      setUser(mapToUserContext(response.user));
+      const utente = mapToUserContext(response.user);
+      setUser(utente);
+      return utente;
     } catch (err) {
       clearToken();
       // Propaga il messaggio reale dal server

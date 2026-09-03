@@ -121,6 +121,23 @@ public class BookingService {
         return result;
     }
 
+    /**
+     * Prenotazioni di un singolo proprietario — portale owner.
+     *
+     * <p>L'ownerId arriva dal token (SecurityUtils.getCurrentOwnerId()), non dal client:
+     * il filtro è quindi lato server e un owner non può vedere le prenotazioni di altri.
+     * NB l'ordine dei parametri del DAO è (tenantId, ownerId).
+     */
+    public List<BookingListDTO> findByOwner(Integer tenantId, Integer ownerId) {
+        LookupMaps maps = buildLookupMaps(tenantId);
+        List<BookingListDTO> result = bookingDAO.findByOwnerAndTenant(tenantId, ownerId).stream()
+                .map(b -> toListDTO(b, maps))
+                .toList();
+        log.info("BookingService.findByOwner() - tenantId={} ownerId={} {} booking trovati",
+                tenantId, ownerId, result.size());
+        return result;
+    }
+
     public Optional<BookingDetailDTO> findById(Integer tenantId, Integer bookingId) {
         log.info("BookingService.findById() - tenantId={}, bookingId={}", tenantId, bookingId);
         return bookingDAO.findById(bookingId)

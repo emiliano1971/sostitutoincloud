@@ -61,6 +61,19 @@ public class OwnerDashboardService {
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        // Canone complessivo che spetta al proprietario (ricaviTotali è il lordo ospite).
+        BigDecimal totalNet = bookings.stream()
+                .map(Booking::getOwnerNetAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Netto ancora da incassare: il complemento di totalLiquidato.
+        BigDecimal netDaPagare = settlements.stream()
+                .filter(s -> !"paid".equals(s.getStato()))
+                .map(Settlement::getNetAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
         YearMonth currentMonth = YearMonth.now();
         DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ITALIAN);
         DateTimeFormatter keyFormatter = DateTimeFormatter.ofPattern("yyyy-MM");
@@ -97,6 +110,9 @@ public class OwnerDashboardService {
                 .totalRitenute(totalRitenute)
                 .totalLiquidato(totalLiquidato)
                 .ricaviMensili(ricaviMensili)
+                .totalNet(totalNet)
+                .settlementsCount(settlements.size())
+                .netDaPagare(netDaPagare)
                 .build();
     }
 }

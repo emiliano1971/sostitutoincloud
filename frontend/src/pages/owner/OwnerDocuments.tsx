@@ -1,8 +1,12 @@
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Download, FileText } from 'lucide-react';
-import { mockDocuments } from '@/data/mock-data';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Download, Loader2, AlertCircle } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
+import { getOwnerDocuments } from '@/api/ownerApi';
+import { downloadOwnerDocumentPdf, type DocumentListItem } from '@/api/documentApi';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -12,42 +16,125 @@ const statusColors: Record<string, string> = {
   rejected: 'bg-destructive/10 text-destructive',
 };
 
+// La lookup stato_documento ha descrizioni orientate allo SDI ("Pronto per invio SDI"),
+// che non riguardano la ricevuta: qui le etichette sono locali, come in BookingDetail.
+const statusLabels: Record<string, string> = {
+  draft: 'Bozza',
+  ready: 'Emesso',
+};
+
+const fmtEuro = (v?: number) =>
+  `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('it-IT') : '—');
+
 const OwnerDocuments = () => {
-  // Owner sees only ricevute (receipts), not fatture (invoices)
-  const docs = mockDocuments.filter(d => d.document_type === 'ricevuta').slice(0, 10);
+  const [docs, setDocs] = useState<DocumentListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    // /api/owner/documents restituisce già solo le ricevute del proprietario
+    // autenticato: nessun filtro per tipo o per nome lato client.
+    getOwnerDocuments()
+      .then(setDocs)
+      .catch(err => setError(err instanceof Error ? err.message : 'Errore nel caricamento dei documenti'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleDownload = async (doc: DocumentListItem) => {
+    setDownloadingId(doc.id);
+    try {
+      await downloadOwnerDocumentPdf(doc.id, doc.documentNumber);
+    } catch (err) {
+      toast({
+        title: 'Errore download PDF',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span>Caricamento documenti…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-16 text-destructive gap-2">
+        <AlertCircle className="h-5 w-5" />
+        <span>{error}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Documenti</h1>
-      <p className="text-sm text-muted-foreground">{docs.length} documenti</p>
-
-      <div className="space-y-3">
-        {docs.map(d => (
-          <Card key={d.document_id}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="flex gap-3">
-                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <FileText className="h-4 w-4 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-sm">{d.document_number}</p>
-                    <p className="text-xs text-muted-foreground">{d.recipient_name} · {d.issue_date}</p>
-                    <div className="flex gap-2 mt-1.5">
-                      <Badge variant="outline" className="text-[10px]">{d.document_type}</Badge>
-                      <Badge variant="outline" className={`text-[10px] ${statusColors[d.status]}`}>{d.status}</Badge>
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-sm">€{d.total_amount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</p>
-                  <Button variant="ghost" size="sm" className="mt-1 gap-1 text-xs"><Download className="h-3 w-3" /> PDF</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+      <div>
+        <h1 className="text-2xl font-bold">Documenti</h1>
+        <p className="text-sm text-muted-foreground">{docs.length} ricevute</p>
       </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {docs.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">Nessun documento</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Numero</TableHead>
+                    <TableHead>Data emissione</TableHead>
+                    <TableHead>Immobile</TableHead>
+                    <TableHead className="text-right">Importo</TableHead>
+                    <TableHead>Stato</TableHead>
+                    <TableHead className="w-12"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {docs.map(d => (
+                    <TableRow key={d.id}>
+                      <TableCell className="font-mono text-xs">{d.documentNumber}</TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">{fmtDate(d.issueDate)}</TableCell>
+                      <TableCell className="text-sm">{d.propertyName ?? '—'}</TableCell>
+                      <TableCell className="text-right font-medium">{fmtEuro(d.totalAmount)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`text-xs ${statusColors[d.statoDocumento] ?? ''}`}>
+                          {statusLabels[d.statoDocumento] ?? d.statoDocumento}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Scarica PDF"
+                          onClick={() => handleDownload(d)}
+                          disabled={downloadingId === d.id}
+                        >
+                          {downloadingId === d.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Download className="h-3.5 w-3.5" />}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

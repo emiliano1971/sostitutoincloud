@@ -20,4 +20,11 @@ public class OwnerDashboardDTO {
     private BigDecimal totalRitenute;
     private BigDecimal totalLiquidato;
     private List<MensileDTO> ricaviMensili;
+
+    // Portale owner: canone maturato, numero liquidazioni e quanto resta da incassare.
+    // ricaviTotali è il lordo ospite, totalNet il canone che spetta al proprietario.
+    private BigDecimal totalNet;
+    private Integer settlementsCount;
+    /** Somma dei netti delle liquidazioni non ancora pagate (stato != 'paid'). */
+    private BigDecimal netDaPagare;
 }

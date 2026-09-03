@@ -1,52 +1,58 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { TrendingUp, CalendarDays, FileText, Receipt, Download } from 'lucide-react';
+import { TrendingUp, CalendarDays, FileText, Receipt, Wallet, Coins, Loader2, AlertCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useAuth } from '@/contexts/AuthContext';
-import { getOwnerDashboard, type OwnerDashboardDTO } from '@/api/ownerApi';
-import { getBookings, type BookingListItem } from '@/api/bookingApi';
-import { getCuList, type CuListItem } from '@/api/cuApi';
+import { getOwnerDashboardSelf, getOwnerBookings, type OwnerDashboardDTO } from '@/api/ownerApi';
+import type { BookingListItem } from '@/api/bookingApi';
+
+const fmtEuro = (v?: number) =>
+  `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const OwnerDashboard = () => {
-  const { user } = useAuth();
-  const ownerId = user?.owner_id ? parseInt(user.owner_id) : undefined;
-
   const [dashboard, setDashboard] = useState<OwnerDashboardDTO | null>(null);
   const [recentBookings, setRecentBookings] = useState<BookingListItem[]>([]);
-  const [cuList, setCuList] = useState<CuListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!ownerId) return;
     setLoading(true);
-    Promise.all([
-      getOwnerDashboard(ownerId),
-      getBookings(),
-      getCuList({ ownerId }),
-    ])
-      .then(([dash, bookings, cus]) => {
+    // Entrambi gli endpoint ricavano il proprietario dal token: non serve più
+    // scaricare tutte le prenotazioni del tenant e filtrarle per nome nel browser.
+    Promise.all([getOwnerDashboardSelf(), getOwnerBookings()])
+      .then(([dash, bookings]) => {
         setDashboard(dash);
-        const ownerFullName = `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim();
-        setRecentBookings(
-          bookings.filter(b => b.ownerName === ownerFullName).slice(0, 5)
-        );
-        setCuList(cus);
+        setRecentBookings(bookings.slice(0, 5));
       })
-      .catch(() => setError('Errore nel caricamento dei dati'))
+      .catch(err => setError(err instanceof Error ? err.message : 'Errore nel caricamento dei dati'))
       .finally(() => setLoading(false));
-  }, [ownerId]);
+  }, []);
 
-  if (loading) return <div className="p-6 text-muted-foreground">Caricamento...</div>;
-  if (error) return <div className="p-6 text-destructive">{error}</div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span>Caricamento…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-16 text-destructive gap-2">
+        <AlertCircle className="h-5 w-5" />
+        <span>{error}</span>
+      </div>
+    );
+  }
 
   const kpis = [
-    { label: 'Ricavi Totali', value: `€${(dashboard?.ricaviTotali ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: TrendingUp, color: 'text-primary' },
-    { label: 'Prenotazioni', value: dashboard?.prenotazioniCount ?? 0, icon: CalendarDays, color: 'text-success' },
-    { label: 'Ritenute', value: `€${(dashboard?.totalRitenute ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: FileText, color: 'text-warning' },
-    { label: 'Liquidato', value: `€${(dashboard?.totalLiquidato ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 0 })}`, icon: Receipt, color: 'text-success' },
+    { label: 'Totale lordo', value: fmtEuro(dashboard?.ricaviTotali), icon: TrendingUp, color: 'text-primary' },
+    { label: 'Netto maturato', value: fmtEuro(dashboard?.totalNet), icon: Wallet, color: 'text-success' },
+    { label: 'Ritenute', value: fmtEuro(dashboard?.totalRitenute), icon: FileText, color: 'text-warning' },
+    { label: 'Prenotazioni', value: dashboard?.prenotazioniCount ?? 0, icon: CalendarDays, color: 'text-primary' },
+    { label: 'Liquidazioni', value: dashboard?.settlementsCount ?? 0, icon: Receipt, color: 'text-primary' },
+    { label: 'Netto da pagare', value: fmtEuro(dashboard?.netDaPagare), icon: Coins, color: 'text-success' },
   ];
 
   const ownerRevenue = (dashboard?.ricaviMensili ?? []).map(d => ({
@@ -62,8 +68,8 @@ const OwnerDashboard = () => {
         <p className="text-sm text-muted-foreground">Riepilogo della tua attività</p>
       </div>
 
-      {/* KPIs - mobile cards */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* KPI */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         {kpis.map(kpi => (
           <Card key={kpi.label}>
             <CardContent className="p-4">
@@ -105,7 +111,7 @@ const OwnerDashboard = () => {
                 <p className="text-xs text-muted-foreground">{b.propertyName} · {b.checkinDate}</p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-medium">€{b.ownerNetAmount.toLocaleString('it-IT')}</p>
+                <p className="text-sm font-medium">{fmtEuro(b.ownerNetAmount)}</p>
                 <Badge variant="outline" className="text-[10px]">{b.statoPrenotazione}</Badge>
               </div>
             </div>
@@ -115,24 +121,6 @@ const OwnerDashboard = () => {
           )}
         </CardContent>
       </Card>
-
-      {/* CU */}
-      {cuList.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Certificazioni Uniche</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {cuList.map(cu => (
-              <div key={cu.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                <div>
-                  <p className="text-sm font-medium">CU {cu.taxYear}</p>
-                  <p className="text-xs text-muted-foreground">Compensi: €{cu.totalCompensi.toLocaleString('it-IT')} · Ritenute: €{cu.totalRitenute.toLocaleString('it-IT')}</p>
-                </div>
-                <Button variant="outline" size="sm" className="gap-1"><Download className="h-3.5 w-3.5" /> PDF</Button>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 };

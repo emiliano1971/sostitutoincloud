@@ -56,11 +56,27 @@ export async function updateCuStatus(id: number, stato: string): Promise<CuListI
 /**
  * Scarica il PDF della CU (GET /api/cu/{id}/pdf) e avvia il download nel browser.
  * Non usa apiClient perché la risposta è un blob, non JSON.
+ *
+ * Back-office del tenant: /api/cu/** è precluso a owner_user. Dal portale
+ * proprietario si usa downloadOwnerCuPdf().
  */
 export async function downloadCuPdf(id: number, anno: number, ownerName: string): Promise<void> {
+  return scaricaCuPdf(`/cu/${id}/pdf`, anno, ownerName);
+}
+
+/**
+ * Scarica il PDF della propria CU dal portale proprietario
+ * (GET /api/owner/cu/{id}/pdf). Il backend verifica che la CU appartenga
+ * all'owner del token: 403 se è di un altro proprietario.
+ */
+export async function downloadOwnerCuPdf(id: number, anno: number, ownerName: string): Promise<void> {
+  return scaricaCuPdf(`/owner/cu/${id}/pdf`, anno, ownerName);
+}
+
+async function scaricaCuPdf(path: string, anno: number, ownerName: string): Promise<void> {
   const base = getConfig().apiBaseUrl;
   const token = getToken();
-  const res = await fetch(`${base}/cu/${id}/pdf`, {
+  const res = await fetch(`${base}${path}`, {
     headers: {
       'Accept': 'application/pdf',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),

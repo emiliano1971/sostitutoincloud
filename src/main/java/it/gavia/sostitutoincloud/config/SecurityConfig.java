@@ -51,6 +51,28 @@ public class SecurityConfig {
                 ).permitAll()
                 .requestMatchers("/api/public/**").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("SUPER_ADMIN")
+                // Portale proprietario: solo owner_user. Un tenant_admin riceve 403.
+                // L'authority è ROLE_OWNER_USER (DatabaseUserDetailsService.mapRuoloToRole()).
+                .requestMatchers("/api/owner/**").hasRole("OWNER_USER")
+                // Back-office del tenant: precluso a owner_user, che ha i propri
+                // endpoint sotto /api/owner/**. Deve stare PRIMA di /api/** perché in
+                // Spring Security vince la prima regola che corrisponde.
+                .requestMatchers(
+                    "/api/bookings/**",
+                    "/api/settlements/**",
+                    "/api/documents/**",
+                    "/api/cu/**",
+                    "/api/owners/**",
+                    "/api/properties/**",
+                    "/api/f24/**",
+                    "/api/users/**",
+                    "/api/sdi/**",
+                    "/api/dashboard/**",
+                    "/api/settings/**",
+                    "/api/audit-log/**",
+                    "/api/tourist-tax/**",
+                    "/api/withholding-ledger/**"
+                ).hasAnyRole("TENANT_ADMIN", "PM_USER", "SUPER_ADMIN")
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )
