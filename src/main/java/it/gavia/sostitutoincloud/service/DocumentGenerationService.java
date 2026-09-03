@@ -40,6 +40,7 @@ public class DocumentGenerationService {
     private static final BigDecimal CENTO = new BigDecimal("100");
     private static final String REGIME_FORFETTARIO = "RF19";
     private static final String STATO_READY = "ready";
+    private static final String STATO_SENT_SDI = "sent_sdi";
     private static final String STATO_DOC_ISSUED = "doc_issued";
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
@@ -52,6 +53,7 @@ public class DocumentGenerationService {
     private final WithholdingLedgerService withholdingLedgerService;
     private final BookingDAO bookingDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
+    private final SdiXmlService sdiXmlService;
 
     public DocumentGenerationService(FiscalDocumentDAO fiscalDocumentDAO,
                                      BookingService bookingService,
@@ -62,7 +64,8 @@ public class DocumentGenerationService {
                                      PropertyDAO propertyDAO,
                                      WithholdingLedgerService withholdingLedgerService,
                                      BookingDAO bookingDAO,
-                                     StatoPrenotazioneDAO statoPrenotazioneDAO) {
+                                     StatoPrenotazioneDAO statoPrenotazioneDAO,
+                                     SdiXmlService sdiXmlService) {
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingService = bookingService;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
@@ -73,6 +76,7 @@ public class DocumentGenerationService {
         this.withholdingLedgerService = withholdingLedgerService;
         this.bookingDAO = bookingDAO;
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
+        this.sdiXmlService = sdiXmlService;
     }
 
     public DocumentGenerateResponseDTO generate(Integer tenantId, DocumentGenerateRequestDTO request) {
@@ -271,7 +275,7 @@ public class DocumentGenerationService {
                         + " per prenotazione " + booking.getExternalBookingId());
 
         // 7. Response
-        return DocumentGenerateResponseDTO.builder()
+        DocumentGenerateResponseDTO result = DocumentGenerateResponseDTO.builder()
                 .documentId(saved.getId())
                 .documentNumber(saved.getDocumentNumber())
                 .tipoDocumento(tipo)
@@ -287,6 +291,50 @@ public class DocumentGenerationService {
                 .ownerName(booking.getOwnerName())
                 .propertyName(booking.getPropertyName())
                 .build();
+
+        // 8. Auto-invio SDI se configurato (tenant_settings.sdi_auto_send).
+        // Solo per la fattura PM: la ricevuta owner è un documento interno e
+        // SdiXmlService.generaEInvia() la rifiuta.
+        // sdi_auto_send arriva dagli stessi settings già usati per bollo e ritenute:
+        // per un tenant senza riga in tenant_settings valgono i default, dove è true.
+        if (TIPO_FATTURA_PM.equals(tipo) && Boolean.TRUE.equals(settings.getSdiAutoSend())) {
+            // Dati obbligatori ospite. Il CF è già garantito dal controllo in testa al metodo
+            // (fattura PM senza CF non arriva qui): in pratica solo il nome può mancare.
+            boolean datiCompleti = booking.getGuestTaxCode() != null
+                    && !booking.getGuestTaxCode().isBlank()
+                    && booking.getGuestName() != null
+                    && !booking.getGuestName().isBlank();
+
+            if (datiCompleti) {
+                try {
+                    String filePath = sdiXmlService.generaEInvia(tenantId, saved.getId());
+                    log.info("DocumentGenerationService: SDI auto-send OK per doc={} file={}",
+                            saved.getId(), filePath);
+                    // Segnala al chiamante che lo SDI è stato generato automaticamente
+                    result.setSdiAutoGenerato(true);
+                    result.setSdiFilePath(filePath);
+                    result.setSdiProgressivo(fiscalDocumentDAO.findById(saved.getId())
+                            .map(FiscalDocument::getSdiProgressivo)
+                            .orElse(null));
+                    // generaEInvia() porta il documento a 'sent_sdi': senza questo la response
+                    // continuerebbe a dichiarare 'ready' e il dialog mostrerebbe lo stato sbagliato.
+                    result.setStatoDocumento(STATO_SENT_SDI);
+                } catch (Exception e) {
+                    // L'emissione resta valida: l'invio si potrà ritentare manualmente.
+                    log.error("DocumentGenerationService: SDI auto-send fallito per doc={}: {}",
+                            saved.getId(), e.getMessage(), e);
+                    result.setSdiAutoGenerato(false);
+                    result.setSdiAutoSendError(e.getMessage());
+                }
+            } else {
+                log.warn("DocumentGenerationService: sdi_auto_send=true ma dati ospite incompleti "
+                        + "per doc={} booking={}", saved.getId(), booking.getId());
+                result.setSdiAutoGenerato(false);
+                result.setSdiDatiIncompleti(true);
+            }
+        }
+
+        return result;
     }
 
     private BigDecimal nz(BigDecimal v) {

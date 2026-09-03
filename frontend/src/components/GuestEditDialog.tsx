@@ -22,6 +22,8 @@ interface GuestData {
   guestDocType?: string;
   guestDocNumber?: string;
   guestCountry?: string;
+  guestAddress?: string;
+  guestPhone?: string;
 }
 
 interface GuestEditDialogProps {
@@ -42,6 +44,8 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
   const [birthBelfiore, setBirthBelfiore] = useState(guest.guestBirthBelfiore ?? '');
   const [docType, setDocType] = useState(guest.guestDocType ?? '');
   const [docNumber, setDocNumber] = useState(guest.guestDocNumber ?? '');
+  const [indirizzo, setIndirizzo] = useState(guest.guestAddress ?? '');
+  const [telefono, setTelefono] = useState(guest.guestPhone ?? '');
   const [nazione, setNazione] = useState<'Italia' | 'Straniero'>(
     guest.guestCountry === 'Straniero' ? 'Straniero' : 'Italia');
   const [taxCode, setTaxCode] = useState(guest.guestTaxCode ?? '');
@@ -99,6 +103,8 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
         guestDocType: docType || undefined,
         guestDocNumber: docNumber || undefined,
         guestCountry: nazione,
+        guestAddress: indirizzo.trim() || undefined,
+        guestPhone: telefono.trim() || undefined,
       };
       const updated = await updateBookingGuest(bookingId, payload);
       toast({ title: 'Dati ospite aggiornati' });
@@ -179,6 +185,17 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
             <div className="space-y-1">
               <Label className="text-xs">Numero documento</Label>
               <Input value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Indirizzo</Label>
+              <Input value={indirizzo} onChange={e => setIndirizzo(e.target.value)} placeholder="Via, civico, città" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Telefono</Label>
+              <Input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="+39 …" />
             </div>
           </div>
 

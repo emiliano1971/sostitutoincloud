@@ -25,7 +25,8 @@ const superAdminNav = [
 const tenantMainNav = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Prenotazioni', url: '/bookings', icon: CalendarDays },
-  { title: 'Riconciliazione', url: '/reconciliation', icon: GitMerge },
+  // Voce nascosta dal menu: la pagina resta raggiungibile via URL diretto /reconciliation
+  // { title: 'Riconciliazione', url: '/reconciliation', icon: GitMerge },
   { title: 'Proprietari', url: '/owners', icon: Users },
   { title: 'Immobili', url: '/properties', icon: Home },
   { title: 'Utenti', url: '/users', icon: Users },
@@ -45,7 +46,8 @@ const tenantAccountingNav = [
 const pmMainNav = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Prenotazioni', url: '/bookings', icon: CalendarDays },
-  { title: 'Riconciliazione', url: '/reconciliation', icon: GitMerge },
+  // Voce nascosta dal menu: la pagina resta raggiungibile via URL diretto /reconciliation
+  // { title: 'Riconciliazione', url: '/reconciliation', icon: GitMerge },
 ];
 
 const pmAccountingNav = [

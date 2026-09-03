@@ -1,6 +1,7 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportConfirmDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewRowDTO;
@@ -69,7 +70,19 @@ class BookingImportServiceTest {
     BookingDAO bookingDAO;
 
     @Autowired
+    CanaleOtaDAO canaleOtaDAO;
+
+    @Autowired
     CodiceFiscaleService codiceFiscaleService;
+
+    /**
+     * Id del canale della prenotazione di test (Origine = "Booking.com"): fa parte
+     * della chiave di ricerca di findByExternalBookingId. Risolto per codice, non
+     * hardcodato, così il test regge un cambio di id sulla lookup.
+     */
+    private Integer canaleTestId() {
+        return canaleOtaDAO.findByCodice("booking").orElseThrow().getId();
+    }
 
     /** Foglio xlsx a due righe (intestazioni + valori) generato in memoria. */
     private static byte[] xlsx(String[] headers, String[] valori) throws IOException {
@@ -109,7 +122,7 @@ class BookingImportServiceTest {
     @DisplayName("Import Marco Bianchi: anagrafica completa scritta su booking")
     void importMarcoBianchi_anagraficaCompleta() throws Exception {
         // ARRANGE — nessuna prenotazione con questo id può esistere: l'id è generato ora
-        assertTrue(bookingDAO.findByExternalBookingId(BOOKING_ID).isEmpty(),
+        assertTrue(bookingDAO.findByExternalBookingId(BOOKING_ID, TENANT_ID, canaleTestId()).isEmpty(),
                 "L'id di test deve essere nuovo: " + BOOKING_ID);
 
         // ACT - Step 1: upload
@@ -144,7 +157,7 @@ class BookingImportServiceTest {
         bookingImportService.confirm(TENANT_ID, confirm);
 
         // ASSERT - booking su DB
-        Optional<Booking> saved = bookingDAO.findByExternalBookingId(BOOKING_ID);
+        Optional<Booking> saved = bookingDAO.findByExternalBookingId(BOOKING_ID, TENANT_ID, canaleTestId());
         assertTrue(saved.isPresent(), "Il booking deve essere presente nel DB");
         Booking b = saved.get();
 

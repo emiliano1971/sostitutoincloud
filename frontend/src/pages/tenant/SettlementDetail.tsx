@@ -4,8 +4,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
-import { getSettlementById, type SettlementDetail as SettlementDetailType } from '@/api/settlementApi';
+import { ArrowLeft, Loader2, AlertCircle, Download } from 'lucide-react';
+import {
+  getSettlementById,
+  downloadSettlementPdf,
+  type SettlementDetail as SettlementDetailType,
+} from '@/api/settlementApi';
+import { useToast } from '@/hooks/use-toast';
 
 const statusColors: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
@@ -42,9 +47,11 @@ const notti = (checkin: string, checkout: string): number => {
 const SettlementDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [settlement, setSettlement] = useState<SettlementDetailType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -77,6 +84,17 @@ const SettlementDetail = () => {
       </div>
     );
   }
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    try {
+      await downloadSettlementPdf(settlement.id, settlement.period, settlement.ownerName);
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const bookings = settlement.bookings ?? [];
 
@@ -115,6 +133,12 @@ const SettlementDetail = () => {
               </Badge>
             </p>
           </div>
+          <Button variant="outline" className="gap-2" onClick={handleDownloadPdf} disabled={isDownloading}>
+            {isDownloading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Download className="h-4 w-4" />}
+            Scarica PDF
+          </Button>
         </div>
       </div>
 

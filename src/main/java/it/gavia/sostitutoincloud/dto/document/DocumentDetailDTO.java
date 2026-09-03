@@ -64,6 +64,12 @@ public class DocumentDetailDTO {
     private String cuStato;
     private Boolean cuConsegnata;
 
+    // Liquidazione che include la prenotazione del documento. A differenza di F24 e CU
+    // è valorizzata per qualsiasi tipo di documento: è il frontend a mostrare la card
+    // solo sulla ricevuta owner.
+    private Integer settlementId;   // null se la prenotazione non è ancora liquidata
+    private String settlementStato;
+
     // Emittente (tenant)
     private String tenantLegalName;
     private String tenantVatNumber;

@@ -17,4 +17,6 @@ public class GuestUpdateDTO {
     private String guestDocType;
     private String guestDocNumber;
     private String guestCountry;
+    private String guestAddress;
+    private String guestPhone;
 }

@@ -29,6 +29,21 @@ const statusColors: Record<string, string> = {
   error: 'bg-destructive/10 text-destructive',
 };
 
+// Stato liquidazione — stesse etichette e colori di BookingDetail
+const settlementLabels: Record<string, string> = {
+  pending: 'In attesa',
+  calculated: 'Calcolata',
+  approved: 'Approvata',
+  paid: 'Pagata',
+};
+
+const settlementBadgeColors: Record<string, string> = {
+  pending: 'bg-muted text-muted-foreground',
+  calculated: 'bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300',
+  approved: 'bg-warning/10 text-warning',
+  paid: 'bg-success/10 text-success',
+};
+
 type SortDir = 'asc' | 'desc';
 
 interface SortableThProps {
@@ -79,6 +94,9 @@ const DocumentsList = () => {
   // Filtro per tipo documento: i valori sono i codice della lookup tipo_documento
   // ('fattura' | 'ricevuta' | 'nota_credito'), come restituiti da documentType.
   const tipoFilter = searchParams.get('tipo') ?? '';
+  // Filtro stato liquidazione: in memoria (il backend non lo espone come parametro),
+  // persistito nell'URL (?liquidazione=paid). 'none' = documenti non ancora liquidati.
+  const settlementFilter = searchParams.get('liquidazione') ?? '';
   // Input date locali: scrivere l'URL a ogni keystroke rimonterebbe il valore
   // mentre l'utente digita l'anno a mano, azzerando il campo. L'URL si aggiorna onBlur.
   const [dateFromInput, setDateFromInput] = useState(dateFrom);
@@ -182,6 +200,11 @@ const DocumentsList = () => {
     .filter(d => {
       if (!tipoFilter) return true;
       return d.documentType === tipoFilter;
+    })
+    .filter(d => {
+      if (!settlementFilter) return true;
+      if (settlementFilter === 'none') return !d.settlementId;
+      return d.settlementStato === settlementFilter;
     });
 
   const ownerFilterName = ownerIdFilter != null
@@ -222,12 +245,28 @@ const DocumentsList = () => {
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tutti gli stati</SelectItem>
+                <SelectItem value="all">Stato SDI</SelectItem>
                 <SelectItem value="draft">Bozza</SelectItem>
                 <SelectItem value="ready">Pronto</SelectItem>
                 <SelectItem value="sent_sdi">Inviato SDI</SelectItem>
                 <SelectItem value="accepted">Accettato</SelectItem>
                 <SelectItem value="rejected">Rifiutato</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Filtro stato liquidazione: in memoria, persistito nell'URL (?liquidazione=paid).
+                Il Select non accetta value="" — 'all' fa da valore neutro e non finisce nell'URL. */}
+            <Select
+              value={settlementFilter || 'all'}
+              onValueChange={v => updateFilter('liquidazione', v === 'all' ? '' : v)}
+            >
+              <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Liquidazione</SelectItem>
+                <SelectItem value="pending">In attesa</SelectItem>
+                <SelectItem value="calculated">Calcolata</SelectItem>
+                <SelectItem value="approved">Approvata</SelectItem>
+                <SelectItem value="paid">Pagata</SelectItem>
+                <SelectItem value="none">Non liquidata</SelectItem>
               </SelectContent>
             </Select>
             {/* Filtro tipo documento: in memoria, persistito nell'URL (?tipo=fattura).
@@ -382,6 +421,7 @@ const DocumentsList = () => {
                   <SortableTh label="Data" colKey="issueDate" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                   <SortableTh label="Totale €" colKey="totalAmount" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" />
                   <SortableTh label="Stato SDI" colKey="statoDocumento" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTh label="Liquidazione" colKey="settlementStato" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                   <TableHead className="w-10"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -425,6 +465,21 @@ const DocumentsList = () => {
                     <TableCell className="text-sm">{d.issueDate}</TableCell>
                     <TableCell className="text-right font-medium">€{d.totalAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</TableCell>
                     <TableCell><Badge variant="outline" className={statusColors[d.statoDocumento]}>{d.statoDocumento}</Badge></TableCell>
+                    <TableCell>
+                      {d.settlementId ? (
+                        <button
+                          type="button"
+                          title="Vedi la liquidazione"
+                          onClick={e => { e.stopPropagation(); navigate(`/settlements/${d.settlementId}`); }}
+                        >
+                          <Badge className={settlementBadgeColors[d.settlementStato ?? 'pending'] ?? settlementBadgeColors.pending}>
+                            {settlementLabels[d.settlementStato ?? 'pending'] ?? d.settlementStato}
+                          </Badge>
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/documents/${d.id}`)}><Eye className="h-3.5 w-3.5" /></Button></TableCell>
                   </TableRow>
                 ))}

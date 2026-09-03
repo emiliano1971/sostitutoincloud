@@ -128,7 +128,14 @@ public class BookingImportService {
             Map.entry("comune emittente", "COMUNE_NASCITA"),
             Map.entry("documento", "DOCUMENTO"),
             Map.entry("nº documento", "NUM_DOCUMENTO"),
-            Map.entry("nazione", "NAZIONE")
+            Map.entry("nazione", "NAZIONE"),
+            Map.entry("codice fiscale", "CODICE_FISCALE"),
+            Map.entry("codicefiscale", "CODICE_FISCALE"),
+            Map.entry("codice_fiscale", "CODICE_FISCALE"),
+            Map.entry("cf", "CODICE_FISCALE"),
+            Map.entry("indirizzo", "INDIRIZZO"),
+            Map.entry("telefono", "TELEFONO"),
+            Map.entry("phone", "TELEFONO")
     );
 
     public BookingImportPreviewDTO preview(Integer tenantId, MultipartFile file) throws IOException, CsvException {
@@ -273,6 +280,8 @@ public class BookingImportService {
                         .guestDocType(row.getGuestDocType())
                         .guestDocNumber(row.getGuestDocNumber())
                         .guestCountry(row.getGuestCountry())
+                        .guestAddress(row.getGuestAddress())
+                        .guestPhone(row.getGuestPhone())
                         .checkinDate(row.getCheckinDate())
                         .checkoutDate(row.getCheckoutDate())
                         .nights(row.getNights())
@@ -442,6 +451,9 @@ public class BookingImportService {
                             .docType(mapVal(gRow, gMap, "DOCUMENTO"))
                             .docNumber(mapVal(gRow, gMap, "NUM_DOCUMENTO"))
                             .country(mapVal(gRow, gMap, "NAZIONE"))
+                            .codiceFiscale(mapVal(gRow, gMap, "CODICE_FISCALE"))
+                            .indirizzo(mapVal(gRow, gMap, "INDIRIZZO"))
+                            .telefono(mapVal(gRow, gMap, "TELEFONO"))
                             .build());
                 }
             }
@@ -553,19 +565,32 @@ public class BookingImportService {
             ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
                     tenantId, m.propertyId(), m.canaleId(), gross, commissione, nights, guests);
 
-            // warning informativi (non cambiano lo stato riga): split + dati anagrafici incompleti
-            List<String> warnings = new ArrayList<>(calcolo.getWarnings() != null ? calcolo.getWarnings() : List.of());
             String comuneNascita = guest != null ? guest.getBirthPlace() : null;
             String dataNascita   = guest != null ? guest.getBirthDate()  : null;
             String numDocumento  = guest != null ? guest.getDocNumber()  : null;
-            if (blank(comuneNascita)) warnings.add("CF non calcolabile: comune di nascita mancante");
-            if (blank(dataNascita))   warnings.add("CF non calcolabile: data di nascita mancante");
+            String indirizzo     = guest != null ? guest.getIndirizzo()  : null;
+            String telefono      = guest != null ? guest.getTelefono()   : null;
+
+            // CF ospite: il valore presente nel file ha la precedenza sul calcolo.
+            String cfOspite = null;
+            if (guest != null && !blank(guest.getCodiceFiscale())) {
+                cfOspite = guest.getCodiceFiscale().trim().toUpperCase();
+                log.debug("BookingImportService - riga {}: CF dal file: {}", rowNum, cfOspite);
+            }
+
+            // warning informativi (non cambiano lo stato riga): split + dati anagrafici incompleti.
+            // I dati di nascita servono solo a calcolare il CF: se il file lo fornisce già,
+            // segnalarli come mancanti sarebbe fuorviante.
+            List<String> warnings = new ArrayList<>(calcolo.getWarnings() != null ? calcolo.getWarnings() : List.of());
+            if (cfOspite == null) {
+                if (blank(comuneNascita)) warnings.add("CF non calcolabile: comune di nascita mancante");
+                if (blank(dataNascita))   warnings.add("CF non calcolabile: data di nascita mancante");
+            }
             if (blank(numDocumento))  warnings.add("Documento identificativo mancante");
             if (nomeMancante)         warnings.add("Nome ospite mancante");
 
-            // Calcolo automatico del CF ospite se i dati anagrafici sono completi.
-            String cfCalcolato = null;
-            if (!blank(firstName) && !blank(lastName) && !blank(dataNascita)
+            // Calcolo automatico del CF solo se il file non lo fornisce e l'anagrafica è completa.
+            if (cfOspite == null && !blank(firstName) && !blank(lastName) && !blank(dataNascita)
                     && !blank(comuneNascita) && guest != null && !blank(guest.getGender())) {
                 LocalDate nascita = null;
                 try { nascita = parseFlexibleDate(dataNascita); } catch (Exception ignore) { }
@@ -573,13 +598,15 @@ public class BookingImportService {
                     Optional<String> cf = codiceFiscaleService.calcolaSafe(
                             lastName, firstName, nascita, guest.getGender(), comuneNascita);
                     if (cf.isPresent()) {
-                        cfCalcolato = cf.get();
+                        cfOspite = cf.get();
+                        log.debug("BookingImportService - riga {}: CF calcolato: {}", rowNum, cfOspite);
                         warnings.removeIf(w -> w.startsWith("CF non calcolabile"));
                     }
                 }
             }
 
-            boolean duplicata = bookingDAO.findByExternalBookingId(externalId).isPresent();
+            boolean duplicata = bookingDAO
+                    .findByExternalBookingId(externalId, tenantId, m.canaleId()).isPresent();
 
             BookingImportRowDTO raw = BookingImportRowDTO.builder()
                     .rowNumber(rowNum)
@@ -587,7 +614,7 @@ public class BookingImportService {
                     .fkPropertyId(m.propertyId())
                     .fkCanaleOtaId(m.canaleId())
                     .guestName(guestName)
-                    .guestTaxCode(cfCalcolato)
+                    .guestTaxCode(cfOspite)
                     .guestFirstName(firstName)
                     .guestLastName(lastName)
                     .guestBirthDate(guest != null ? guest.getBirthDate() : null)
@@ -596,6 +623,8 @@ public class BookingImportService {
                     .guestDocType(guest != null ? guest.getDocType() : null)
                     .guestDocNumber(guest != null ? guest.getDocNumber() : null)
                     .guestCountry(guest != null ? guest.getCountry() : null)
+                    .guestAddress(indirizzo)
+                    .guestPhone(telefono)
                     .checkinDate(checkin)
                     .checkoutDate(checkout)
                     .nights(nights)
@@ -612,13 +641,13 @@ public class BookingImportService {
                     .rowNumber(rowNum)
                     .externalBookingId(externalId)
                     .guestName(guestName)
-                    .guestTaxCode(cfCalcolato)
+                    .guestTaxCode(cfOspite)
                     // Anagrafica ospite: propagata a confirm(), che la persiste sul booking.
-                    // Il Belfiore si ricava dal CF calcolato (posizioni 12-15).
+                    // Il Belfiore si ricava dal CF (posizioni 12-15), sia dal file sia calcolato.
                     .guestBirthDate(dataNascita)
                     .guestSesso(guest != null ? guest.getGender() : null)
                     .guestBirthPlace(comuneNascita)
-                    .guestBirthBelfiore(belfioreDaCf(cfCalcolato))
+                    .guestBirthBelfiore(belfioreDaCf(cfOspite))
                     .guestDocType(guest != null ? guest.getDocType() : null)
                     .guestDocNumber(numDocumento)
                     .guestCountry(guest != null ? guest.getCountry() : null)
@@ -817,6 +846,9 @@ public class BookingImportService {
         private String docType;
         private String docNumber;
         private String country;
+        private String codiceFiscale;
+        private String indirizzo;
+        private String telefono;
     }
 
     // ── parsing helpers ──────────────────────────────────────────────────────
@@ -863,8 +895,9 @@ public class BookingImportService {
             // lookup canale (non bloccante — segnala ma non è errore fatale)
             CanaleOta canale = canaleByCode.get(channelCode.toLowerCase());
 
-            // duplicato?
-            if (bookingDAO.findByExternalBookingId(externalId).isPresent()) {
+            // duplicato? il canale può essere null se il codice non è riconosciuto
+            Integer fkCanaleOtaId = canale != null ? canale.getId() : null;
+            if (bookingDAO.findByExternalBookingId(externalId, tenantId, fkCanaleOtaId).isPresent()) {
                 return BookingImportPreviewRowDTO.builder()
                         .rowNumber(rowNum)
                         .externalBookingId(externalId)

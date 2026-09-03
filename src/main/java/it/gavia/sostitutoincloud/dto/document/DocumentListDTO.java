@@ -38,4 +38,8 @@ public class DocumentListDTO {
     private Integer fkOwnerId;
     private String ownerName;     // first_name + ' ' + last_name (o legalName); null se documento non collegato a booking
     private LocalDateTime createdAt;
+
+    // Liquidazione che include la prenotazione del documento (null se non ancora liquidata)
+    private Integer settlementId;
+    private String settlementStato;
 }

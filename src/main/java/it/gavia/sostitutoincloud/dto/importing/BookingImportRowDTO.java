@@ -39,7 +39,9 @@ public class BookingImportRowDTO {
     private Integer fkPropertyId;
     private Integer fkCanaleOtaId;
 
-    // V2: dati ospite dal merge con il secondo file (per BOOKING_ID)
+    // V2: dati ospite dal merge con il secondo file (per BOOKING_ID).
+    // guestTaxCode e guestPhone (dichiarati sopra, condivisi con V1) raccolgono
+    // rispettivamente il CF — dal file se mappato, altrimenti calcolato — e il campo TELEFONO.
     private String guestFirstName;
     private String guestLastName;
     private String guestBirthDate;
@@ -48,6 +50,7 @@ public class BookingImportRowDTO {
     private String guestDocType;
     private String guestDocNumber;
     private String guestCountry;
+    private String guestAddress;
 
     // V2: avvisi del calcolo split economico
     private List<String> splitWarnings;

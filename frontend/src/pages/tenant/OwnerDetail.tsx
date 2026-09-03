@@ -15,6 +15,8 @@ import { useLookup } from '@/contexts/LookupContext';
 import { getProperties, type PropertyListItem } from '@/api/propertyApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
+import { getConfig } from '@/config/AppConfig';
+import { validateIban } from '@/lib/iban';
 
 const ownerTypeLabels: Record<string, string> = {
   persona_fisica: 'Persona Fisica',
@@ -40,6 +42,19 @@ const OwnerDetail = () => {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [ibanWarning, setIbanWarning] = useState('');
+
+  // getConfig() va letta a render e non a livello di modulo: main.tsx importa App.tsx
+  // staticamente, quindi i moduli sono valutati prima che loadConfig() risolva e a
+  // livello di modulo getConfig() lancerebbe 'Config non ancora caricata'.
+  // In locale la validazione IBAN è disattivata: i dati di sviluppo sono fittizi.
+  const isLocal = getConfig().environment === 'local';
+
+  // In modifica l'IBAN non valido è solo un avviso visivo e non blocca il salvataggio:
+  // i proprietari già a DB possono avere IBAN non conformi e devono restare modificabili
+  // negli altri campi. Il blocco vero è solo in creazione (OwnerCreate).
+  const checkIban = (value: string) =>
+    setIbanWarning(!isLocal && value.trim() && !validateIban(value) ? 'IBAN non valido' : '');
 
   useEffect(() => {
     if (!id) return;
@@ -100,6 +115,8 @@ const OwnerDetail = () => {
       fiscalRegimeCodice: owner.fiscalRegime ?? 'cedolare_secca',
     });
     setEditError(null);
+    // Avvisa subito se l'IBAN già a DB non è valido, senza attendere una modifica
+    checkIban(owner.iban ?? '');
     setShowEdit(true);
   };
 
@@ -370,7 +387,19 @@ const OwnerDetail = () => {
                 </div>
                 <div className="space-y-1">
                   <Label>IBAN</Label>
-                  <Input value={editForm.iban} onChange={e => setEditForm(f => ({ ...f, iban: e.target.value.toUpperCase() }))} className="font-mono" />
+                  <Input
+                    value={editForm.iban}
+                    onChange={e => {
+                      const value = e.target.value.toUpperCase();
+                      checkIban(value);
+                      setEditForm(f => ({ ...f, iban: value }));
+                    }}
+                    placeholder="es. IT60X0542811101000000123456"
+                    className="font-mono"
+                  />
+                  {ibanWarning && (
+                    <p className="text-sm text-warning mt-1">{ibanWarning}</p>
+                  )}
                 </div>
               </div>
             </div>

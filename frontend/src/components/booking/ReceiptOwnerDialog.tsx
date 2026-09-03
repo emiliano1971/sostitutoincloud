@@ -54,9 +54,12 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
   const totaleRicevuta = canone + importoBollo;
   const ritenuta = canone * 0.21;
 
-  // Semantica bottoni in base allo stato: 'doc_issued' = documenti già emessi (solo stampa/download),
-  // altrimenti emissione (azione irreversibile).
-  const isDocIssued = booking.booking_status === 'doc_issued';
+  // Semantica bottoni: se QUESTA ricevuta esiste già solo stampa/download, altrimenti
+  // emissione (azione irreversibile).
+  // NB: si guarda existingDoc e non booking_status === 'doc_issued'. Lo stato del booking
+  // diventa 'doc_issued' con un solo documento qualsiasi (BookingService.resolveStatoId),
+  // quindi con la sola fattura emessa la ricevuta non sarebbe più emettibile da qui.
+  const isDocIssued = !!existingDoc;
 
   // Il PDF server-side richiede l'id del documento fiscale già emesso.
   const docId = existingDoc?.id ?? generatedDoc?.documentId;

@@ -26,6 +26,10 @@ export interface DocumentListItem {
   cuTaxYear?: number;
   cuStato?: string;
   cuConsegnata?: boolean;
+  // Liquidazione che include la prenotazione del documento (assente se non liquidata).
+  // A differenza di F24 e CU è valorizzata anche in lista e per qualsiasi tipo documento.
+  settlementId?: number;
+  settlementStato?: string;
   propertyName?: string;
   channelName?: string;
   fkBookingId?: number;
@@ -111,6 +115,13 @@ export interface DocumentGenerateResponse {
   guestName: string;
   ownerName: string;
   propertyName: string;
+  // Auto-invio SDI (tenant_settings.sdi_auto_send): presenti solo per la fattura PM
+  // e solo se l'auto-invio è attivo, assenti in ogni altro caso.
+  sdiAutoGenerato?: boolean;
+  sdiFilePath?: string;
+  sdiProgressivo?: string;
+  sdiDatiIncompleti?: boolean;
+  sdiAutoSendError?: string;
 }
 
 export async function generateDocument(

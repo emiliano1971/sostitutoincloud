@@ -32,6 +32,8 @@ public class BookingRowMapper implements RowMapper<Booking> {
                 .guestDocType(rs.getString("guest_doc_type"))
                 .guestDocNumber(rs.getString("guest_doc_number"))
                 .guestCountry(rs.getString("guest_country"))
+                .guestAddress(rs.getString("guest_address"))
+                .guestPhone(rs.getString("guest_phone"))
                 .checkinDate(rs.getObject("checkin_date", LocalDate.class))
                 .checkoutDate(rs.getObject("checkout_date", LocalDate.class))
                 .nights(rs.getInt("nights"))

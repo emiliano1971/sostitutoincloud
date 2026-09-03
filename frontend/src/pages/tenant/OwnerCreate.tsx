@@ -10,6 +10,8 @@ import { ArrowLeft, User, Phone, CreditCard, Save, Loader2 } from 'lucide-react'
 import { createOwner } from '@/api/ownerApi';
 import { useLookup } from '@/contexts/LookupContext';
 import { useToast } from '@/hooks/use-toast';
+import { getConfig } from '@/config/AppConfig';
+import { validateIban } from '@/lib/iban';
 
 const OwnerCreate = () => {
   const navigate = useNavigate();
@@ -17,6 +19,13 @@ const OwnerCreate = () => {
   const { lookups } = useLookup();
   const [isSaving, setIsSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [ibanError, setIbanError] = useState('');
+
+  // getConfig() va letta a render e non a livello di modulo: main.tsx importa App.tsx
+  // staticamente, quindi i moduli sono valutati prima che loadConfig() risolva e a
+  // livello di modulo getConfig() lancerebbe 'Config non ancora caricata'.
+  // In locale la validazione IBAN è disattivata: i dati di sviluppo sono fittizi.
+  const isLocal = getConfig().environment === 'local';
 
   const [form, setForm] = useState({
     ownerType: 'persona_fisica',
@@ -33,6 +42,9 @@ const OwnerCreate = () => {
 
   const update = (field: string, value: string) => {
     setServerError(null);
+    if (field === 'iban') {
+      setIbanError(!isLocal && value.trim() && !validateIban(value) ? 'IBAN non valido' : '');
+    }
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
@@ -48,12 +60,15 @@ const OwnerCreate = () => {
     if (!form.regimeCodice) return 'Regime fiscale obbligatorio';
     if (!form.email.trim()) return 'Email obbligatoria';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Formato email non valido';
+    // IBAN opzionale, ma se compilato deve essere valido (fuori dal locale)
+    if (!isLocal && form.iban.trim() && !validateIban(form.iban)) return 'IBAN non valido';
     return null;
   };
 
   const handleSave = async () => {
     const validationError = validate();
     if (validationError) {
+      if (validationError === 'IBAN non valido') setIbanError(validationError);
       toast({ title: 'Errore', description: validationError, variant: 'destructive' });
       return;
     }
@@ -190,9 +205,13 @@ const OwnerCreate = () => {
                 <Input
                   value={form.iban}
                   onChange={e => update('iban', e.target.value.toUpperCase())}
-                  placeholder="IT60X0542811101000000123456"
+                  placeholder="es. IT60X0542811101000000123456"
                   className="font-mono"
+                  aria-invalid={!!ibanError}
                 />
+                {ibanError && (
+                  <p className="text-sm text-destructive mt-1">{ibanError}</p>
+                )}
               </div>
             </CardContent>
           </Card>

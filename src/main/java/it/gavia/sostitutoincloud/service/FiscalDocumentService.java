@@ -9,6 +9,8 @@ import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.SdiEsitoDAO;
+import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
+import it.gavia.sostitutoincloud.dao.SettlementDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
@@ -21,6 +23,7 @@ import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.SdiEsito;
+import it.gavia.sostitutoincloud.model.Settlement;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
@@ -55,6 +58,8 @@ public class FiscalDocumentService {
     private final WithholdingLedgerDAO withholdingLedgerDAO;
     private final F24RecordDAO f24RecordDAO;
     private final CuRecordDAO cuRecordDAO;
+    private final SettlementBookingDAO settlementBookingDAO;
+    private final SettlementDAO settlementDAO;
 
     public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
                                   BookingDAO bookingDAO,
@@ -67,10 +72,14 @@ public class FiscalDocumentService {
                                   OwnerProfileDAO ownerProfileDAO,
                                   WithholdingLedgerDAO withholdingLedgerDAO,
                                   F24RecordDAO f24RecordDAO,
-                                  CuRecordDAO cuRecordDAO) {
+                                  CuRecordDAO cuRecordDAO,
+                                  SettlementBookingDAO settlementBookingDAO,
+                                  SettlementDAO settlementDAO) {
         this.withholdingLedgerDAO = withholdingLedgerDAO;
         this.f24RecordDAO = f24RecordDAO;
         this.cuRecordDAO = cuRecordDAO;
+        this.settlementBookingDAO = settlementBookingDAO;
+        this.settlementDAO = settlementDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
@@ -163,6 +172,12 @@ public class FiscalDocumentService {
         Map<Integer, CanaleOta> canaliById = canali.stream()
                 .collect(Collectors.toMap(CanaleOta::getId, c -> c));
 
+        // Liquidazione per prenotazione: due query fisse invece di due per documento (no N+1).
+        Map<Integer, Integer> settlementIdByBookingId =
+                settlementBookingDAO.findSettlementIdByBookingIdForTenant(tenantId);
+        Map<Integer, Settlement> settlementsById = settlementDAO.findByTenantId(tenantId).stream()
+                .collect(Collectors.toMap(Settlement::getId, s -> s));
+
         int pageNum = page != null ? page : 0;
         int pageSize = size != null ? size : 20;
 
@@ -204,6 +219,9 @@ public class FiscalDocumentService {
                     StatoDocumento stato = lookup.statiById().get(d.getFkStatoDocumentoId());
                     SdiEsito sdiEsito = d.getFkSdiEsitoId() != null
                             ? lookup.sdiEsitiById().get(d.getFkSdiEsitoId()) : null;
+                    Integer settlementId = d.getFkBookingId() != null
+                            ? settlementIdByBookingId.get(d.getFkBookingId()) : null;
+                    Settlement settlement = settlementId != null ? settlementsById.get(settlementId) : null;
 
                     return DocumentListDTO.builder()
                             .id(d.getId())
@@ -228,6 +246,8 @@ public class FiscalDocumentService {
                             .fkOwnerId(d.getFkOwnerId())
                             .ownerName(ownerDisplayName(owner))
                             .createdAt(d.getCreatedAt())
+                            .settlementId(settlementId)
+                            .settlementStato(settlement != null ? settlement.getStato() : null)
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -307,6 +327,10 @@ public class FiscalDocumentService {
                 .tenantPec(tenant != null ? tenant.getPec() : null)
                 .build();
 
+        // Liquidazione della prenotazione: stessa logica di BookingService, valorizzata per
+        // qualsiasi tipo di documento (la card è mostrata solo sulla ricevuta owner).
+        popolaSettlement(detail, doc);
+
         // F24 e CU riguardano la ritenuta, quindi solo la ricevuta owner.
         if (tipo != null && !Boolean.TRUE.equals(tipo.getRichiedeIva())) {
             popolaF24(detail, doc);
@@ -317,6 +341,25 @@ public class FiscalDocumentService {
 
         log.info("FiscalDocumentService.findById() - tenantId={}, documentId={}", tenantId, documentId);
         return Optional.of(detail);
+    }
+
+    /**
+     * Liquidazione che include la prenotazione del documento: si passa da
+     * settlement_booking, come fa BookingService per il dettaglio prenotazione.
+     * Documento senza prenotazione o prenotazione non ancora liquidata → campi a null.
+     */
+    private void popolaSettlement(DocumentDetailDTO detail, FiscalDocument doc) {
+        if (doc.getFkBookingId() == null) {
+            return;
+        }
+        settlementBookingDAO.findSettlementIdByBookingId(doc.getFkBookingId())
+                .flatMap(settlementDAO::findById)
+                .ifPresent(s -> {
+                    detail.setSettlementId(s.getId());
+                    detail.setSettlementStato(s.getStato());
+                });
+        log.debug("FiscalDocumentService: settlementStato={} per doc={}",
+                detail.getSettlementStato(), doc.getId());
     }
 
     /**

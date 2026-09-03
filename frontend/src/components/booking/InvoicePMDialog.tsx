@@ -87,9 +87,12 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
     ? generatedDoc.importoTotale
     : otaLordo + cleaningLordo + pmLordo;
 
-  // Semantica bottoni in base allo stato: 'doc_issued' = documenti già emessi (solo stampa/download),
-  // altrimenti emissione (azione irreversibile).
-  const isDocIssued = booking.booking_status === 'doc_issued';
+  // Semantica bottoni: se QUESTA fattura esiste già solo stampa/download, altrimenti
+  // emissione (azione irreversibile).
+  // NB: si guarda existingDoc e non booking_status === 'doc_issued'. Lo stato del booking
+  // diventa 'doc_issued' con un solo documento qualsiasi (BookingService.resolveStatoId),
+  // quindi con la sola ricevuta emessa la fattura non sarebbe più emettibile da qui.
+  const isDocIssued = !!existingDoc;
 
   // Il PDF server-side richiede l'id del documento fiscale già emesso.
   const docId = existingDoc?.id ?? generatedDoc?.documentId;

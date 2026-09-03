@@ -6,7 +6,9 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Log4j2
@@ -39,6 +41,26 @@ public class SettlementBookingDAO {
         Optional<Integer> found = result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
         log.debug("SettlementBookingDAO.findSettlementIdByBookingId() - bookingId={} found={}", bookingId, found.orElse(null));
         return found;
+    }
+
+    /**
+     * bookingId → settlementId per tutte le liquidazioni del tenant, in una sola query.
+     *
+     * <p>Serve alla lista documenti: risolvere la liquidazione documento per documento
+     * con findSettlementIdByBookingId() significherebbe una query per riga (N+1).
+     */
+    public Map<Integer, Integer> findSettlementIdByBookingIdForTenant(Integer tenantId) {
+        String sql = "SELECT sb.fk_booking_id, sb.fk_settlement_id " +
+                "FROM settlement_booking sb " +
+                "JOIN settlement s ON s.id = sb.fk_settlement_id " +
+                "WHERE s.fk_tenant_id = ?";
+        Map<Integer, Integer> result = new HashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            result.put(rs.getInt("fk_booking_id"), rs.getInt("fk_settlement_id"));
+        }, tenantId);
+        log.debug("SettlementBookingDAO.findSettlementIdByBookingIdForTenant() - tenantId={} righe={}",
+                tenantId, result.size());
+        return result;
     }
 
     public void insert(Integer settlementId, Integer bookingId) {

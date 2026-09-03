@@ -1,4 +1,5 @@
-import { get, post, patch } from '@/lib/apiClient';
+import { get, post, patch, getToken } from '@/lib/apiClient';
+import { getConfig } from '@/config/AppConfig';
 
 export interface SettlementListItem {
   id: number;
@@ -81,4 +82,47 @@ export async function updateSettlementStatus(
 /** Prenotazioni con documenti emessi non ancora incluse in una liquidazione. */
 export async function getCountDaLiquidare(): Promise<{ count: number }> {
   return get<{ count: number }>('/settlements/da-liquidare');
+}
+
+/**
+ * Scarica il rendiconto PDF della liquidazione e avvia il download nel browser.
+ * Non usa apiClient perché la risposta è un blob, non JSON.
+ */
+export async function downloadSettlementPdf(
+  id: number,
+  periodo: string,
+  ownerName: string,
+): Promise<void> {
+  const base = getConfig().apiBaseUrl;
+  const token = getToken();
+  const res = await fetch(`${base}/settlements/${id}/pdf`, {
+    headers: {
+      'Accept': 'application/pdf',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    // In caso di errore il backend risponde JSON con il campo message
+    let message = `Errore ${res.status} durante la generazione del PDF`;
+    try {
+      const json = await res.json();
+      if (json.message) message = json.message;
+    } catch { /* body non JSON */ }
+    throw new Error(message);
+  }
+
+  const fileName = `Rendiconto_${periodo}_${ownerName}`.replace(/\s+/g, '_');
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${fileName}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

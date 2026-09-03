@@ -216,6 +216,8 @@ public class BookingService {
                 .guestDocType(emptyToNull(dto.getGuestDocType()))
                 .guestDocNumber(emptyToNull(dto.getGuestDocNumber()))
                 .guestCountry(emptyToNull(dto.getGuestCountry()))
+                .guestAddress(emptyToNull(dto.getGuestAddress()))
+                .guestPhone(emptyToNull(dto.getGuestPhone()))
                 .build();
 
         bookingDAO.updateGuestAnagrafica(existing.getId(), tenantId, g);
@@ -453,6 +455,8 @@ public class BookingService {
                 .guestDocType(b.getGuestDocType())
                 .guestDocNumber(b.getGuestDocNumber())
                 .guestCountry(b.getGuestCountry())
+                .guestAddress(b.getGuestAddress())
+                .guestPhone(b.getGuestPhone())
                 .propertyName(prop != null ? prop.getDisplayName() : null)
                 .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)

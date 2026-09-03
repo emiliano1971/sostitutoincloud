@@ -530,6 +530,9 @@ CREATE TABLE booking (
     guest_doc_type                  VARCHAR(30),
     guest_doc_number                VARCHAR(30),
     guest_country                   VARCHAR(50),
+    -- Recapiti ospite (migration 013), mappabili dal file ospiti in import
+    guest_address                   VARCHAR(200),
+    guest_phone                     VARCHAR(30),
     checkin_date                    DATE                    NOT NULL,
     checkout_date                   DATE                    NOT NULL,
     nights                          SMALLINT                NOT NULL,
@@ -553,7 +556,8 @@ CREATE TABLE booking (
     CONSTRAINT chk_checkout_after_checkin   CHECK (checkout_date > checkin_date),
     CONSTRAINT chk_nights_positive          CHECK (nights > 0),
     CONSTRAINT chk_guests_positive          CHECK (guests > 0),
-    CONSTRAINT uq_external_booking          UNIQUE (fk_canale_ota_id, external_booking_id)
+    -- migration 014: il tenant fa parte della chiave, l'id esterno è univoco solo dentro il tenant
+    CONSTRAINT uq_external_booking          UNIQUE (fk_tenant_id, fk_canale_ota_id, external_booking_id)
 );
 COMMENT ON TABLE booking IS
     'Prenotazioni importate dai canali OTA o inserite manualmente. '
@@ -611,17 +615,25 @@ CREATE TRIGGER trg_fiscal_document_updated_at
 -- Progressivo invio SDI: contatore per tenant + anno usato nel ProgressivoInvio
 -- e nel nome file XML (IT{PIVA}_{PROGRESSIVO}.xml). Incrementato atomicamente
 -- con INSERT ... ON CONFLICT DO UPDATE ... RETURNING (SdiProgressivoDAO).
+-- Contatore GLOBALE per applicazione (migration 016): una sola riga per applicazione,
+-- senza tenant né anno. Il progressivo è alfanumerico base-26 (A-Z) su 5 caratteri;
+-- 'DZZZZ' = nulla ancora emesso, il primo incremento produce 'EAAAA'.
 CREATE TABLE sdi_progressivo (
-    id              SERIAL PRIMARY KEY,
-    fk_tenant_id    INTEGER         NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
-    anno            INTEGER         NOT NULL,
-    ultimo_valore   INTEGER         NOT NULL DEFAULT 0,
-    updated_at      TIMESTAMP       NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_sdi_progressivo UNIQUE (fk_tenant_id, anno)
+    id                  SERIAL PRIMARY KEY,
+    applicazione        VARCHAR(50)     NOT NULL DEFAULT 'SDI',
+    ultimo_valore_alfa  CHAR(5)         NOT NULL DEFAULT 'DZZZZ' CHECK (ultimo_valore_alfa ~ '^[A-Z]{5}$'),
+    valore_massimo      CHAR(5)         NOT NULL DEFAULT 'HZZZZ' CHECK (valore_massimo ~ '^[A-Z]{5}$'),
+    updated_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_sdi_applicazione UNIQUE (applicazione)
 );
 COMMENT ON TABLE sdi_progressivo IS
-    'Ultimo progressivo di invio SDI per tenant e anno. Garantisce unicità del '
-    'ProgressivoInvio anche con invii concorrenti.';
+    'Ultimo progressivo di invio emesso, globale per applicazione. Garantisce unicità '
+    'del ProgressivoInvio anche con invii concorrenti (lock di riga SELECT ... FOR UPDATE). '
+    'Il progressivo è alfanumerico base-26 (A-Z) su 5 caratteri, con tetto in valore_massimo.';
+
+-- Riga obbligatoria: SdiProgressivoDAO la presuppone esistente, non la crea.
+INSERT INTO sdi_progressivo (applicazione, ultimo_valore_alfa, valore_massimo)
+VALUES ('SDI', 'DZZZZ', 'HZZZZ');
 
 
 -- Liquidazioni periodiche proprietari

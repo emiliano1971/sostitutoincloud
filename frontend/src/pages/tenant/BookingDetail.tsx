@@ -28,6 +28,15 @@ const settlementLabels: Record<string, string> = {
   paid: 'Pagata',
 };
 
+// Stato della ricevuta owner: le descrizioni della lookup stato_documento sono orientate
+// allo SDI ("Pronto per invio SDI", "Inviato a SDI") — corrette per la fattura PM, fuorvianti
+// per la ricevuta, che è un documento interno e non viene trasmessa. Qui le etichette sono
+// quindi locali; per gli stati non previsti si ricade sulla lookup.
+const statoRicevutaLabels: Record<string, string> = {
+  draft: 'Bozza',
+  ready: 'Emesso',
+};
+
 // Colori badge per stato settlement: null/pending grigio, calculated blu, approved arancione, paid verde
 const settlementBadgeColors: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
@@ -103,6 +112,26 @@ const BookingDetail = () => {
       const doc = await generateDocument({ bookingId: Number(id), tipoDocumento });
       setGenerated(doc);
       toast({ title: 'Documento emesso', description: `Numero ${doc.documentNumber}` });
+
+      // Esito dell'auto-invio SDI (tenant_settings.sdi_auto_send): si aggiunge al toast di
+      // emissione, non lo sostituisce. I campi arrivano solo per la fattura PM con auto-invio
+      // attivo; un auto-invio fallito NON invalida l'emissione, resta l'invio manuale.
+      if (doc.sdiAutoGenerato) {
+        toast({
+          title: '📤 File SDI generato automaticamente',
+          description: `Progressivo: ${doc.sdiProgressivo ?? '—'}`,
+        });
+      } else if (doc.sdiDatiIncompleti) {
+        toast({
+          title: '⚠️ SDI non generato automaticamente',
+          description: 'Dati ospite incompleti. Completare l\'anagrafica e inviare manualmente.',
+        });
+      } else if (doc.sdiAutoSendError) {
+        toast({
+          title: '⚠️ SDI auto-invio fallito',
+          description: `${doc.sdiAutoSendError}. Riprovare manualmente.`,
+        });
+      }
       // ricarica il booking per aggiornare i badge di stato
       const refreshed = await getBookingById(Number(id));
       setBooking(refreshed);
@@ -311,9 +340,9 @@ const BookingDetail = () => {
         {/* Un riquadro per documento fiscale: cliccabile se il documento è stato emesso.
             Stesso pattern della card Liquidazione. */}
         {[
-          { label: 'Fattura PM', doc: existingInvoice, icon: FileText },
-          { label: 'Ricevuta Owner', doc: existingReceipt, icon: ReceiptText },
-        ].map(({ label, doc, icon: Icon }) => (
+          { label: 'Fattura PM', doc: existingInvoice, icon: FileText, sdi: true },
+          { label: 'Ricevuta Owner', doc: existingReceipt, icon: ReceiptText, sdi: false },
+        ].map(({ label, doc, icon: Icon, sdi }) => (
           <Card
             key={label}
             className={doc ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
@@ -323,9 +352,12 @@ const BookingDetail = () => {
               <Icon className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
               <p className="text-xs text-muted-foreground">{label}</p>
               <Badge variant="outline" className="mt-1">
-                {doc
-                  ? getLabelByCodice(lookups?.statiDocumento ?? [], doc.statoDocumento)
-                  : 'Da emettere'}
+                {!doc
+                  ? 'Da emettere'
+                  : sdi
+                    ? getLabelByCodice(lookups?.statiDocumento ?? [], doc.statoDocumento)
+                    : statoRicevutaLabels[doc.statoDocumento]
+                      ?? getLabelByCodice(lookups?.statiDocumento ?? [], doc.statoDocumento)}
               </Badge>
               {doc && (
                 <p className="mt-1 font-mono text-[11px] text-muted-foreground">{doc.documentNumber}</p>
@@ -395,6 +427,8 @@ const BookingDetail = () => {
             guestDocType: booking.guestDocType,
             guestDocNumber: booking.guestDocNumber,
             guestCountry: booking.guestCountry,
+            guestAddress: booking.guestAddress,
+            guestPhone: booking.guestPhone,
           }}
           onSaved={(updated) => setBooking(updated)}
         />

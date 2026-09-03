@@ -33,6 +33,8 @@ public class Booking {
     private String guestDocType;
     private String guestDocNumber;
     private String guestCountry;
+    private String guestAddress;
+    private String guestPhone;
     private LocalDate checkinDate;
     private LocalDate checkoutDate;
     private Integer nights;

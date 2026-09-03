@@ -164,8 +164,8 @@ public class SdiXmlService {
                     "Partita IVA o codice fiscale del tenant mancanti: obbligatori per l'invio SDI");
         }
 
-        // 3. Progressivo invio (atomico per tenant/anno)
-        String progressivo = sdiProgressivoDAO.getNextProgressivo(tenantId, doc.getIssueDate().getYear());
+        // 3. Progressivo invio (contatore globale atomico)
+        String progressivo = sdiProgressivoDAO.getNextProgressivo();
 
         // 4. Nome file nel formato AdE: IT{PIVA}_{PROGRESSIVO}.xml
         String nomeFile = "IT" + piva + "_" + progressivo + ".xml";
@@ -180,8 +180,8 @@ public class SdiXmlService {
             Path filePath = dir.resolve(nomeFile);
             Files.writeString(filePath, xml, StandardCharsets.UTF_8);
 
-            // 7b. Copia di archivio in elaborati/{piva}/{anno}/{progressivo}/: l'anno evita
-            // collisioni fra progressivi omonimi di anni diversi (il contatore riparte da 1).
+            // 7b. Copia di archivio in elaborati/{piva}/{anno}/{progressivo}/: l'anno serve solo
+            // a raggruppare per esercizio — il progressivo è globale e non si ripete (migration 016).
             // La copia in outgoing/ resta finché non arriva la risposta (la rimuove SdiRispostaService).
             String anno = String.valueOf(doc.getIssueDate().getYear());
             Path elaboratiDir = Path.of(sdiElaboratiPath, piva, anno, progressivo);

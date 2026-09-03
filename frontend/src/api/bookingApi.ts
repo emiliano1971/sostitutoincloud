@@ -67,6 +67,8 @@ export interface BookingDetail extends BookingListItem {
   guestDocType?: string;
   guestDocNumber?: string;
   guestCountry?: string;
+  guestAddress?: string;
+  guestPhone?: string;
   fiscalScenarioCode?: string;
   otaCommissionAmount?: number;
   cleaningAmount?: number;
@@ -136,6 +138,8 @@ export interface GuestUpdateRequest {
   guestDocType?: string;
   guestDocNumber?: string;
   guestCountry?: string;
+  guestAddress?: string;
+  guestPhone?: string;
 }
 
 export async function updateBookingGuest(id: number, data: GuestUpdateRequest): Promise<BookingDetail> {

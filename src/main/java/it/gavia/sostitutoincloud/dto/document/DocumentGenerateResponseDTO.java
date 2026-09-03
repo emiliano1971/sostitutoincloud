@@ -33,4 +33,17 @@ public class DocumentGenerateResponseDTO {
     private String guestName;
     private String ownerName;
     private String propertyName;
+
+    // Auto-invio SDI (tenant_settings.sdi_auto_send): valorizzati solo per la fattura PM
+    // e solo se l'auto-invio è attivo. Tutti null quando l'auto-invio non è entrato in gioco.
+    /** true se l'XML è stato generato automaticamente */
+    private Boolean sdiAutoGenerato;
+    /** path del file XML generato */
+    private String sdiFilePath;
+    /** progressivo assegnato all'invio, es. "EAAAA" */
+    private String sdiProgressivo;
+    /** true se l'auto-invio è stato saltato per dati ospite incompleti */
+    private Boolean sdiDatiIncompleti;
+    /** messaggio dell'errore che ha fatto fallire l'auto-invio (l'emissione resta valida) */
+    private String sdiAutoSendError;
 }

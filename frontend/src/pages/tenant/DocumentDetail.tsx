@@ -48,6 +48,21 @@ const cuBadgeColors: Record<string, string> = {
   sent: 'bg-success/10 text-success border-success/20',
 };
 
+// Stato liquidazione — stesse etichette e colori di BookingDetail e DocumentsList
+const settlementLabels: Record<string, string> = {
+  pending: 'In attesa',
+  calculated: 'Calcolata',
+  approved: 'Approvata',
+  paid: 'Pagata',
+};
+
+const settlementBadgeColors: Record<string, string> = {
+  pending: 'bg-muted text-muted-foreground',
+  calculated: 'bg-blue-100 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300',
+  approved: 'bg-warning/10 text-warning',
+  paid: 'bg-success/10 text-success',
+};
+
 const DocumentDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -104,7 +119,7 @@ const DocumentDetail = () => {
     setIsSendingSdi(true);
     try {
       const res = await inviaSdi(doc.id);
-      toast({ title: 'File SDI generato', description: res.progressivo });
+      toast({ title: 'File SDI generato con progressivo:', description: res.progressivo });
       const aggiornato = await getDocumentById(doc.id);
       setDoc(aggiornato);
     } catch (err) {
@@ -360,9 +375,9 @@ const DocumentDetail = () => {
         </CardContent>
       </Card>
 
-      {/* Ricevuta owner: dove è finita la ritenuta (F24) e la CU dell'anno */}
+      {/* Ricevuta owner: dove è finita la ritenuta (F24), la CU dell'anno e la liquidazione */}
       {isRicevutaOwner && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card
             className={doc.f24RecordId ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
             onClick={doc.f24RecordId ? () => navigate(`/f24?anno=${annoF24}&mese=${meseF24}`) : undefined}
@@ -411,6 +426,33 @@ const DocumentDetail = () => {
                   <Badge variant="outline" className="bg-muted text-muted-foreground">Non in CU</Badge>
                   <p className="text-xs text-muted-foreground">
                     Nessuna CU generata per l'anno {annoDocumento ?? '—'}
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card
+            className={doc.settlementId ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
+            onClick={doc.settlementId ? () => navigate(`/settlements/${doc.settlementId}`) : undefined}
+          >
+            <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Receipt className="h-4 w-4" /> Liquidazione</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {doc.settlementId ? (
+                <>
+                  <Badge className={settlementBadgeColors[doc.settlementStato ?? 'pending'] ?? settlementBadgeColors.pending}>
+                    {settlementLabels[doc.settlementStato ?? 'pending'] ?? doc.settlementStato}
+                  </Badge>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Liquidazione</span>
+                    <span className="font-mono text-xs">#{doc.settlementId}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Badge variant="outline" className="bg-muted text-muted-foreground">Non ancora liquidata</Badge>
+                  <p className="text-xs text-muted-foreground">
+                    La prenotazione non è ancora inclusa in nessuna liquidazione
                   </p>
                 </>
               )}

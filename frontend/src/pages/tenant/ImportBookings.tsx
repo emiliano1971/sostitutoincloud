@@ -81,6 +81,9 @@ const GUEST_FIELDS: FieldDef[] = [
   { key: 'DOCUMENTO',      label: 'Documento' },
   { key: 'NUM_DOCUMENTO',  label: 'Numero documento' },
   { key: 'NAZIONE',        label: 'Nazione' },
+  { key: 'CODICE_FISCALE', label: 'Codice Fiscale' },
+  { key: 'INDIRIZZO',      label: 'Indirizzo' },
+  { key: 'TELEFONO',       label: 'Telefono' },
 ];
 
 const ImportBookings = () => {
