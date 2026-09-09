@@ -271,3 +271,40 @@ VALUES
     -- Roma
     (4, 2, 'Tutto il territorio',       0);
 SELECT setval('tassa_zona_id_seq', 4);
+
+
+-- ============================================================
+-- BOOKING DI TEST — SERVIZI PM A ZERO
+-- Caso limite usato dal test E2E 4.13 (fase04-documenti-fiscali):
+-- l'emissione della fattura PM deve essere rifiutata quando non c'è
+-- nulla da fatturare.
+--
+-- Lo scenario è realistico e nasce dalla combinazione di due cause:
+--   * immobile 2 (Loft Monti) NON ha regole in property_contract_rule
+--     → pulizie e provvigione PM restano a 0;
+--   * canale 'diretto' → nessuna commissione OTA da riaddebitare.
+-- Il proprietario incassa quindi l'intero lordo: owner_net = gross.
+--
+-- Il prefisso SEED- lo rende riconoscibile: le fasi 04 e 06 escludono
+-- queste prenotazioni quando cercano un booking su cui lavorare.
+--
+-- NB: senza id esplicito, così resta applicabile anche a un database di
+-- sviluppo già popolato — va eseguito dopo i setval qui sopra.
+-- ============================================================
+INSERT INTO booking (
+    fk_tenant_id, fk_property_id, fk_owner_id, fk_canale_ota_id, fk_scenario_fiscale_id,
+    external_booking_id, guest_name, guest_tax_code,
+    checkin_date, checkout_date, nights, guests,
+    gross_amount, ota_commission_amount, cleaning_amount, pm_fee_amount,
+    owner_net_amount, withholding_amount, aliquota_ritenuta,
+    tourist_tax_amount, tourist_tax_included_in_gross, tourist_tax_collection,
+    fk_stato_prenotazione_id, payment_status, settlement_status
+)
+VALUES
+    (1, 2, 1, 7, 1,
+     'SEED-NO-SERVIZI-001', 'Ospite Senza Servizi', 'SDOSPT80A01H501R',
+     '2026-11-10', '2026-11-14', 4, 2,
+     300.00, 0.00, 0.00, 0.00,
+     300.00, 63.00, 21.00,
+     0.00, FALSE, 'contanti',
+     3, 'pending', 'pending');   -- 3 = 'ready': il pulsante di emissione è disponibile

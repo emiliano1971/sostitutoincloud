@@ -251,6 +251,9 @@
         <th>Immobile</th>
         <th class="nowrap">Check-in</th>
         <th class="nowrap">Check-out</th>
+        <!-- Competenza: valorizzata solo per le prenotazioni entrate come arretrato,
+             cioè con periodo di ritenuta diverso da quello liquidato -->
+        <th class="nowrap">Competenza</th>
         <th class="text-right">Lordo &#8364;</th>
         <th class="text-right">Comm. OTA &#8364;</th>
         <th class="text-right">Pulizie &#8364;</th>
@@ -265,7 +268,7 @@
       {RIGHE_PRENOTAZIONI}
       <!-- riga totale -->
       <tr class="totals-row">
-        <td colspan="5">TOTALE</td>
+        <td colspan="6">TOTALE</td>
         <td class="text-right">{TOT_LORDO}</td>
         <td class="text-right negative">
           {TOT_OTA}
@@ -296,12 +299,15 @@
 
 <!-- RIEPILOGO CARD -->
 <div class="summary">
+  <!-- Canone e non lordo: la ritenuta della card accanto si calcola sul canone,
+       e canone - ritenute quadra col netto da pagare in fondo. Il lordo OTA resta
+       nella colonna Lordo € della tabella e nella sua riga TOTALE. -->
   <div class="summary-cell">
     <div class="summary-label">
-      Lordo totale
+      Canone totale
     </div>
     <div class="summary-value">
-      &#8364; {TOT_LORDO}
+      &#8364; {TOT_CANONE}
     </div>
   </div>
   <div class="summary-cell">

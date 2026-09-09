@@ -94,4 +94,15 @@ public class TenantSettingsDAO {
                 s.getAlertScadenzeDocumenti(), s.getAlertScadenzeF24(),
                 s.getNotificheEmail());
     }
+
+    /**
+     * Cancella le impostazioni di un tenant. La FK è già ON DELETE CASCADE, quindi
+     * eliminando il tenant spariscono comunque: resta esplicito per rendere l'ordine
+     * del cleanup leggibile e indipendente dai vincoli del DB.
+     */
+    public int deleteByTenantId(Integer tenantId) {
+        int righe = jdbcTemplate.update("DELETE FROM tenant_settings WHERE fk_tenant_id = ?", tenantId);
+        log.info("TenantSettingsDAO.deleteByTenantId() - tenantId={} eliminati={}", tenantId, righe);
+        return righe;
+    }
 }

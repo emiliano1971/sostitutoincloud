@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   getSettlements, calcolaSettlements, updateSettlementStatus,
   type SettlementListItem, type SettlementCalcolaResult,
-  getCountDaLiquidare,
+  getBookingsDaLiquidare, type BookingDaLiquidare,
 } from '@/api/settlementApi';
 
 const statusColors: Record<string, string> = {
@@ -37,6 +37,8 @@ const MESI = [
 ];
 
 const fmtEuro = (v: number) => `€${v.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
+
+const fmtData = (v: string) => (v ? new Date(v).toLocaleDateString('it-IT') : '—');
 
 /**
  * Intestazione di colonna con icona informativa e tooltip esplicativo.
@@ -70,7 +72,8 @@ const SettlementsList = () => {
   const [risultato, setRisultato] = useState<SettlementCalcolaResult | null>(null);
 
   // Prenotazioni con documenti emessi ancora fuori dalle liquidazioni.
-  const [daLiquidare, setDaLiquidare] = useState(0);
+  const [daLiquidare, setDaLiquidare] = useState<BookingDaLiquidare[]>([]);
+  const [showModal, setShowModal] = useState(false);
 
   const reload = () => {
     setIsLoading(true);
@@ -78,10 +81,10 @@ const SettlementsList = () => {
       .then(setSettlements)
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
-    // L'avviso è informativo: se il conteggio non arriva non blocca la pagina.
-    getCountDaLiquidare()
-      .then(r => setDaLiquidare(r.count))
-      .catch(() => setDaLiquidare(0));
+    // L'avviso è informativo: se la lista non arriva non blocca la pagina.
+    getBookingsDaLiquidare()
+      .then(setDaLiquidare)
+      .catch(() => setDaLiquidare([]));
   };
 
   useEffect(reload, []);
@@ -152,14 +155,22 @@ const SettlementsList = () => {
 
       {/* Prenotazioni con ricevuta emessa ma senza liquidazione: si aggiorna a ogni reload(),
           quindi anche dopo "Calcola liquidazioni". */}
-      {daLiquidare > 0 && (
+      {daLiquidare.length > 0 && (
         <div className="flex items-start gap-3 rounded-md border border-orange-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-orange-500" />
           <span>
-            <strong>{daLiquidare}</strong>{' '}
-            {daLiquidare === 1 ? 'prenotazione' : 'prenotazioni'} con ricevuta emessa non ancora{' '}
-            {daLiquidare === 1 ? 'liquidata' : 'liquidate'}. Usa "Calcola liquidazioni" per
-            {daLiquidare === 1 ? ' includerla' : ' includerle'} nel prossimo settlement.
+            <strong>{daLiquidare.length}</strong>{' '}
+            {daLiquidare.length === 1 ? 'prenotazione' : 'prenotazioni'} con ricevuta emessa non ancora{' '}
+            {daLiquidare.length === 1 ? 'liquidata' : 'liquidate'}.{' '}
+            <Button
+              variant="link"
+              className="h-auto p-0 text-sm text-amber-900 underline"
+              onClick={() => setShowModal(true)}
+            >
+              Vedi dettaglio
+            </Button>
+            . Usa "Calcola liquidazioni" per
+            {daLiquidare.length === 1 ? ' includerla' : ' includerle'} nel prossimo settlement.
           </span>
         </div>
       )}
@@ -290,6 +301,64 @@ const SettlementsList = () => {
             ) : (
               <Button onClick={() => closeCalcola(false)}>Chiudi</Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: dettaglio prenotazioni da liquidare */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Prenotazioni da liquidare</DialogTitle>
+            <DialogDescription>
+              Prenotazioni con ricevuta emessa non ancora incluse in una liquidazione. La
+              colonna Periodo indica la competenza della ritenuta: se precedente al mese che
+              stai liquidando, la prenotazione rientra come arretrato.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Immobile</TableHead>
+                  <TableHead>Check-in</TableHead>
+                  <TableHead>Periodo</TableHead>
+                  <TableHead className="text-right">Canone €</TableHead>
+                  <TableHead className="text-right">Netto €</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {daLiquidare.map(b => (
+                  <TableRow key={b.bookingId}>
+                    <TableCell>
+                      <Button
+                        variant="link"
+                        className="h-auto p-0 font-medium"
+                        onClick={() => {
+                          setShowModal(false);
+                          navigate(`/bookings/${b.bookingId}`);
+                        }}
+                      >
+                        {b.externalBookingId || b.bookingId}
+                      </Button>
+                    </TableCell>
+                    <TableCell>{b.ownerName}</TableCell>
+                    <TableCell>{b.propertyName}</TableCell>
+                    <TableCell className="text-sm">{fmtData(b.checkinDate)}</TableCell>
+                    <TableCell className="text-sm">{b.periodoLedger}</TableCell>
+                    <TableCell className="text-right">{fmtEuro(b.canoneLocazione)}</TableCell>
+                    <TableCell className="text-right font-medium">{fmtEuro(b.nettoProprietario)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setShowModal(false)}>Chiudi</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

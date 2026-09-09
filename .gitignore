@@ -56,3 +56,8 @@ frontend/public/config.json
 /config*.json
 /.env
 !/.env.example
+
+# Artefatti delle run Playwright (screenshot dei fallimenti, trace, report HTML)
+frontend/test-results/
+frontend/tests/e2e/report/
+frontend/playwright-report/

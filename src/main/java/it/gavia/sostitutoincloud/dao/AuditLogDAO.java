@@ -9,6 +9,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
+import java.util.Collections;
 import java.util.List;
 
 @Log4j2
@@ -75,5 +76,41 @@ public class AuditLogDAO {
         entry.setId(id);
         log.debug("AuditLogDAO.insert() - azione={} tenantId={}", entry.getAction(), entry.getFkTenantId());
         return entry;
+    }
+
+    /**
+     * Cancella le tracce di audit di un tenant: sia quelle scritte dagli utenti del
+     * tenant (fk_tenant_id) sia quelle che hanno il tenant come entità (entity_type
+     * 'Tenant'), scritte dal super_admin e quindi senza fk_tenant_id.
+     * La FK è ON DELETE SET NULL: senza questa pulizia resterebbero righe orfane.
+     */
+    /**
+     * Cancella le tracce di audit relative a un insieme di entità (es. entity_type
+     * 'Booking'). entity_id non è una FK: senza questa pulizia le righe resterebbero
+     * a puntare a record inesistenti.
+     */
+    public int deleteByEntity(String entityType, List<Integer> entityIds) {
+        if (entityIds == null || entityIds.isEmpty()) {
+            return 0;
+        }
+        String placeholders = String.join(",", Collections.nCopies(entityIds.size(), "?"));
+        String sql = "DELETE FROM audit_log WHERE entity_type = ? AND entity_id IN (" + placeholders + ")";
+        Object[] args = new Object[entityIds.size() + 1];
+        args[0] = entityType;
+        for (int i = 0; i < entityIds.size(); i++) {
+            args[i + 1] = entityIds.get(i);
+        }
+        int righe = jdbcTemplate.update(sql, args);
+        log.info("AuditLogDAO.deleteByEntity() - entityType={} entità={} eliminati={}",
+                entityType, entityIds.size(), righe);
+        return righe;
+    }
+
+    public int deleteByTenant(Integer tenantId) {
+        String sql = "DELETE FROM audit_log WHERE fk_tenant_id = ? " +
+                     "OR (entity_type = 'Tenant' AND entity_id = ?)";
+        int righe = jdbcTemplate.update(sql, tenantId, tenantId);
+        log.info("AuditLogDAO.deleteByTenant() - tenantId={} eliminati={}", tenantId, righe);
+        return righe;
     }
 }

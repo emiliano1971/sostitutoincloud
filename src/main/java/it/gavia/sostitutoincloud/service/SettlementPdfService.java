@@ -143,6 +143,7 @@ public class SettlementPdfService {
                     .append("<td>").append(esc(b.getPropertyName())).append("</td>")
                     .append(cella("nowrap", data(b.getCheckinDate())))
                     .append(cella("nowrap", data(b.getCheckoutDate())))
+                    .append(cella("nowrap", competenza(b.getPeriodoLedger())))
                     .append(cella("text-right", fmt(b.getGrossAmount())))
                     .append(cella("text-right negative", neg(b.getOtaCommissionAmount())))
                     .append(cella("text-right negative", neg(b.getCleaningAmount())))
@@ -154,7 +155,7 @@ public class SettlementPdfService {
                     .append("</tr>");
         }
         if (bookings.isEmpty()) {
-            righe.append("<tr><td class=\"empty\" colspan=\"13\">Nessuna prenotazione collegata</td></tr>");
+            righe.append("<tr><td class=\"empty\" colspan=\"14\">Nessuna prenotazione collegata</td></tr>");
         }
 
         String stato = settlement.getStato();
@@ -196,6 +197,23 @@ public class SettlementPdfService {
 
     private String cella(String cssClass, String valore) {
         return "<td class=\"" + cssClass + "\">" + valore + "</td>";
+    }
+
+    /**
+     * Competenza di una prenotazione in arretrato, evidenziata. Cella vuota quando la
+     * competenza coincide col periodo liquidato — qui non si usa esc(), che renderebbe
+     * un "—" al posto del vuoto.
+     * <p>
+     * Il marcatore è "&#187;" (U+00BB) e non "▶" (U+25B6): il template dichiara Arial senza
+     * @font-face, quindi il renderer ricade sull'Helvetica interna del PDF, il cui encoding
+     * WinAnsi non contiene U+25B6 — al suo posto stampava un "#".
+     */
+    private String competenza(String periodoLedger) {
+        if (periodoLedger == null || periodoLedger.isBlank()) {
+            return "";
+        }
+        return "<span style=\"color:#cc6600; font-style:italic; font-size:8px\">&#187; "
+                + esc(periodoLedger) + "</span>";
     }
 
     /** Nome del proprietario: quello già risolto dal service, altrimenti dal profilo. */

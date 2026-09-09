@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.controller;
 
+import it.gavia.sostitutoincloud.dto.settlement.BookingDaLiquidareDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementCalcolaRequestDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementCalcolaResultDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementDetailDTO;
@@ -42,17 +43,18 @@ public class SettlementController {
     }
 
     /**
-     * Prenotazioni con documenti emessi non ancora liquidate: alimenta l'avviso
-     * nella lista liquidazioni. Passa dal service, non dal DAO (Controller → Service → DAO).
+     * Prenotazioni con documenti emessi non ancora liquidate: alimenta l'avviso e il
+     * relativo dettaglio nella lista liquidazioni.
+     * Passa dal service, non dal DAO (Controller → Service → DAO).
      * NB: mappato prima di /{id} non sarebbe necessario — "da-liquidare" non è un Integer —
      * ma resta comunque il path più specifico.
      */
     @GetMapping("/da-liquidare")
-    public ResponseEntity<Map<String, Integer>> countDaLiquidare() {
+    public ResponseEntity<List<BookingDaLiquidareDTO>> findDaLiquidare() {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        Integer count = settlementService.countDaLiquidare(tenantId);
-        log.debug("SettlementController.countDaLiquidare() - tenantId={} count={}", tenantId, count);
-        return ResponseEntity.ok(Map.of("count", count));
+        List<BookingDaLiquidareDTO> result = settlementService.findDaLiquidare(tenantId);
+        log.debug("SettlementController.findDaLiquidare() - tenantId={} count={}", tenantId, result.size());
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/{id}")

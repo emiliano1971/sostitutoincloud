@@ -105,6 +105,12 @@ public class SettlementDAO {
         return findById(id).orElseThrow();
     }
 
+    public int deleteById(Integer id) {
+        int righe = jdbcTemplate.update("DELETE FROM settlement WHERE id = ?", id);
+        log.info("SettlementDAO.deleteById() - id={} righe={}", id, righe);
+        return righe;
+    }
+
     public Settlement updateStato(Integer id, String stato) {
         // Se lo stato passa a 'paid' valorizziamo anche la data di pagamento.
         String sql = "paid".equals(stato)

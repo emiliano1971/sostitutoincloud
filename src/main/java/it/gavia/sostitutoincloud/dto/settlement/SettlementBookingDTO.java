@@ -27,4 +27,11 @@ public class SettlementBookingDTO {
     private BigDecimal ownerNetAmount;        // canone al proprietario
     private BigDecimal withholdingAmount;
     private Integer bolloCents;   // bollo in centesimi (0 o 200) dai fiscal_document "ricevuta" del booking
+
+    /**
+     * Competenza della ritenuta (es. "08/2026") quando differisce dal periodo del
+     * settlement: segnala una prenotazione entrata come arretrato. null quando la
+     * competenza coincide col periodo liquidato, cioè nel caso normale.
+     */
+    private String periodoLedger;
 }

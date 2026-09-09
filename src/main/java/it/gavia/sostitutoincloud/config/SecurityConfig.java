@@ -73,6 +73,10 @@ public class SecurityConfig {
                     "/api/tourist-tax/**",
                     "/api/withholding-ledger/**"
                 ).hasAnyRole("TENANT_ADMIN", "PM_USER", "SUPER_ADMIN")
+                // Endpoint di supporto ai test (@Profile("local")): sono distruttivi,
+                // quindi non basta essere autenticati come fa la regola generica sotto —
+                // un owner_user non deve poterli invocare.
+                .requestMatchers("/api/test/**").hasAnyRole("TENANT_ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )

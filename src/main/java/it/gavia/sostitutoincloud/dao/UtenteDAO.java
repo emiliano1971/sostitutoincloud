@@ -139,6 +139,17 @@ public class UtenteDAO {
         jdbcTemplate.update("DELETE FROM utente WHERE id = ?", id);
     }
 
+    /**
+     * Cancella tutti gli utenti di un tenant. Serve prima di eliminare il tenant:
+     * la FK utente → tenant è ON DELETE SET NULL, quindi senza questa gli utenti
+     * resterebbero orfani con fk_tenant_id a NULL.
+     */
+    public int deleteByTenantId(Integer tenantId) {
+        int righe = jdbcTemplate.update("DELETE FROM utente WHERE fk_tenant_id = ?", tenantId);
+        log.info("UtenteDAO.deleteByTenantId() - tenantId={} eliminati={}", tenantId, righe);
+        return righe;
+    }
+
     // ── Reset / cambio password ────────────────────────────────────────────────
 
     public Optional<Utente> findByResetToken(String token) {

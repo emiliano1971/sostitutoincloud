@@ -109,18 +109,66 @@ public class WithholdingLedgerDAO {
     }
 
     /**
-     * Aggrega canone e ritenuta di un owner per periodo (mese/anno).
-     * Restituisce sempre una riga (SUM/COUNT senza GROUP BY): total_amount e
-     * withholding_amount sono NULL se non ci sono ritenute nel periodo.
+     * Righe di ledger di un owner per periodo (mese/anno), da cui il settlement ricava
+     * totali e prenotazioni collegate.
+     * Nessun filtro su {@code stato}: il versamento della ritenuta (F24) è indipendente
+     * dalla liquidazione all'owner, quindi anche una ritenuta già 'versata' va liquidata.
      */
-    public Map<String, Object> aggregaByOwnerAndPeriodo(Integer tenantId, Integer ownerId, Integer mese, Integer anno) {
-        log.debug("WithholdingLedgerDAO.aggregaByOwnerAndPeriodo() - tenantId={}, ownerId={}, mese={}, anno={}",
-                tenantId, ownerId, mese, anno);
-        String sql = "SELECT SUM(canone_locazione) AS total_amount, " +
-                "SUM(ritenuta_amount) AS withholding_amount, COUNT(id) AS num_righe " +
-                "FROM withholding_ledger " +
-                "WHERE fk_tenant_id = ? AND fk_owner_id = ? AND periodo_mese = ? AND periodo_anno = ?";
-        return jdbcTemplate.queryForMap(sql, tenantId, ownerId, mese, anno);
+    public List<WithholdingLedger> findByOwnerAndPeriodo(Integer tenantId, Integer ownerId,
+                                                          Integer mese, Integer anno) {
+        String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? " +
+                "AND periodo_mese = ? AND periodo_anno = ? ORDER BY id";
+        List<WithholdingLedger> result = jdbcTemplate.query(sql, rowMapper, tenantId, ownerId, mese, anno);
+        log.debug("WithholdingLedgerDAO.findByOwnerAndPeriodo() - tenantId={} ownerId={} periodo={}/{} righe={}",
+                tenantId, ownerId, mese, anno, result.size());
+        return result;
+    }
+
+    /**
+     * Arretrati di un owner: righe di ledger di periodi PRECEDENTI a quello indicato
+     * il cui booking non è ancora incluso in alcuna liquidazione. Servono al rollover,
+     * perché una prenotazione fatturata dopo la chiusura del suo periodo (o dopo che il
+     * settlement è stato pagato) non potrebbe più rientrarvi.
+     * <p>
+     * {@code excludeSettlementId} è il settlement che il chiamante sta ricalcolando: i suoi
+     * collegamenti vengono ignorati perché stanno per essere riscritti. Senza questa
+     * esclusione un arretrato già confluito in quel settlement non risulterebbe più
+     * arretrato e il ricalcolo lo espellerebbe. Per un settlement nuovo si passa un id
+     * inesistente (-1), così nessun collegamento viene ignorato.
+     */
+    public List<WithholdingLedger> findArretratiNonLiquidati(Integer tenantId, Integer ownerId,
+                                                              Integer meseCorrente, Integer annoCorrente,
+                                                              Integer excludeSettlementId) {
+        String sql = SELECT_ALL + " wl WHERE wl.fk_tenant_id = ? AND wl.fk_owner_id = ? " +
+                "AND (wl.periodo_anno < ? OR (wl.periodo_anno = ? AND wl.periodo_mese < ?)) " +
+                "AND NOT EXISTS (SELECT 1 FROM settlement_booking sb " +
+                "WHERE sb.fk_booking_id = wl.fk_booking_id AND sb.fk_settlement_id <> ?) " +
+                "ORDER BY wl.periodo_anno, wl.periodo_mese, wl.id";
+        List<WithholdingLedger> result = jdbcTemplate.query(sql, rowMapper,
+                tenantId, ownerId, annoCorrente, annoCorrente, meseCorrente,
+                excludeSettlementId != null ? excludeSettlementId : -1);
+        log.info("WithholdingLedgerDAO.findArretratiNonLiquidati() - tenantId={} ownerId={} periodo={}/{} arretrati={}",
+                tenantId, ownerId, meseCorrente, annoCorrente, result.size());
+        return result;
+    }
+
+    /**
+     * Owner con almeno un arretrato non liquidato rispetto al periodo indicato: completano
+     * la lista degli owner da elaborare nel calcolo settlement, che altrimenti considererebbe
+     * solo chi ha ritenute nel periodo scelto lasciando gli arretrati orfani per sempre.
+     */
+    public List<Integer> findDistinctOwnerIdsConArretrati(Integer tenantId, Integer meseCorrente, Integer annoCorrente) {
+        String sql = "SELECT DISTINCT wl.fk_owner_id FROM withholding_ledger wl " +
+                "WHERE wl.fk_tenant_id = ? " +
+                "AND (wl.periodo_anno < ? OR (wl.periodo_anno = ? AND wl.periodo_mese < ?)) " +
+                "AND NOT EXISTS (SELECT 1 FROM settlement_booking sb " +
+                "WHERE sb.fk_booking_id = wl.fk_booking_id) " +
+                "ORDER BY wl.fk_owner_id";
+        List<Integer> result = jdbcTemplate.queryForList(sql, Integer.class,
+                tenantId, annoCorrente, annoCorrente, meseCorrente);
+        log.debug("WithholdingLedgerDAO.findDistinctOwnerIdsConArretrati() - tenantId={} periodo={}/{} owner={}",
+                tenantId, meseCorrente, annoCorrente, result.size());
+        return result;
     }
 
     /**
@@ -138,15 +186,6 @@ public class WithholdingLedgerDAO {
                 "WHERE fk_tenant_id = ? AND fk_owner_id = ? AND periodo_anno = ? " +
                 "AND fk_booking_id IN (SELECT id FROM booking WHERE fk_property_id = ?)";
         return jdbcTemplate.queryForMap(sql, tenantId, ownerId, anno, propertyId);
-    }
-
-    /** fk_booking_id distinti delle ritenute di un owner nel periodo. */
-    public List<Integer> findDistinctBookingIdsByOwnerAndPeriodo(Integer tenantId, Integer ownerId, Integer mese, Integer anno) {
-        log.debug("WithholdingLedgerDAO.findDistinctBookingIdsByOwnerAndPeriodo() - tenantId={}, ownerId={}, mese={}, anno={}",
-                tenantId, ownerId, mese, anno);
-        String sql = "SELECT DISTINCT fk_booking_id FROM withholding_ledger " +
-                "WHERE fk_tenant_id = ? AND fk_owner_id = ? AND periodo_mese = ? AND periodo_anno = ?";
-        return jdbcTemplate.queryForList(sql, Integer.class, tenantId, ownerId, mese, anno);
     }
 
     /** Owner con almeno una ritenuta nel periodo (per il batch di calcolo settlement). */
@@ -167,5 +206,17 @@ public class WithholdingLedgerDAO {
         log.debug("WithholdingLedgerDAO.updateStato() - id={}, stato={}", id, stato);
         String sql = "UPDATE withholding_ledger SET stato = ? WHERE id = ?";
         return jdbcTemplate.update(sql, stato, id);
+    }
+
+    /**
+     * Sgancia dall'F24 tutte le ritenute collegate e le riporta allo stato indicato.
+     * È l'inverso di quanto fa F24Service.generaF24(): serve al cleanup dei test, che
+     * altrimenti lascerebbe le ritenute 'versata' e senza F24, quindi non più
+     * agganciabili da una generazione successiva.
+     */
+    public int resetF24Record(Integer f24RecordId, String stato) {
+        log.debug("WithholdingLedgerDAO.resetF24Record() - f24RecordId={}, stato={}", f24RecordId, stato);
+        String sql = "UPDATE withholding_ledger SET fk_f24_record_id = NULL, stato = ? WHERE fk_f24_record_id = ?";
+        return jdbcTemplate.update(sql, stato, f24RecordId);
     }
 }

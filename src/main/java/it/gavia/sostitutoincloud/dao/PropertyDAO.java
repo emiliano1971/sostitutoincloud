@@ -154,4 +154,14 @@ public class PropertyDAO {
                 property.getFkTenantId());
         return findById(property.getId()).orElseThrow();
     }
+
+    /**
+     * Cancellazione fisica dell'immobile. Usata solo dal cleanup dei dati di test:
+     * booking → property è ON DELETE RESTRICT, quindi un immobile con prenotazioni
+     * fa fallire la delete. Regole di contratto e codici OTA vanno in cascata.
+     */
+    public int delete(Integer id) {
+        log.info("PropertyDAO.delete() - id={}", id);
+        return jdbcTemplate.update("DELETE FROM property WHERE id = ?", id);
+    }
 }

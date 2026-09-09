@@ -125,4 +125,14 @@ public class TenantDAO {
                 tenant.getId());
         return findById(tenant.getId()).orElseThrow();
     }
+
+    /**
+     * Cancellazione fisica del tenant. Usata solo dal cleanup dei tenant di test:
+     * owner_profile, property, booking e le altre entità operative hanno FK
+     * ON DELETE RESTRICT, quindi un tenant con dati reali fa fallire la delete.
+     */
+    public int delete(Integer id) {
+        log.info("TenantDAO.delete() - id={}", id);
+        return jdbcTemplate.update("DELETE FROM tenant WHERE id = ?", id);
+    }
 }

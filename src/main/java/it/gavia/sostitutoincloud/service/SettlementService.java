@@ -8,6 +8,7 @@ import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
 import it.gavia.sostitutoincloud.dao.SettlementDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
+import it.gavia.sostitutoincloud.dto.settlement.BookingDaLiquidareDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementBookingDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementCalcolaRequestDTO;
 import it.gavia.sostitutoincloud.dto.settlement.SettlementCalcolaResultDTO;
@@ -19,6 +20,7 @@ import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.Settlement;
 import it.gavia.sostitutoincloud.model.SettlementBooking;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
+import it.gavia.sostitutoincloud.model.WithholdingLedger;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
@@ -113,13 +115,44 @@ public class SettlementService {
     }
 
     /**
-     * Quante prenotazioni con documenti emessi restano fuori dalle liquidazioni:
-     * alimenta l'avviso nella lista liquidazioni.
+     * Competenza della ritenuta del booking (formato "MM/yyyy") quando NON coincide con il
+     * periodo del settlement: identifica le prenotazioni entrate come arretrato dal rollover.
+     * Restituisce null nel caso normale (competenza uguale al periodo liquidato) e quando il
+     * booking non ha righe di ledger.
+     * <p>
+     * Il confronto va normalizzato: il settlement porta il periodo come "yyyy-MM", il ledger
+     * come mese e anno separati. Se il booking avesse più righe di ledger vale la prima
+     * (ordine per id), che è anche l'unico caso reale — una ritenuta per ricevuta.
      */
-    public Integer countDaLiquidare(Integer tenantId) {
-        Integer count = bookingDAO.countDaLiquidare(tenantId);
-        log.debug("SettlementService.countDaLiquidare() - tenantId={} count={}", tenantId, count);
-        return count;
+    private String periodoArretrato(Integer bookingId, String periodSettlement) {
+        List<WithholdingLedger> righe = withholdingLedgerDAO.findByBookingId(bookingId);
+        if (righe.isEmpty()) {
+            return null;
+        }
+        WithholdingLedger wl = righe.get(0);
+        if (wl.getPeriodoMese() == null || wl.getPeriodoAnno() == null) {
+            return null;
+        }
+        String periodoLedger = String.format("%02d/%d", wl.getPeriodoMese(), wl.getPeriodoAnno());
+
+        // "2026-09" → "09/2026", così il confronto avviene tra formati omogenei.
+        if (periodSettlement != null && periodSettlement.length() == 7) {
+            String periodoNormalizzato = periodSettlement.substring(5, 7) + "/" + periodSettlement.substring(0, 4);
+            if (periodoLedger.equals(periodoNormalizzato)) {
+                return null;
+            }
+        }
+        return periodoLedger;
+    }
+
+    /**
+     * Prenotazioni con documenti emessi che restano fuori dalle liquidazioni:
+     * alimenta l'avviso e il relativo dettaglio nella lista liquidazioni.
+     */
+    public List<BookingDaLiquidareDTO> findDaLiquidare(Integer tenantId) {
+        List<BookingDaLiquidareDTO> result = bookingDAO.findDaLiquidare(tenantId);
+        log.debug("SettlementService.findDaLiquidare() - tenantId={} count={}", tenantId, result.size());
+        return result;
     }
 
     public List<SettlementListDTO> findByTenantId(Integer tenantId, Integer ownerId, String period) {
@@ -176,6 +209,7 @@ public class SettlementService {
                     if (booking == null) return null;
                     Property property = propertiesById.get(booking.getFkPropertyId());
                     return SettlementBookingDTO.builder()
+                            .periodoLedger(periodoArretrato(booking.getId(), s.getPeriod()))
                             .bookingId(booking.getId())
                             .externalBookingId(booking.getExternalBookingId())
                             .propertyName(property != null ? property.getDisplayName() : null)
@@ -222,21 +256,46 @@ public class SettlementService {
     private SettlementListDTO calcolaPerOwner(Integer tenantId, Integer ownerId, Integer mese, Integer anno) {
         String period = String.format("%d-%02d", anno, mese);
 
-        // 1. Aggrega canone e ritenuta del periodo.
-        Map<String, Object> row = withholdingLedgerDAO.aggregaByOwnerAndPeriodo(tenantId, ownerId, mese, anno);
-        if (row.get("total_amount") == null) {
+        // 1. Settlement esistente: serve già qui, perché i suoi collegamenti vanno esclusi
+        //    dalla ricerca degli arretrati (stanno per essere riscritti dal ricalcolo).
+        Optional<Settlement> existingOpt = settlementDAO.findByOwnerAndPeriod(tenantId, ownerId, period);
+        Integer existingId = existingOpt.map(Settlement::getId).orElse(null);
+
+        // 2. Righe di ledger del periodo più gli arretrati dei periodi precedenti rimasti
+        //    fuori da ogni liquidazione (rollover): una prenotazione fatturata dopo la
+        //    chiusura del suo periodo non potrebbe più rientrarvi.
+        List<WithholdingLedger> righe = withholdingLedgerDAO
+                .findByOwnerAndPeriodo(tenantId, ownerId, mese, anno);
+        List<WithholdingLedger> arretrati = withholdingLedgerDAO
+                .findArretratiNonLiquidati(tenantId, ownerId, mese, anno, existingId);
+
+        List<WithholdingLedger> tutteLeRighe = new ArrayList<>(righe);
+        tutteLeRighe.addAll(arretrati);
+
+        if (tutteLeRighe.isEmpty()) {
             throw new IllegalArgumentException("Nessuna ritenuta per owner=" + ownerId + " periodo=" + period);
         }
-        BigDecimal totalAmount = toBigDecimal(row.get("total_amount"));
-        BigDecimal withholdingAmount = toBigDecimal(row.get("withholding_amount"));
+        if (!arretrati.isEmpty()) {
+            log.info("SettlementService: settlement {} owner={} include {} prenotazioni in arretrato "
+                    + "da periodi precedenti", period, ownerId, arretrati.size());
+        }
+
+        BigDecimal totalAmount = tutteLeRighe.stream()
+                .map(r -> nullSafe(r.getCanoneLocazione()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal withholdingAmount = tutteLeRighe.stream()
+                .map(r -> nullSafe(r.getRitenutaAmount()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal netAmount = totalAmount.subtract(withholdingAmount);
 
-        // 2. Prenotazioni collegate al periodo.
-        List<Integer> bookingIds = withholdingLedgerDAO
-                .findDistinctBookingIdsByOwnerAndPeriodo(tenantId, ownerId, mese, anno);
+        // 3. Prenotazioni collegate (periodo + arretrati), senza duplicati.
+        List<Integer> bookingIds = tutteLeRighe.stream()
+                .map(WithholdingLedger::getFkBookingId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
 
-        // 3. Settlement esistente?
-        Optional<Settlement> existingOpt = settlementDAO.findByOwnerAndPeriod(tenantId, ownerId, period);
+        // 4. Inserimento o aggiornamento.
         Settlement settlement;
         String tipo;
         if (existingOpt.isPresent()) {
@@ -269,7 +328,7 @@ public class SettlementService {
             tipo = "generated";
         }
 
-        // 4. Nome owner.
+        // 5. Nome owner.
         OwnerProfile owner = ownerProfileDAO.findById(ownerId).orElse(null);
 
         log.info("SettlementService.calcolaPerOwner() - tenantId={} ownerId={} period={} tipo={}",
@@ -303,7 +362,15 @@ public class SettlementService {
             throw new IllegalArgumentException("Anno non valido: " + anno);
         }
 
-        List<Integer> ownerIds = withholdingLedgerDAO.findDistinctOwnerIdsByPeriodo(tenantId, mese, anno);
+        // Owner con ritenute nel periodo più quelli che hanno solo arretrati non liquidati:
+        // senza i secondi i loro arretrati non verrebbero raccolti da nessun calcolo.
+        List<Integer> ownerIds = new ArrayList<>(
+                withholdingLedgerDAO.findDistinctOwnerIdsByPeriodo(tenantId, mese, anno));
+        for (Integer id : withholdingLedgerDAO.findDistinctOwnerIdsConArretrati(tenantId, mese, anno)) {
+            if (!ownerIds.contains(id)) {
+                ownerIds.add(id);
+            }
+        }
         if (ownerIds.isEmpty()) {
             throw new IllegalArgumentException("Nessuna ritenuta per il periodo " + mese + "/" + anno);
         }
@@ -386,13 +453,5 @@ public class SettlementService {
                 .paymentDate(updated.getPaymentDate())
                 .createdAt(updated.getCreatedAt())
                 .build();
-    }
-
-    /** Converte in BigDecimal i valori aggregati provenienti da queryForMap (SUM → BigDecimal, COUNT → Long). */
-    private BigDecimal toBigDecimal(Object v) {
-        if (v == null) return BigDecimal.ZERO;
-        if (v instanceof BigDecimal) return (BigDecimal) v;
-        if (v instanceof Number) return new BigDecimal(v.toString());
-        return new BigDecimal(v.toString());
     }
 }

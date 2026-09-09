@@ -90,4 +90,11 @@ public class PropertyContractRuleDAO {
         log.info("PropertyContractRuleDAO.delete() - id={}", id);
         jdbcTemplate.update("DELETE FROM property_contract_rule WHERE id = ?", id);
     }
+
+    /** Tutte le regole di un immobile: la FK è già CASCADE, resta per il cleanup esplicito. */
+    public int deleteByPropertyId(Integer propertyId) {
+        int righe = jdbcTemplate.update("DELETE FROM property_contract_rule WHERE fk_property_id = ?", propertyId);
+        log.info("PropertyContractRuleDAO.deleteByPropertyId() - propertyId={} eliminate={}", propertyId, righe);
+        return righe;
+    }
 }

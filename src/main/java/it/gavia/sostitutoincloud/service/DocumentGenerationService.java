@@ -179,6 +179,16 @@ public class DocumentGenerationService {
             // L'IVA va SCORPORATA dal lordo (lordo / 1.22), non aggiunta sopra.
             // Il totale della fattura coincide con il lordo dei servizi.
             BigDecimal lordoServizi = otaCommission.add(cleaning).add(pmFee).setScale(2, RoundingMode.HALF_UP);
+            // Senza servizi non c'è nulla da fatturare: una fattura a zero non ha senso
+            // fiscale e nasconderebbe il vero problema a monte — regole contratto assenti
+            // sull'immobile, oppure commissione OTA non mappata in fase di import.
+            if (lordoServizi.compareTo(BigDecimal.ZERO) == 0) {
+                throw new IllegalStateException(
+                        "Impossibile emettere la fattura PM: nessun servizio PM calcolato "
+                        + "(commissione OTA + pulizie + provvigione = 0). "
+                        + "Verificare le regole contratto dell'immobile oppure la commissione "
+                        + "OTA nel file di import.");
+            }
             if (forfettario) {
                 // Regime forfettario (RF19): nessuno scorporo IVA — imponibile = lordo, IVA = 0.
                 imponibile = lordoServizi;

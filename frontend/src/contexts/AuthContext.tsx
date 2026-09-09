@@ -26,7 +26,6 @@ interface AuthContextType {
    *  che altrimenti dovrebbe attendere il re-render con lo stato aggiornato. */
   login: (email: string, password: string) => Promise<UserContext>;
   logout: () => void;
-  switchRole: (role: UserRole) => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -83,11 +82,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   }, []);
 
-  // No-op: role switching not supported with real auth
-  const switchRole = useCallback((_role: UserRole) => {}, []);
-
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, switchRole }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

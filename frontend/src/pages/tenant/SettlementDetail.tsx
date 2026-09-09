@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Loader2, AlertCircle, Download } from 'lucide-react';
+import { ArrowLeft, Loader2, AlertCircle, Download, AlertTriangle } from 'lucide-react';
 import {
   getSettlementById,
   downloadSettlementPdf,
@@ -175,8 +175,8 @@ const SettlementDetail = () => {
                   </TableRow>
                 ) : (
                   bookings.map((b, i) => (
+                    <Fragment key={b.bookingId}>
                     <TableRow
-                      key={b.bookingId}
                       className="cursor-pointer"
                       onClick={() => navigate(`/bookings/${b.bookingId}`)}
                     >
@@ -197,6 +197,20 @@ const SettlementDetail = () => {
                       <TableCell className={`text-right text-destructive ${FISCAL_BG}`}>{fmtCost(b.withholdingAmount)}</TableCell>
                       <TableCell className={`text-right font-semibold text-success ${NET_BG}`}>{fmtEuro(nettoRiga(b))}</TableCell>
                     </TableRow>
+                    {/* Arretrato: la ritenuta è di competenza di un periodo precedente,
+                        recuperata qui dal rollover. Riga a sé perché la tabella è già larga. */}
+                    {b.periodoLedger && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          colSpan={15}
+                          className="py-1 text-xs italic text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/20"
+                        >
+                          <AlertTriangle className="inline h-3 w-3 mr-1 -mt-0.5 text-orange-500" />
+                          Arretrato: competenza {b.periodoLedger}, liquidato in {settlement.period}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </Fragment>
                   ))
                 )}
               </TableBody>

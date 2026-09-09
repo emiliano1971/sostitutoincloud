@@ -110,6 +110,12 @@ public class CuRecordDAO {
         return findById(id).orElseThrow(() -> new RuntimeException("CU non trovata dopo insert: id=" + id));
     }
 
+    public int deleteById(Integer id) {
+        int righe = jdbcTemplate.update("DELETE FROM cu_record WHERE id = ?", id);
+        log.info("CuRecordDAO.deleteById() - id={} righe={}", id, righe);
+        return righe;
+    }
+
     public CuRecord updateTotaliAndStato(Integer id, BigDecimal totalCompensi, BigDecimal totalImponibile,
                                          BigDecimal totalRitenute, String stato) {
         String sql = "UPDATE cu_record SET total_compensi=?, total_imponibile=?, total_ritenute=?, " +

@@ -414,6 +414,21 @@ La configurazione è divisa in due livelli:
   automaticamente — nessun riavvio necessario.
 - I curl di test vanno eseguiti direttamente
   dopo il build Maven senza attendere riavvii.
+- TEMPLATE PDF — DOPPIA COPIA
+  Ogni modifica ai template HTML dei PDF
+  va replicata MANUALMENTE in:
+  /opt/sostitutoincloud/storage/templates/
+
+    PdfTemplateLoader dà sempre precedenza
+    allo storage esterno rispetto al classpath.
+    Se si modifica solo src/main/resources/
+    /templates/ la modifica non viene mai
+    letta in produzione.
+
+    Template presenti in entrambe le posizioni:
+    - fattura-pm.html
+    - ricevuta-owner.html
+    - rendiconto-liquidazione.html
 
 ## Logging
 

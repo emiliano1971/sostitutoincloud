@@ -141,4 +141,25 @@ public class OwnerProfileDAO {
         });
         return findById(owner.getId()).orElseThrow();
     }
+
+    /**
+     * Cancellazione fisica del proprietario. Usata solo dal cleanup dei dati di test:
+     * property, booking, fiscal_document, settlement, cu_record e withholding_ledger
+     * hanno FK ON DELETE RESTRICT, quindi va cancellato dopo i suoi immobili.
+     */
+    public int delete(Integer id) {
+        log.info("OwnerProfileDAO.delete() - id={}", id);
+        return jdbcTemplate.update("DELETE FROM owner_profile WHERE id = ?", id);
+    }
+
+    /**
+     * Proprietari il cui cognome contiene il pattern indicato: serve al pre-cleanup dei
+     * test E2E, che rimuove i residui di una run interrotta prima di ricominciare.
+     */
+    public List<OwnerProfile> findByLastNamePattern(Integer tenantId, String pattern) {
+        log.debug("OwnerProfileDAO.findByLastNamePattern() - tenantId={} pattern={}", tenantId, pattern);
+        return jdbcTemplate.query(
+                SELECT_COLS + " WHERE fk_tenant_id = ? AND last_name LIKE '%' || ? || '%' ORDER BY id",
+                ownerProfileRowMapper, tenantId, pattern);
+    }
 }

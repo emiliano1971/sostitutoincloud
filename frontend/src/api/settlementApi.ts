@@ -28,6 +28,11 @@ export interface SettlementBookingItem {
   ownerNetAmount: number;
   withholdingAmount: number;
   bolloCents: number;   // bollo in centesimi (0 o 200)
+  /**
+   * Competenza della ritenuta (es. "08/2026") quando differisce dal periodo del
+   * settlement: la prenotazione è entrata come arretrato. null/assente nel caso normale.
+   */
+  periodoLedger?: string | null;
 }
 
 export interface SettlementDetail extends SettlementListItem {
@@ -79,9 +84,23 @@ export async function updateSettlementStatus(
   return patch<SettlementListItem>(`/settlements/${id}/status`, { stato });
 }
 
+export interface BookingDaLiquidare {
+  bookingId: number;
+  externalBookingId: string;
+  ownerName: string;
+  propertyName: string;
+  checkinDate: string;
+  checkoutDate: string;
+  canoneLocazione: number;
+  ritenutaAmount: number;
+  nettoProprietario: number;
+  /** Periodo di competenza della ritenuta, es. "08/2026" */
+  periodoLedger: string;
+}
+
 /** Prenotazioni con documenti emessi non ancora incluse in una liquidazione. */
-export async function getCountDaLiquidare(): Promise<{ count: number }> {
-  return get<{ count: number }>('/settlements/da-liquidare');
+export async function getBookingsDaLiquidare(): Promise<BookingDaLiquidare[]> {
+  return get<BookingDaLiquidare[]>('/settlements/da-liquidare');
 }
 
 /**

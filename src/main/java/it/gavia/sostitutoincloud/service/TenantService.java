@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.service;
 
+import it.gavia.sostitutoincloud.dao.AuditLogDAO;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
@@ -21,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -36,6 +38,7 @@ public class TenantService {
     private final BookingDAO bookingDAO;
     private final TenantSettingsDAO tenantSettingsDAO;
     private final UtenteDAO utenteDAO;
+    private final AuditLogDAO auditLogDAO;
     private final AuditService auditService;
 
     public TenantService(TenantDAO tenantDAO,
@@ -44,6 +47,7 @@ public class TenantService {
                          BookingDAO bookingDAO,
                          TenantSettingsDAO tenantSettingsDAO,
                          UtenteDAO utenteDAO,
+                         AuditLogDAO auditLogDAO,
                          AuditService auditService) {
         this.tenantDAO = tenantDAO;
         this.propertyDAO = propertyDAO;
@@ -51,6 +55,7 @@ public class TenantService {
         this.bookingDAO = bookingDAO;
         this.tenantSettingsDAO = tenantSettingsDAO;
         this.utenteDAO = utenteDAO;
+        this.auditLogDAO = auditLogDAO;
         this.auditService = auditService;
     }
 
@@ -192,6 +197,40 @@ public class TenantService {
                     "Tenant " + updated.getDisplayName() + " sospeso");
         }
         return toDetailDTO(updated);
+    }
+
+    /**
+     * Cancellazione fisica di un tenant creato dai test E2E, con i suoi utenti,
+     * impostazioni e tracce di audit.
+     * <p>
+     * Protezione anti-cancellazione dei dati reali: procede SOLO se la ragione sociale
+     * contiene "E2E-" o "TEST-". Le entità operative (owner, immobili, prenotazioni)
+     * hanno FK ON DELETE RESTRICT, quindi un tenant con dati fa fallire la delete a
+     * livello DB: è una seconda rete di sicurezza, non un caso da gestire.
+     * <p>
+     * Ordine: audit_log e utente vanno cancellati a mano (FK ON DELETE SET NULL),
+     * tenant_settings sarebbe già in cascata ma resta esplicito.
+     */
+    public void cleanupTenantDiTest(Integer id) {
+        Tenant tenant = tenantDAO.findById(id)
+                .orElseThrow(() -> new NoSuchElementException("Tenant non trovato: id=" + id));
+
+        String legalName = tenant.getLegalName() != null ? tenant.getLegalName() : "";
+        boolean diTest = legalName.contains("E2E-") || legalName.contains("TEST-");
+        if (!diTest) {
+            throw new IllegalArgumentException(
+                    "Cleanup consentito solo sui tenant di test: la ragione sociale deve contenere "
+                            + "'E2E-' o 'TEST-' (trovata: '" + legalName + "')");
+        }
+
+        int audit = auditLogDAO.deleteByTenant(id);
+        int utenti = utenteDAO.deleteByTenantId(id);
+        int settings = tenantSettingsDAO.deleteByTenantId(id);
+        int tenants = tenantDAO.delete(id);
+
+        log.info("TenantService.cleanupTenantDiTest() - id={} legalName='{}' "
+                        + "audit={} utenti={} settings={} tenant={}",
+                id, legalName, audit, utenti, settings, tenants);
     }
 
     private TenantSettings defaultSettings(Integer tenantId) {

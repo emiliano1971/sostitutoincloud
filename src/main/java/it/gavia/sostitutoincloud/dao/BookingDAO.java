@@ -1,13 +1,20 @@
 package it.gavia.sostitutoincloud.dao;
 
 import it.gavia.sostitutoincloud.dao.mapper.BookingRowMapper;
+import it.gavia.sostitutoincloud.dto.settlement.BookingDaLiquidareDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.util.StreamUtils;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.Types;
 import java.time.LocalDate;
@@ -237,15 +244,51 @@ public class BookingDAO {
     /**
      * Prenotazioni con documenti già emessi ('doc_issued') non ancora incluse in alcuna
      * liquidazione: sono quelle che il prossimo calcolo dovrebbe raccogliere.
-     * Lo stato è risolto per codice sulla lookup, non per id.
+     * Query esternalizzata in sql/booking/da_liquidare.sql.
      */
-    public Integer countDaLiquidare(Integer tenantId) {
-        log.debug("BookingDAO.countDaLiquidare() - tenantId={}", tenantId);
-        String sql = "SELECT COUNT(*) FROM booking b " +
-                "JOIN stato_prenotazione sp ON sp.id = b.fk_stato_prenotazione_id " +
-                "WHERE b.fk_tenant_id = ? AND sp.codice = 'doc_issued' " +
-                "AND NOT EXISTS (SELECT 1 FROM settlement_booking sb WHERE sb.fk_booking_id = b.id)";
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, tenantId);
-        return count != null ? count : 0;
+    public List<BookingDaLiquidareDTO> findDaLiquidare(Integer tenantId) {
+        String sql = loadSql("sql/booking/da_liquidare.sql");
+        List<BookingDaLiquidareDTO> result = jdbcTemplate.query(sql, (rs, rowNum) -> {
+            BigDecimal canone = rs.getBigDecimal("canone_locazione");
+            BigDecimal ritenuta = rs.getBigDecimal("ritenuta_amount");
+            if (canone == null) canone = BigDecimal.ZERO;
+            if (ritenuta == null) ritenuta = BigDecimal.ZERO;
+            return BookingDaLiquidareDTO.builder()
+                    .bookingId(rs.getInt("booking_id"))
+                    .externalBookingId(rs.getString("external_booking_id"))
+                    .ownerName(rs.getString("owner_name"))
+                    .propertyName(rs.getString("property_name"))
+                    .checkinDate(rs.getObject("checkin_date", LocalDate.class))
+                    .checkoutDate(rs.getObject("checkout_date", LocalDate.class))
+                    .canoneLocazione(canone)
+                    .ritenutaAmount(ritenuta)
+                    .nettoProprietario(canone.subtract(ritenuta))
+                    .periodoLedger(String.format("%02d/%d",
+                            rs.getInt("periodo_mese"), rs.getInt("periodo_anno")))
+                    .build();
+        }, tenantId);
+        log.debug("BookingDAO.findDaLiquidare() - tenantId={} count={}", tenantId, result.size());
+        return result;
+    }
+
+    /**
+     * Id dei booking di un tenant il cui external_booking_id combacia col pattern LIKE.
+     * Usata dal cleanup dei test E2E: il filtro sul tenant è parte della protezione.
+     */
+    public List<Integer> findIdsByExternalIdPattern(Integer tenantId, String pattern) {
+        String sql = "SELECT id FROM booking WHERE fk_tenant_id = ? " +
+                "AND external_booking_id LIKE ? ORDER BY id";
+        List<Integer> ids = jdbcTemplate.queryForList(sql, Integer.class, tenantId, pattern);
+        log.debug("BookingDAO.findIdsByExternalIdPattern() - tenantId={} pattern={} trovati={}",
+                tenantId, pattern, ids.size());
+        return ids;
+    }
+
+    private String loadSql(String classpath) {
+        try (InputStream is = new ClassPathResource(classpath).getInputStream()) {
+            return StreamUtils.copyToString(is, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("Impossibile caricare SQL: " + classpath, e);
+        }
     }
 }

@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/api/admin/tenants")
@@ -91,6 +92,34 @@ public class TenantController {
             return ResponseEntity.status(HttpStatus.CREATED).body(created);
         } catch (IllegalArgumentException ex) {
             log.warn("TenantController.createUser() - richiesta non valida: {}", ex.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", HttpStatus.BAD_REQUEST.value(),
+                    "error", HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                    "message", ex.getMessage()));
+        }
+    }
+
+    /**
+     * Cleanup di un tenant creato dai test E2E, con utenti, impostazioni e audit —
+     * solo super_admin (l'intero /api/admin/** lo è via SecurityConfig, nessuna
+     * logica di autorizzazione qui).
+     * Procede solo se la ragione sociale contiene "E2E-" o "TEST-": il service
+     * risponde 400 su qualsiasi altro tenant.
+     */
+    @DeleteMapping("/{id}/cleanup")
+    public ResponseEntity<?> cleanup(@PathVariable Integer id) {
+        log.info("TenantController.cleanup() - id={}", id);
+        try {
+            tenantService.cleanupTenantDiTest(id);
+            return ResponseEntity.ok(Map.of("message", "Tenant eliminato"));
+        } catch (NoSuchElementException ex) {
+            log.warn("TenantController.cleanup() - tenant non trovato: id={}", id);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "status", HttpStatus.NOT_FOUND.value(),
+                    "error", HttpStatus.NOT_FOUND.getReasonPhrase(),
+                    "message", ex.getMessage()));
+        } catch (IllegalArgumentException ex) {
+            log.warn("TenantController.cleanup() - rifiutato: {}", ex.getMessage());
             return ResponseEntity.badRequest().body(Map.of(
                     "status", HttpStatus.BAD_REQUEST.value(),
                     "error", HttpStatus.BAD_REQUEST.getReasonPhrase(),

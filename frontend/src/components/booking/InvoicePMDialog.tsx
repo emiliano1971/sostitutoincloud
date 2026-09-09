@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { FileText, Printer, Send, Download, Loader2 } from 'lucide-react';
+import { FileText, Printer, Send, Download, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { aggiornaStatoDocumento, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
@@ -87,6 +87,10 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
     ? generatedDoc.importoTotale
     : otaLordo + cleaningLordo + pmLordo;
 
+  // Servizi PM tutti a zero: non c'è nulla da fatturare e il server rifiuta l'emissione
+  // (DocumentGenerationService). Si avvisa prima, spiegando dove guardare.
+  const servizioTotale = otaLordo + cleaningLordo + pmLordo;
+
   // Semantica bottoni: se QUESTA fattura esiste già solo stampa/download, altrimenti
   // emissione (azione irreversibile).
   // NB: si guarda existingDoc e non booking_status === 'doc_issued'. Lo stato del booking
@@ -166,6 +170,18 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             Anteprima Fattura P.M.
           </DialogTitle>
         </DialogHeader>
+
+        {/* Fuori da print-document-content: è un avviso operativo, non parte del documento */}
+        {servizioTotale === 0 && !existingDoc && !generatedDoc && (
+          <div className="flex items-start gap-2 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-900">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-yellow-600" />
+            <span>
+              I servizi PM risultano tutti a zero (commissione OTA, pulizie e provvigione).
+              Verificare le regole contratto dell'immobile o la commissione OTA nel file di
+              import. L'emissione sarà bloccata dal server.
+            </span>
+          </div>
+        )}
 
         <div className="border rounded-lg p-6 space-y-6 bg-background text-foreground text-sm" id="print-document-content">
           <div className="flex justify-between items-start">

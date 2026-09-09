@@ -106,6 +106,12 @@ public class F24RecordDAO {
         log.info("F24RecordDAO.updateTotale() - id={} totale={} count={}", id, totalAmount, withholdingsCount);
     }
 
+    public int deleteById(Integer id) {
+        int righe = jdbcTemplate.update("DELETE FROM f24_record WHERE id = ?", id);
+        log.info("F24RecordDAO.deleteById() - id={} righe={}", id, righe);
+        return righe;
+    }
+
     public F24Record updateStato(Integer id, String stato, LocalDate paymentDate) {
         String sql = "UPDATE f24_record SET stato = ?, payment_date = ?, updated_at = NOW() WHERE id = ?";
         jdbcTemplate.update(con -> {
