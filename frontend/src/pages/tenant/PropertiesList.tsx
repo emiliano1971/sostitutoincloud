@@ -29,7 +29,8 @@ const PropertiesList = () => {
     search === '' ||
     p.displayName.toLowerCase().includes(search.toLowerCase()) ||
     p.internalCode.toLowerCase().includes(search.toLowerCase()) ||
-    (p.cinCode ?? '').toLowerCase().includes(search.toLowerCase())
+    (p.cinCode ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (p.ownerName ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -46,7 +47,7 @@ const PropertiesList = () => {
         <CardContent className="p-4">
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Cerca per nome, codice o CIN..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+            <Input placeholder="Cerca per nome, proprietario, codice o CIN..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
           </div>
         </CardContent>
       </Card>
@@ -65,6 +66,7 @@ const PropertiesList = () => {
                 <TableRow>
                   <TableHead>Codice</TableHead>
                   <TableHead>Nome</TableHead>
+                  <TableHead>Proprietario</TableHead>
                   <TableHead>CIN</TableHead>
                   <TableHead>Città</TableHead>
                   <TableHead>Tipo</TableHead>
@@ -79,6 +81,20 @@ const PropertiesList = () => {
                   <TableRow key={p.id} className="cursor-pointer" onClick={() => navigate(`/properties/${p.id}`)}>
                     <TableCell className="font-mono text-xs">{p.internalCode}</TableCell>
                     <TableCell className="font-medium">{p.displayName}</TableCell>
+                    <TableCell className="text-sm">
+                      {/* stopPropagation: la riga apre l'immobile, questa cella il proprietario */}
+                      {p.ownerName && p.fkOwnerId ? (
+                        <button
+                          type="button"
+                          className="text-primary hover:underline"
+                          onClick={e => { e.stopPropagation(); navigate(`/owners/${p.fkOwnerId}`); }}
+                        >
+                          {p.ownerName}
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">{p.ownerName || '—'}</span>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{p.cinCode ?? '—'}</TableCell>
                     <TableCell className="text-sm">{p.city}</TableCell>
                     <TableCell><Badge variant="outline" className="text-xs">{p.propertyType}</Badge></TableCell>

@@ -14,6 +14,7 @@ import { getOwnerById, updateOwnerStatus, updateOwner, type OwnerDetail as Owner
 import { useLookup } from '@/contexts/LookupContext';
 import { getProperties, type PropertyListItem } from '@/api/propertyApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
+import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useToast } from '@/hooks/use-toast';
 import { getConfig } from '@/config/AppConfig';
 import { validateIban } from '@/lib/iban';
@@ -43,6 +44,8 @@ const OwnerDetail = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [ibanWarning, setIbanWarning] = useState('');
+  // Aliquote ritenuta del tenant: mostrate nei badge solo se disponibili.
+  const [settings, setSettings] = useState<TenantSettingsDTO | null>(null);
 
   // getConfig() va letta a render e non a livello di modulo: main.tsx importa App.tsx
   // staticamente, quindi i moduli sono valutati prima che loadConfig() risolva e a
@@ -56,6 +59,21 @@ const OwnerDetail = () => {
   const checkIban = (value: string) =>
     setIbanWarning(!isLocal && value.trim() && !validateIban(value) ? 'IBAN non valido' : '');
 
+  // Etichetta del badge classificazione ritenuta: l'aliquota compare solo
+  // quando i settings del tenant sono stati caricati.
+  const classificazioneLabel = (primoImmobile: boolean) => {
+    if (!settings) return primoImmobile ? 'Primo immobile' : 'Secondo+ immobile';
+    return primoImmobile
+      ? `Primo (${settings.withholdingRatePrimary}%)`
+      : `Secondo+ (${settings.withholdingRateSecondary}%)`;
+  };
+
+  // Le aliquote sono un dettaglio informativo: se la GET fallisce i badge restano
+  // senza percentuale invece di rompere la pagina.
+  useEffect(() => {
+    getSettings().then(setSettings).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!id) return;
     setIsLoading(true);
@@ -64,10 +82,12 @@ const OwnerDetail = () => {
         setOwner(ownerData);
         const fullName = `${ownerData.firstName} ${ownerData.lastName}`;
         return Promise.all([
-          getProperties(),
+          // Immobili filtrati dal backend sull'id del proprietario: il confronto per
+          // nome sbaglierebbe con due proprietari omonimi nello stesso tenant.
+          getProperties(undefined, ownerData.id),
           getBookings({ page: 0, size: 5 }),
-        ]).then(([allProps, allBookings]) => {
-          setProperties(allProps.filter(p => p.ownerName === fullName));
+        ]).then(([ownerProps, allBookings]) => {
+          setProperties(ownerProps);
           setRecentBookings(allBookings.filter(b => b.ownerName === fullName));
         });
       })
@@ -264,7 +284,17 @@ const OwnerDetail = () => {
                   <p className="font-medium text-sm">{p.displayName}</p>
                   <p className="text-xs text-muted-foreground">{p.internalCode} · {p.city} · CIN: {p.cinCode}</p>
                 </div>
-                <Badge variant={p.attivo ? 'default' : 'secondary'} className="text-xs">{p.attivo ? 'Attivo' : 'Inattivo'}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${p.primoImmobile
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : 'border-muted bg-muted text-muted-foreground'}`}
+                  >
+                    {classificazioneLabel(p.primoImmobile)}
+                  </Badge>
+                  <Badge variant={p.attivo ? 'default' : 'secondary'} className="text-xs">{p.attivo ? 'Attivo' : 'Inattivo'}</Badge>
+                </div>
               </div>
             ))}
           </CardContent>

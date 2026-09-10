@@ -6,10 +6,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Building2, Hash, Globe, Save, Loader2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { ArrowLeft, Building2, Hash, Globe, Save, Loader2, AlertTriangle } from 'lucide-react';
 import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { getOwners, type OwnerListItem } from '@/api/ownerApi';
-import { createProperty } from '@/api/propertyApi';
+import { createProperty, checkPrimoImmobile } from '@/api/propertyApi';
 import { useToast } from '@/hooks/use-toast';
 import { useLookup } from '@/contexts/LookupContext';
 
@@ -37,8 +38,33 @@ const PropertyCreate = () => {
     owner_id: '',
   });
 
+  // Classificazione ritenuta: default primo immobile (aliquota primaria).
+  const [primoImmobile, setPrimoImmobile] = useState(true);
+  const [primoImmobileWarning, setPrimoImmobileWarning] = useState('');
+
   // Codici OTA per canale: { [codiceCanale]: externalId }
   const [otaCodes, setOtaCodes] = useState<Record<string, string>>({});
+
+  // Avvisa se il proprietario ha già un altro immobile censito come primo immobile.
+  // In creazione non c'è nulla da escludere: excludePropertyId resta undefined.
+  useEffect(() => {
+    if (!primoImmobile || !form.owner_id) {
+      setPrimoImmobileWarning('');
+      return;
+    }
+    let annullato = false;
+    checkPrimoImmobile(Number(form.owner_id), undefined)
+      .then(res => {
+        if (annullato) return;
+        setPrimoImmobileWarning(
+          res.exists
+            ? `Attenzione: il proprietario ha già un immobile censito come primo immobile ("${res.propertyName}"). Impostare questo come secondo immobile comporta l'applicazione della ritenuta al 26%.`
+            : ''
+        );
+      })
+      .catch(() => { if (!annullato) setPrimoImmobileWarning(''); });
+    return () => { annullato = true; };
+  }, [form.owner_id, primoImmobile]);
 
   const update = (field: string, value: string) => setForm(prev => ({ ...prev, [field]: value }));
   const updateOta = (codice: string, value: string) => setOtaCodes(prev => ({ ...prev, [codice]: value }));
@@ -69,6 +95,7 @@ const PropertyCreate = () => {
         region:       form.region || undefined,
         cinCode:      form.cin_code || undefined,
         fkOwnerId:    form.owner_id ? Number(form.owner_id) : undefined,
+        primoImmobile,
         otaCodes:     otaCodesList.length > 0 ? otaCodesList : undefined,
       });
       toast({ title: 'Immobile creato', description: `${form.display_name} è stato creato con successo.` });
@@ -169,6 +196,24 @@ const PropertyCreate = () => {
                   </SelectContent>
                 </Select>
                 {ownerError && <p className="text-sm text-destructive">Seleziona un proprietario</p>}
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Primo immobile</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {primoImmobile ? 'Ritenuta primaria (21%)' : 'Ritenuta secondaria (26%)'}
+                    </p>
+                  </div>
+                  <Switch checked={primoImmobile} onCheckedChange={setPrimoImmobile} />
+                </div>
+                {primoImmobileWarning && (
+                  <div className="flex gap-2 rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{primoImmobileWarning}</span>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

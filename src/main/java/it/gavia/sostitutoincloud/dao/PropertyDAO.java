@@ -86,6 +86,23 @@ public class PropertyDAO {
         return count != null ? count : 0;
     }
 
+    /**
+     * Cerca un altro immobile attivo dello stesso proprietario già censito come primo immobile.
+     * Serve ad avvisare il PM che marcare anche questo come primo immobile creerebbe un duplicato
+     * (con conseguente ritenuta primaria applicata due volte allo stesso owner).
+     * excludePropertyId esclude l'immobile in corso di modifica: null = nessuna esclusione.
+     */
+    public Optional<Property> findPrimoImmobileByOwner(Integer tenantId, Integer ownerId, Integer excludePropertyId) {
+        log.debug("PropertyDAO.findPrimoImmobileByOwner() - tenantId={} ownerId={} excludePropertyId={}",
+                tenantId, ownerId, excludePropertyId);
+        Integer exclude = excludePropertyId != null ? excludePropertyId : -1;
+        List<Property> result = jdbcTemplate.query(
+                SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? " +
+                "AND primo_immobile = TRUE AND attivo = TRUE AND id != ? LIMIT 1",
+                propertyRowMapper, tenantId, ownerId, exclude);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
     public Property insert(Property property) {
         String sql = "INSERT INTO property " +
                      "(fk_tenant_id, fk_owner_id, fk_pm_user_id, fk_tipo_immobile_id, " +

@@ -23,6 +23,9 @@ public class PropertyListDTO {
     private String propertyType;
     private String cinCode;
     private Boolean attivo;
+    // Classificazione ai fini della ritenuta: true = aliquota primaria, false = secondaria.
+    private Boolean primoImmobile;
+    private Integer fkOwnerId;
     private String ownerName;
     private Integer listingsCount;
     private Integer bookingsCount;

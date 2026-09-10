@@ -15,6 +15,9 @@ export interface PropertyListItem {
   propertyType: string;
   cinCode?: string;
   attivo: boolean;
+  // Classificazione ai fini della ritenuta: true = aliquota primaria, false = secondaria.
+  primoImmobile: boolean;
+  fkOwnerId?: number;
   ownerName: string;
   listingsCount: number;
   bookingsCount: number;
@@ -26,13 +29,16 @@ export interface PropertyDetail extends PropertyListItem {
   fkTenantId: number;
   fkOwnerId: number;
   fkPmUserId?: number;
-  primoImmobile: boolean;
   updatedAt: string;
 }
 
-export async function getProperties(attivo?: boolean): Promise<PropertyListItem[]> {
-  const path = attivo !== undefined ? `/properties?attivo=${attivo}` : '/properties';
-  return get<PropertyListItem[]>(path);
+// ownerId: filtro lato backend sugli immobili di un proprietario.
+export async function getProperties(attivo?: boolean, ownerId?: number): Promise<PropertyListItem[]> {
+  const params = new URLSearchParams();
+  if (attivo !== undefined) params.set('attivo', String(attivo));
+  if (ownerId !== undefined) params.set('ownerId', String(ownerId));
+  const qs = params.toString();
+  return get<PropertyListItem[]>(qs ? `/properties?${qs}` : '/properties');
 }
 
 export async function getPropertyById(id: number): Promise<PropertyDetail> {
@@ -48,6 +54,7 @@ export interface PropertyCreateRequest {
   region?: string;
   cinCode?: string;
   fkOwnerId?: number;
+  primoImmobile?: boolean;
   otaCodes?: { canaleCodiceName: string; externalId: string }[];
 }
 
@@ -69,6 +76,23 @@ export async function updatePropertyOwner(id: number, fkOwnerId: number): Promis
 
 export async function updatePropertyPrimoImmobile(id: number, primoImmobile: boolean): Promise<PropertyDetail> {
   return patch<PropertyDetail>(`/properties/${id}`, { primoImmobile });
+}
+
+export interface PrimoImmobileCheck {
+  exists: boolean;
+  propertyName?: string;
+  propertyId?: number;
+}
+
+// Verifica se il proprietario ha già un altro immobile attivo come primo immobile.
+// excludePropertyId esclude l'immobile in corso di modifica.
+export async function checkPrimoImmobile(
+  ownerId: number,
+  excludePropertyId?: number
+): Promise<PrimoImmobileCheck> {
+  const params = new URLSearchParams({ ownerId: String(ownerId) });
+  if (excludePropertyId !== undefined) params.set('excludePropertyId', String(excludePropertyId));
+  return get<PrimoImmobileCheck>(`/properties/check-primo-immobile?${params.toString()}`);
 }
 
 // ── Regole contratto immobile ────────────────────────────────────────────────

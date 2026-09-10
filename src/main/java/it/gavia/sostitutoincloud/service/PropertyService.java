@@ -10,6 +10,7 @@ import it.gavia.sostitutoincloud.dto.property.OtaCodeDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyCreateDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyDetailDTO;
 import it.gavia.sostitutoincloud.dto.property.PropertyListDTO;
+import it.gavia.sostitutoincloud.dto.settings.TenantSettingsDTO;
 import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
@@ -19,6 +20,7 @@ import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -36,6 +38,7 @@ public class PropertyService {
     private final CanaleOtaDAO canaleOtaDAO;
     private final TipoImmobileDAO tipoImmobileDAO;
     private final AuditService auditService;
+    private final TenantSettingsService tenantSettingsService;
 
     public PropertyService(PropertyDAO propertyDAO,
                            PropertyOtaCodeDAO propertyOtaCodeDAO,
@@ -43,7 +46,8 @@ public class PropertyService {
                            BookingDAO bookingDAO,
                            CanaleOtaDAO canaleOtaDAO,
                            TipoImmobileDAO tipoImmobileDAO,
-                           AuditService auditService) {
+                           AuditService auditService,
+                           TenantSettingsService tenantSettingsService) {
         this.propertyDAO = propertyDAO;
         this.propertyOtaCodeDAO = propertyOtaCodeDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -51,6 +55,7 @@ public class PropertyService {
         this.canaleOtaDAO = canaleOtaDAO;
         this.tipoImmobileDAO = tipoImmobileDAO;
         this.auditService = auditService;
+        this.tenantSettingsService = tenantSettingsService;
     }
 
     public List<PropertyListDTO> findByTenantId(Integer tenantId) {
@@ -68,6 +73,18 @@ public class PropertyService {
                 tenantId, attivo, properties.size());
         LookupMaps maps = buildLookupMaps(tenantId);
         return properties.stream()
+                .map(p -> toListDTO(p, maps))
+                .toList();
+    }
+
+    /** Immobili di un proprietario. attivo null = tutti, altrimenti filtra sullo stato. */
+    public List<PropertyListDTO> findByOwner(Integer tenantId, Integer ownerId, Boolean attivo) {
+        List<Property> properties = propertyDAO.findByOwnerAndTenant(tenantId, ownerId);
+        log.info("PropertyService.findByOwner() - tenantId={}, ownerId={}, attivo={}, {} property trovate",
+                tenantId, ownerId, attivo, properties.size());
+        LookupMaps maps = buildLookupMaps(tenantId);
+        return properties.stream()
+                .filter(p -> attivo == null || attivo.equals(p.getAttivo()))
                 .map(p -> toListDTO(p, maps))
                 .toList();
     }
@@ -102,10 +119,13 @@ public class PropertyService {
                     .orElse(null);
         }
         final Integer resolvedTipoId = tipoId;
-        // primo_immobile: TRUE se è il primo immobile attivo dell'owner (ritenuta primaria 21%),
-        // FALSE dal secondo in poi (ritenuta secondaria 26%). Il PM può poi modificarlo manualmente.
-        boolean primoImmobile = dto.getFkOwnerId() != null
-                && propertyDAO.countActiveByOwner(dto.getFkOwnerId(), tenantId) == 0;
+        // primo_immobile: se il DTO lo valorizza vince la scelta esplicita del PM (toggle in creazione),
+        // altrimenti TRUE se è il primo immobile attivo dell'owner (ritenuta primaria 21%),
+        // FALSE dal secondo in poi (ritenuta secondaria 26%).
+        boolean primoImmobile = dto.getPrimoImmobile() != null
+                ? dto.getPrimoImmobile()
+                : dto.getFkOwnerId() != null
+                        && propertyDAO.countActiveByOwner(dto.getFkOwnerId(), tenantId) == 0;
         Property property = Property.builder()
                 .fkTenantId(tenantId)
                 .fkOwnerId(dto.getFkOwnerId())
@@ -176,6 +196,21 @@ public class PropertyService {
                 .build();
         Property updated = propertyDAO.update(toUpdate);
 
+        // primo_immobile: la update() principale non tocca la colonna, si passa dal DAO dedicato.
+        // Cambia solo l'aliquota dei booking FUTURI: quelli già importati conservano
+        // l'aliquota storica con cui sono stati calcolati e non vanno mai ricalcolati.
+        if (dto.getPrimoImmobile() != null
+                && !dto.getPrimoImmobile().equals(Boolean.TRUE.equals(existing.getPrimoImmobile()))) {
+            updated = propertyDAO.updatePrimoImmobile(propertyId, dto.getPrimoImmobile());
+            log.info("PropertyService: primo_immobile cambiato per property={} owner={} — "
+                            + "i booking futuri useranno aliquota {}%",
+                    propertyId, existing.getFkOwnerId(), aliquotaRitenuta(tenantId, dto.getPrimoImmobile()));
+            auditService.log("property.primo_immobile", "Property", updated.getId(),
+                    "Immobile " + updated.getDisplayName()
+                            + (dto.getPrimoImmobile() ? " marcato come primo immobile (ritenuta primaria)"
+                                                      : " marcato come secondo+ immobile (ritenuta secondaria)"));
+        }
+
         // codici OTA: cancella e reinserisci quelli non vuoti (stessa logica del create)
         propertyOtaCodeDAO.deleteByPropertyId(propertyId);
         if (dto.getOtaCodes() != null && !dto.getOtaCodes().isEmpty()) {
@@ -245,6 +280,23 @@ public class PropertyService {
         return toDetailDTO(updated, maps);
     }
 
+    /**
+     * Verifica se il proprietario ha già un altro immobile attivo censito come primo immobile.
+     * Usata dalle pagine di creazione/modifica per avvisare il PM prima del salvataggio:
+     * è un avviso informativo, non blocca il salvataggio.
+     */
+    public Optional<Property> checkPrimoImmobile(Integer tenantId, Integer ownerId, Integer excludePropertyId) {
+        log.debug("PropertyService.checkPrimoImmobile() - tenantId={} ownerId={} excludePropertyId={}",
+                tenantId, ownerId, excludePropertyId);
+        return propertyDAO.findPrimoImmobileByOwner(tenantId, ownerId, excludePropertyId);
+    }
+
+    /** Aliquota ritenuta del tenant per la classificazione indicata — mai hardcodata, sempre da tenant_settings. */
+    private BigDecimal aliquotaRitenuta(Integer tenantId, boolean primoImmobile) {
+        TenantSettingsDTO settings = tenantSettingsService.getSettings(tenantId);
+        return primoImmobile ? settings.getWithholdingRatePrimary() : settings.getWithholdingRateSecondary();
+    }
+
     // ── lookup helpers ──────────────────────────────────────────────────────
 
     private LookupMaps buildLookupMaps(Integer tenantId) {
@@ -285,6 +337,8 @@ public class PropertyService {
                 .propertyType(maps.tipoMap.getOrDefault(p.getFkTipoImmobileId(), null))
                 .cinCode(p.getCinCode())
                 .attivo(p.getAttivo())
+                .primoImmobile(p.getPrimoImmobile())
+                .fkOwnerId(p.getFkOwnerId())
                 .ownerName(resolveOwnerName(p.getFkOwnerId(), maps.ownerMap))
                 .listingsCount(otaCodes.size())
                 .bookingsCount(bookingDAO.findByPropertyId(p.getId()).size())

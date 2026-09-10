@@ -209,38 +209,63 @@ public class BookingService {
             birthDate = LocalDate.parse(dto.getGuestBirthDate().trim());
         }
 
-        // CF: se non fornito, prova a calcolarlo dai dati anagrafici (come nel flusso import).
-        String taxCode = emptyToNull(dto.getGuestTaxCode());
-        String sesso = emptyToNull(dto.getGuestSesso());
-        String comune = emptyToNull(dto.getGuestBirthPlace());
-        if (comune == null) comune = emptyToNull(dto.getGuestBirthBelfiore());
-        if (taxCode == null && dto.getGuestName() != null && !dto.getGuestName().isBlank()
-                && birthDate != null && sesso != null && comune != null) {
-            String full = dto.getGuestName().trim();
+        // PATCH parziale: updateGuestAnagrafica() riscrive TUTTE le colonne guest, quindi ogni
+        // campo assente dal body va riletto dal booking a DB o verrebbe azzerato.
+        String guestName = merge(dto.getGuestName(), existing.getGuestName());
+        LocalDate guestBirthDate = birthDate != null ? birthDate : existing.getGuestBirthDate();
+        String guestSesso = merge(dto.getGuestSesso(), existing.getGuestSesso());
+        String guestBirthPlace = merge(dto.getGuestBirthPlace(), existing.getGuestBirthPlace());
+        String guestBirthBelfiore = merge(dto.getGuestBirthBelfiore(), existing.getGuestBirthBelfiore());
+        String guestDocType = merge(dto.getGuestDocType(), existing.getGuestDocType());
+        String guestDocNumber = merge(dto.getGuestDocNumber(), existing.getGuestDocNumber());
+        String guestCountry = merge(dto.getGuestCountry(), existing.getGuestCountry());
+        String guestAddress = merge(dto.getGuestAddress(), existing.getGuestAddress());
+        String guestPhone = merge(dto.getGuestPhone(), existing.getGuestPhone());
+
+        // CF: se manca sia nel body sia a DB, prova a calcolarlo dai dati anagrafici già
+        // mergiati (come nel flusso import). Un CF già presente non viene mai ricalcolato.
+        String guestTaxCode = merge(dto.getGuestTaxCode(), existing.getGuestTaxCode());
+        String comune = emptyToNull(guestBirthPlace);
+        if (comune == null) comune = emptyToNull(guestBirthBelfiore);
+        if (emptyToNull(guestTaxCode) == null && isNotBlank(guestName)
+                && guestBirthDate != null && emptyToNull(guestSesso) != null && comune != null) {
+            String full = guestName.trim();
             int sp = full.indexOf(' ');
             String cognome = sp < 0 ? full : full.substring(0, sp);
             String nome = sp < 0 ? full : full.substring(sp + 1).trim();
-            taxCode = codiceFiscaleService.calcolaSafe(cognome, nome, birthDate, sesso, comune).orElse(null);
+            guestTaxCode = codiceFiscaleService
+                    .calcolaSafe(cognome, nome, guestBirthDate, guestSesso.trim(), comune)
+                    .orElse(null);
         }
 
         Booking g = Booking.builder()
-                .guestName(dto.getGuestName())
-                .guestTaxCode(taxCode)
-                .guestBirthDate(birthDate)
-                .guestSesso(emptyToNull(dto.getGuestSesso()))
-                .guestBirthPlace(emptyToNull(dto.getGuestBirthPlace()))
-                .guestBirthBelfiore(emptyToNull(dto.getGuestBirthBelfiore()))
-                .guestDocType(emptyToNull(dto.getGuestDocType()))
-                .guestDocNumber(emptyToNull(dto.getGuestDocNumber()))
-                .guestCountry(emptyToNull(dto.getGuestCountry()))
-                .guestAddress(emptyToNull(dto.getGuestAddress()))
-                .guestPhone(emptyToNull(dto.getGuestPhone()))
+                .guestName(guestName)
+                .guestTaxCode(guestTaxCode)
+                .guestBirthDate(guestBirthDate)
+                .guestSesso(guestSesso)
+                .guestBirthPlace(guestBirthPlace)
+                .guestBirthBelfiore(guestBirthBelfiore)
+                .guestDocType(guestDocType)
+                .guestDocNumber(guestDocNumber)
+                .guestCountry(guestCountry)
+                .guestAddress(guestAddress)
+                .guestPhone(guestPhone)
                 .build();
 
+        log.info("BookingService.updateBookingGuest() - id={} merge completato", bookingId);
         bookingDAO.updateGuestAnagrafica(existing.getId(), tenantId, g);
         aggiornaStato(existing.getId());
         log.info("BookingService.updateBookingGuest() - tenantId={} bookingId={}", tenantId, bookingId);
         return findById(tenantId, bookingId);
+    }
+
+    private boolean isNotBlank(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    /** Valore in arrivo se valorizzato, altrimenti quello già a DB: base del merge del PATCH. */
+    private String merge(String nuovo, String esistente) {
+        return isNotBlank(nuovo) ? nuovo.trim() : esistente;
     }
 
     private String emptyToNull(String s) {

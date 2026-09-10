@@ -22,5 +22,10 @@ app:
   security:
     admin-password: ${ADMIN_PASSWORD:CHANGE_ME}
   jwt:
-    secret: CHANGE_ME_USE_A_LONG_RANDOM_SECRET_IN_PRODUCTION
+    # Nessun default: senza APP_JWT_SECRET il context non parte, invece di ripiegare
+    # su un segreto committato e quindi noto a chiunque legga il repository.
+    # Va impostata come variabile d'ambiente nel setenv.sh di Tomcat (il .env della root
+    # non viene letto: avviando con catalina la working directory è bin/).
+    # Generazione: openssl rand -base64 48  — minimo 32 byte, richiesti da HS256.
+    secret: ${APP_JWT_SECRET}
     expiration-ms: 86400000

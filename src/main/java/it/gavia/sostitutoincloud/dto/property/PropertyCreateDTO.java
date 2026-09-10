@@ -20,5 +20,8 @@ public class PropertyCreateDTO {
     private String region;
     private String cinCode;
     private Integer fkOwnerId;
+    // null = lascia decidere al backend (in creazione: primo immobile attivo dell'owner).
+    // Valorizzato = scelta esplicita del PM dal toggle in creazione/modifica.
+    private Boolean primoImmobile;
     private List<OtaCodeDTO> otaCodes;
 }

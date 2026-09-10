@@ -30,6 +30,8 @@ WEB-INF/lib/
 
 # File di configurazione locali (contengono credenziali)
 application-local.yml
+# Override da laptop del profilo test: SPRING_PROFILES_ACTIVE=test,testlocal
+application-testlocal.yml
 
 # Log applicazione
 logs/

@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/properties")
@@ -28,12 +29,36 @@ public class PropertyController {
 
     @GetMapping
     public ResponseEntity<List<PropertyListDTO>> findAll(
-            @RequestParam(required = false) Boolean attivo) {
+            @RequestParam(required = false) Boolean attivo,
+            @RequestParam(required = false) Integer ownerId) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
+        if (ownerId != null) {
+            return ResponseEntity.ok(propertyService.findByOwner(tenantId, ownerId, attivo));
+        }
         if (attivo != null) {
             return ResponseEntity.ok(propertyService.findByTenantIdAndAttivo(tenantId, attivo));
         }
         return ResponseEntity.ok(propertyService.findByTenantId(tenantId));
+    }
+
+    /**
+     * Segnala se il proprietario ha già un altro immobile attivo censito come primo immobile.
+     * excludePropertyId esclude l'immobile in corso di modifica. Avviso informativo per il
+     * frontend: non blocca la creazione né il salvataggio.
+     */
+    @GetMapping("/check-primo-immobile")
+    public ResponseEntity<Map<String, Object>> checkPrimoImmobile(
+            @RequestParam Integer ownerId,
+            @RequestParam(required = false) Integer excludePropertyId) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.debug("PropertyController.checkPrimoImmobile() - tenantId={} ownerId={} excludePropertyId={}",
+                tenantId, ownerId, excludePropertyId);
+        return propertyService.checkPrimoImmobile(tenantId, ownerId, excludePropertyId)
+                .map(p -> ResponseEntity.ok(Map.<String, Object>of(
+                        "exists", true,
+                        "propertyName", p.getDisplayName(),
+                        "propertyId", p.getId())))
+                .orElseGet(() -> ResponseEntity.ok(Map.of("exists", false)));
     }
 
     @GetMapping("/{id}")

@@ -9,9 +9,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Building2, MapPin, User, Hash, Globe, Link2, Power, PowerOff, FileText, Loader2, AlertCircle, Edit } from 'lucide-react';
-import { getPropertyById, updatePropertyStatus, updatePropertyOwner, updatePropertyPrimoImmobile, type PropertyDetail as PropertyDetailType } from '@/api/propertyApi';
+import { getPropertyById, updatePropertyStatus, updatePropertyOwner, updatePropertyPrimoImmobile, checkPrimoImmobile, type PropertyDetail as PropertyDetailType } from '@/api/propertyApi';
 import { getOwnerById, getOwners, type OwnerListItem } from '@/api/ownerApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
+import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useToast } from '@/hooks/use-toast';
 
 const PropertyDetail = () => {
@@ -27,6 +28,18 @@ const PropertyDetail = () => {
   const [showDeactivate, setShowDeactivate] = useState(false);
   const [showAssignOwner, setShowAssignOwner] = useState(false);
   const [selectedOwner, setSelectedOwner] = useState('');
+  // Aliquote ritenuta del tenant: mai hardcodate, arrivano da tenant_settings.
+  const [settings, setSettings] = useState<TenantSettingsDTO | null>(null);
+  // Cambio classificazione in attesa di conferma: null = nessun dialog aperto.
+  // altroImmobile valorizzato solo quando l'owner ha già un altro primo immobile.
+  const [primoImmobilePending, setPrimoImmobilePending] =
+    useState<{ value: boolean; altroImmobile?: string } | null>(null);
+
+  // Le aliquote sono un dettaglio informativo: se la GET fallisce si resta sui default
+  // di legge senza rompere la pagina.
+  useEffect(() => {
+    getSettings().then(setSettings).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -109,16 +122,46 @@ const PropertyDetail = () => {
     }
   };
 
-  const handlePrimoImmobile = async (value: boolean) => {
+  const aliquotaPrimaria = settings?.withholdingRatePrimary ?? 21;
+  const aliquotaSecondaria = settings?.withholdingRateSecondary ?? 26;
+
+  // Scrittura effettiva: eseguita solo dopo la conferma nel dialog.
+  const applyPrimoImmobile = async (value: boolean) => {
     try {
       const updated = await updatePropertyPrimoImmobile(property.id, value);
       setProperty(updated);
       toast({
         title: 'Classificazione aggiornata',
         description: value
-          ? 'Immobile marcato come primo immobile (ritenuta 21%).'
-          : 'Immobile marcato come secondo+ immobile (ritenuta 26%).',
+          ? `Immobile marcato come primo immobile (ritenuta ${aliquotaPrimaria}%).`
+          : `Immobile marcato come secondo+ immobile (ritenuta ${aliquotaSecondaria}%).`,
       });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setPrimoImmobilePending(null);
+    }
+  };
+
+  const handlePrimoImmobile = async (value: boolean) => {
+    // Verso "secondo+": conferma sempre, cambia l'aliquota dei prossimi booking.
+    if (!value) {
+      setPrimoImmobilePending({ value: false });
+      return;
+    }
+    // Verso "primo immobile": conferma solo se l'owner ne ha già un altro
+    // (se stesso escluso). Senza proprietario assegnato non c'è nulla da verificare.
+    if (!property.fkOwnerId) {
+      await applyPrimoImmobile(true);
+      return;
+    }
+    try {
+      const res = await checkPrimoImmobile(property.fkOwnerId, property.id);
+      if (res.exists) {
+        setPrimoImmobilePending({ value: true, altroImmobile: res.propertyName });
+      } else {
+        await applyPrimoImmobile(true);
+      }
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
     }
@@ -156,12 +199,16 @@ const PropertyDetail = () => {
               <div>
                 <span className="text-muted-foreground">Classificazione ritenuta</span>
                 <p className="text-xs text-muted-foreground">
-                  {property.primoImmobile ? 'Primo immobile (21%)' : 'Secondo+ immobile (26%)'}
+                  {property.primoImmobile
+                    ? `Primo immobile (${aliquotaPrimaria}%)`
+                    : `Secondo+ immobile (${aliquotaSecondaria}%)`}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={property.primoImmobile ? 'default' : 'secondary'} className="text-xs">
-                  {property.primoImmobile ? 'Primo immobile (21%)' : 'Secondo+ (26%)'}
+                  {property.primoImmobile
+                    ? `Primo immobile (${aliquotaPrimaria}%)`
+                    : `Secondo+ (${aliquotaSecondaria}%)`}
                 </Badge>
                 <Switch checked={property.primoImmobile} onCheckedChange={handlePrimoImmobile} />
               </div>
@@ -316,6 +363,31 @@ const PropertyDetail = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAssignOwner(false)}>Annulla</Button>
             <Button onClick={handleAssignOwner} disabled={!selectedOwner}>Assegna</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog conferma classificazione ritenuta */}
+      <Dialog
+        open={primoImmobilePending !== null}
+        onOpenChange={open => { if (!open) setPrimoImmobilePending(null); }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {primoImmobilePending?.value ? 'Imposta come primo immobile' : 'Imposta come secondo+ immobile'}
+            </DialogTitle>
+            <DialogDescription>
+              {primoImmobilePending?.value
+                ? `Il proprietario ha già un primo immobile: "${primoImmobilePending.altroImmobile}". Continuando, questo immobile verrà impostato come primo immobile con aliquota ${aliquotaPrimaria}%. Ricorda di aggiornare anche l'altro immobile.`
+                : `Impostare come secondo immobile applicherà la ritenuta al ${aliquotaSecondaria}% sui prossimi booking.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPrimoImmobilePending(null)}>Annulla</Button>
+            <Button onClick={() => primoImmobilePending && applyPrimoImmobile(primoImmobilePending.value)}>
+              Conferma
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
