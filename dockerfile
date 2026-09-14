@@ -22,7 +22,7 @@ RUN mvn dependency:go-offline -q
 COPY . .
 
 # Build con profilo da ARG. Il profilo test/prod:
-#  - builda il frontend React (npm) con base path /sostitutoincloud/
+#  - builda il frontend React (npm) con base path / (prod) o /sostitutoincloud/ (test)
 #  - copia frontend/dist → target/classes/static/
 #  - rinomina config.{env}.json → static/config.json
 #  - rinomina db-{env}.properties → db.properties
@@ -38,11 +38,22 @@ RUN rm -rf /usr/local/tomcat/webapps/*
 # Storage per file persistenti (PDF generati)
 RUN mkdir -p /app/storage/pdf
 
-# Deploya il WAR: Tomcat lo espande sul context /sostitutoincloud
-# (il WAR è l'artefatto completo: classi, lib, frontend, config.json,
+# Deploya il WAR (l'artefatto completo: classi, lib, frontend, config.json,
 #  db.properties, log4j2.xml filtrato — a differenza della cartella
-#  WEB-INF/ del progetto, che è pensata solo per il deploy locale)
-COPY --from=builder /build/target/*.war /usr/local/tomcat/webapps/sostitutoincloud.war
+#  WEB-INF/ del progetto, che è pensata solo per il deploy locale).
+#
+# Il context path su Tomcat standalone deriva dal NOME del WAR, non da
+# server.servlet.context-path (che vale solo per il Tomcat embedded):
+#   prod → ROOT.war             → https://app.sostitutoincloud.it/
+#   test → sostitutoincloud.war → https://.../sostitutoincloud
+# Va riletto lo stesso ARG dello stage 1: i build arg sono per-stage.
+ARG MAVEN_PROFILE=prod
+COPY --from=builder /build/target/*.war /tmp/app.war
+RUN if [ "$MAVEN_PROFILE" = "prod" ]; then \
+        mv /tmp/app.war /usr/local/tomcat/webapps/ROOT.war; \
+    else \
+        mv /tmp/app.war /usr/local/tomcat/webapps/sostitutoincloud.war; \
+    fi
 
 # Volume per i file persistenti
 VOLUME /app/storage

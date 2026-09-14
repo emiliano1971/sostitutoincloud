@@ -1,4 +1,4 @@
 {
-  "apiBaseUrl": "/sostitutoincloud/api",
+  "apiBaseUrl": "/api",
   "environment": "prod"
 }

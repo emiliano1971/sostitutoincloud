@@ -522,9 +522,10 @@
                                 <configuration>
                                     <executable>npm</executable>
                                     <workingDirectory>${project.basedir}/frontend</workingDirectory>
-                                    <!-- Base path = context-path Tomcat: gli asset puntano a /sostitutoincloud/assets/ -->
+                                    <!-- Base path = context-path Tomcat: in prod il WAR è deployato
+                                         come ROOT.war, quindi gli asset puntano a /assets/ -->
                                     <environmentVariables>
-                                        <VITE_BASE_PATH>/sostitutoincloud/</VITE_BASE_PATH>
+                                        <VITE_BASE_PATH>/</VITE_BASE_PATH>
                                     </environmentVariables>
                                     <arguments>
                                         <argument>run</argument>
