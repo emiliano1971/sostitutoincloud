@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.config;
 
+import it.gavia.sostitutoincloud.config.DatabaseUserDetailsService.CustomUserDetails;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -43,9 +44,33 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
                 log.debug("JWT auth OK per: {}", email);
+
+                if (userDetails instanceof CustomUserDetails cud && cud.isMustChangePassword()
+                        && !isConsentitoConCambioPendente(request)) {
+                    log.warn("JwtAuthFilter - accesso negato a {}: cambio password obbligatorio pendente", email);
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write(
+                            "{\"message\":\"Cambio password obbligatorio\",\"mustChangePassword\":true}");
+                    return;
+                }
             }
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Finché l'utente non ha cambiato la password è ammesso solo il minimo indispensabile
+     * per farlo: leggere il proprio profilo e inviare la nuova password. Senza questo blocco
+     * il vincolo sarebbe solo un redirect del frontend, aggirabile con una chiamata diretta.
+     * Le rotte pubbliche restano libere: non dipendono dall'utente autenticato.
+     */
+    private boolean isConsentitoConCambioPendente(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return path.startsWith("/api/public/")
+                || path.equals("/api/auth/me")
+                || path.equals("/api/auth/force-change-password")
+                || !path.startsWith("/api/");
     }
 }

@@ -13,4 +13,7 @@ public class LoginResponseDTO {
 
     private String token;
     private UserMeDTO user;
+    /** Duplicato di user.mustChangePassword: comodo per il frontend che legge la
+     *  risposta di login senza scendere nell'oggetto user. */
+    private Boolean mustChangePassword;
 }

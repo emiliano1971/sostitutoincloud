@@ -4,6 +4,8 @@ import it.gavia.sostitutoincloud.dao.UtenteDAO;
 import it.gavia.sostitutoincloud.model.Utente;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,6 +28,7 @@ public class PasswordResetService {
     private final UtenteDAO utenteDAO;
     private final JavaMailSender mailSender;
     private final PasswordEncoder passwordEncoder;
+    private final Environment environment;
 
     @Value("${app.mail.from}")
     private String mailFrom;
@@ -42,10 +45,12 @@ public class PasswordResetService {
 
     public PasswordResetService(UtenteDAO utenteDAO,
                                 JavaMailSender mailSender,
-                                PasswordEncoder passwordEncoder) {
+                                PasswordEncoder passwordEncoder,
+                                Environment environment) {
         this.utenteDAO = utenteDAO;
         this.mailSender = mailSender;
         this.passwordEncoder = passwordEncoder;
+        this.environment = environment;
     }
 
     /**
@@ -132,10 +137,49 @@ public class PasswordResetService {
         log.info("PasswordResetService.changePassword() - utenteId={}", utenteId);
     }
 
+    /**
+     * Cambio password al primo accesso: NON verifica la password corrente perché
+     * l'utente non conosce quella temporanea assegnata dall'amministratore.
+     * Proprio per questo è vincolato al flag must_change_password: senza il controllo
+     * sarebbe un modo per cambiare la password di chiunque partendo da un token rubato.
+     */
+    public void forceChangePassword(Integer utenteId, String newPassword) {
+        Utente utente = utenteDAO.findById(utenteId)
+                .orElseThrow(() -> new IllegalArgumentException("Utente non trovato"));
+
+        if (!Boolean.TRUE.equals(utente.getMustChangePassword())) {
+            log.warn("PasswordResetService.forceChangePassword() - rifiutata: utenteId={} non ha "
+                    + "must_change_password attivo", utenteId);
+            throw new IllegalArgumentException(
+                    "Cambio forzato non consentito: usa il cambio password ordinario");
+        }
+
+        validateNewPassword(newPassword);
+        // updatePassword riporta must_change_password a false.
+        utenteDAO.updatePassword(utenteId, passwordEncoder.encode(newPassword));
+        log.info("PasswordResetService.forceChangePassword() - utenteId={} password impostata al primo accesso",
+                utenteId);
+    }
+
+    /**
+     * Regole valide per TUTTI i flussi (reset via email, cambio ordinario, cambio forzato).
+     * Fuori dal profilo local si richiede anche un minimo di complessità: in locale i dati
+     * sono fittizi e la regola intralcerebbe solo lo sviluppo, come già per la validazione IBAN.
+     */
     private void validateNewPassword(String newPassword) {
         if (newPassword == null || newPassword.length() < MIN_PASSWORD_LENGTH) {
             throw new IllegalArgumentException(
                     "La password deve essere di almeno " + MIN_PASSWORD_LENGTH + " caratteri");
+        }
+        if (environment.acceptsProfiles(Profiles.of("local"))) {
+            return;
+        }
+        boolean maiuscola = newPassword.chars().anyMatch(Character::isUpperCase);
+        boolean minuscola = newPassword.chars().anyMatch(Character::isLowerCase);
+        boolean cifra = newPassword.chars().anyMatch(Character::isDigit);
+        if (!maiuscola || !minuscola || !cifra) {
+            throw new IllegalArgumentException(
+                    "La password deve contenere almeno una maiuscola, una minuscola e una cifra");
         }
     }
 

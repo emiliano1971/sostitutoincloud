@@ -5,6 +5,7 @@ import it.gavia.sostitutoincloud.config.DatabaseUserDetailsService.CustomUserDet
 import it.gavia.sostitutoincloud.config.JwtUtils;
 import it.gavia.sostitutoincloud.dao.UtenteDAO;
 import it.gavia.sostitutoincloud.dto.auth.ChangePasswordDTO;
+import it.gavia.sostitutoincloud.dto.auth.ForceChangePasswordDTO;
 import it.gavia.sostitutoincloud.dto.auth.LoginRequestDTO;
 import it.gavia.sostitutoincloud.dto.auth.LoginResponseDTO;
 import it.gavia.sostitutoincloud.dto.auth.PasswordResetConfirmDTO;
@@ -58,8 +59,13 @@ public class AuthController {
             Utente utente = utenteDAO.findById(userDetails.getUtenteId())
                     .orElseThrow(() -> new RuntimeException("Utente non trovato"));
             UserMeDTO userDto = buildUserMeDTO(utente);
-            log.info("Login riuscito per: {}", request.getEmail());
-            return ResponseEntity.ok(LoginResponseDTO.builder().token(token).user(userDto).build());
+            boolean mustChange = Boolean.TRUE.equals(utente.getMustChangePassword());
+            log.info("Login riuscito per: {} (mustChangePassword={})", request.getEmail(), mustChange);
+            return ResponseEntity.ok(LoginResponseDTO.builder()
+                    .token(token)
+                    .user(userDto)
+                    .mustChangePassword(mustChange)
+                    .build());
         } catch (DisabledException e) {
             log.warn("Login bloccato - tenant sospeso: {}", request.getEmail());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -124,6 +130,24 @@ public class AuthController {
         }
     }
 
+    /**
+     * Cambio password al primo accesso. Non richiede la password corrente — l'utente
+     * non conosce quella temporanea — ed è per questo consentito SOLO a chi ha
+     * must_change_password = true: la verifica è nel service, non qui.
+     */
+    @PostMapping("/api/auth/force-change-password")
+    public ResponseEntity<?> forceChangePassword(@RequestBody ForceChangePasswordDTO request) {
+        Integer utenteId = SecurityUtils.getCurrentUtenteId();
+        log.info("AuthController.forceChangePassword() - utenteId={}", utenteId);
+        try {
+            passwordResetService.forceChangePassword(utenteId, request.getNewPassword());
+            return ResponseEntity.ok(Map.of("message", "Password aggiornata"));
+        } catch (IllegalArgumentException e) {
+            log.warn("AuthController.forceChangePassword() - rifiutata per utenteId={}: {}", utenteId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
     private UserMeDTO buildUserMeDTO(Utente utente) {
         return UserMeDTO.builder()
                 .id(utente.getId())
@@ -134,6 +158,7 @@ public class AuthController {
                 .firstName(utente.getFirstName())
                 .lastName(utente.getLastName())
                 .attivo(utente.getAttivo())
+                .mustChangePassword(Boolean.TRUE.equals(utente.getMustChangePassword()))
                 .build();
     }
 }

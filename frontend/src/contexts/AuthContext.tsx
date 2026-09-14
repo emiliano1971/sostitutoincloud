@@ -11,11 +11,13 @@ interface UserMeResponse {
   firstName?: string;
   lastName?: string;
   attivo: boolean;
+  mustChangePassword?: boolean;
 }
 
 interface LoginResponse {
   token: string;
   user: UserMeResponse;
+  mustChangePassword?: boolean;
 }
 
 interface AuthContextType {
@@ -26,6 +28,9 @@ interface AuthContextType {
    *  che altrimenti dovrebbe attendere il re-render con lo stato aggiornato. */
   login: (email: string, password: string) => Promise<UserContext>;
   logout: () => void;
+  /** Ricarica l'utente da /auth/me. Serve dopo il cambio password forzato per
+   *  azzerare mustChangePassword senza costringere a un nuovo login. */
+  refreshUser: () => Promise<UserContext | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -39,6 +44,7 @@ function mapToUserContext(me: UserMeResponse): UserContext {
     role: me.ruolo as UserRole,
     tenant_id: me.fkTenantId ? String(me.fkTenantId) : undefined,
     owner_id: me.fkOwnerId ? String(me.fkOwnerId) : undefined,
+    mustChangePassword: me.mustChangePassword === true,
   };
 }
 
@@ -64,7 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await post<LoginResponse>('/public/login', { email, password });
       setToken(response.token);
-      const utente = mapToUserContext(response.user);
+      // Il flag arriva sia a livello di risposta sia dentro user: basta che uno dei due
+      // sia true. Lo stato viene salvato, ma la navigazione la decide il chiamante
+      // (Login) e comunque ProtectedRoute impedisce di uscire da /change-password.
+      const utente = {
+        ...mapToUserContext(response.user),
+        mustChangePassword: response.mustChangePassword === true || response.user.mustChangePassword === true,
+      };
       setUser(utente);
       return utente;
     } catch (err) {
@@ -82,8 +94,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async (): Promise<UserContext | null> => {
+    try {
+      const me = await get<UserMeResponse>('/auth/me');
+      const utente = mapToUserContext(me);
+      setUser(utente);
+      return utente;
+    } catch {
+      return null;
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

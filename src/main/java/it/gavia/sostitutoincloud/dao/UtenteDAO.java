@@ -99,8 +99,9 @@ public class UtenteDAO {
 
     public Utente insert(Utente utente) {
         String sql = "INSERT INTO utente " +
-                     "(fk_tenant_id, email, first_name, last_name, password_hash, ruolo, attivo, fk_owner_id) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                     "(fk_tenant_id, email, first_name, last_name, password_hash, ruolo, attivo, fk_owner_id, " +
+                     "must_change_password) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -112,6 +113,7 @@ public class UtenteDAO {
             ps.setObject(6, utente.getRuolo(), Types.OTHER);
             ps.setBoolean(7, Boolean.TRUE.equals(utente.getAttivo()));
             ps.setObject(8, utente.getFkOwnerId());
+            ps.setBoolean(9, Boolean.TRUE.equals(utente.getMustChangePassword()));
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();

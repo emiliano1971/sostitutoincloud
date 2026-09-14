@@ -25,8 +25,8 @@ public class DatabaseUserDetailsService implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        String sql = "SELECT id, email, password_hash, ruolo, fk_tenant_id, fk_owner_id, attivo " +
-                     "FROM utente WHERE email = ?";
+        String sql = "SELECT id, email, password_hash, ruolo, fk_tenant_id, fk_owner_id, attivo, " +
+                     "must_change_password FROM utente WHERE email = ?";
 
         List<CustomUserDetails> results = jdbcTemplate.query(sql, (rs, rowNum) -> {
             Integer id = rs.getInt("id");
@@ -35,10 +35,12 @@ public class DatabaseUserDetailsService implements UserDetailsService {
             Integer fkTenantId = rs.getObject("fk_tenant_id", Integer.class);
             Integer fkOwnerId = rs.getObject("fk_owner_id", Integer.class);
             boolean attivo = rs.getBoolean("attivo");
+            boolean mustChangePassword = rs.getBoolean("must_change_password");
 
             GrantedAuthority authority = new SimpleGrantedAuthority(mapRuoloToRole(ruolo));
 
-            return new CustomUserDetails(email, pwd, List.of(authority), fkTenantId, id, fkOwnerId, attivo);
+            return new CustomUserDetails(email, pwd, List.of(authority), fkTenantId, id, fkOwnerId, attivo,
+                    mustChangePassword);
         }, email);
 
         if (results.isEmpty()) {
@@ -86,14 +88,21 @@ public class DatabaseUserDetailsService implements UserDetailsService {
         private final Integer tenantId;
         private final Integer utenteId;
         private final Integer ownerId;
+        private final boolean mustChangePassword;
 
         public CustomUserDetails(String username, String password,
                                   Collection<? extends GrantedAuthority> authorities,
-                                  Integer tenantId, Integer utenteId, Integer ownerId, boolean enabled) {
+                                  Integer tenantId, Integer utenteId, Integer ownerId, boolean enabled,
+                                  boolean mustChangePassword) {
             super(username, password, enabled, true, true, true, authorities);
             this.tenantId = tenantId;
             this.utenteId = utenteId;
             this.ownerId = ownerId;
+            this.mustChangePassword = mustChangePassword;
+        }
+
+        public boolean isMustChangePassword() {
+            return mustChangePassword;
         }
 
         public Integer getTenantId() {

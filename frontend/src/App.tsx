@@ -10,6 +10,7 @@ import { OwnerLayout } from "@/components/OwnerLayout";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import ChangePassword from "./pages/ChangePassword";
 import NotFound from "./pages/NotFound";
 
 // Admin pages
@@ -76,6 +77,10 @@ function ProtectedRoute({ children, allow }: { children: React.ReactNode; allow:
   // isAuthenticated è false e si finirebbe su /login perdendo la pagina corrente.
   if (isLoading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Cambio password al primo accesso: finché il flag è attivo nessun'altra pagina è
+  // raggiungibile, nemmeno digitando l'URL. Il vincolo vero è comunque lato server —
+  // JwtAuthFilter respinge ogni API tranne /auth/me e /auth/force-change-password.
+  if (user?.mustChangePassword) return <Navigate to="/change-password" replace />;
   const role = user?.role;
   if (role && !allow.includes(role)) {
     return <Navigate to={HOME_BY_ROLE[role] ?? '/dashboard'} replace />;
@@ -89,6 +94,13 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to={user?.role === 'super_admin' ? '/admin' : user?.role === 'owner_user' ? '/owner' : '/dashboard'} replace /> : <Login />} />
+
+      {/* Cambio password obbligatorio: richiede solo l'autenticazione, NON passa da
+          ProtectedRoute — sarebbe un ciclo di redirect verso se stessa. */}
+      <Route
+        path="/change-password"
+        element={isAuthenticated ? <ChangePassword /> : <Navigate to="/login" replace />}
+      />
 
       {/* Super Admin */}
       <Route path="/admin" element={<ProtectedRoute allow={['super_admin']}><DashboardLayout /></ProtectedRoute>}>

@@ -31,6 +31,13 @@ const Login = () => {
       // login() restituisce l'utente: il redirect usa il ruolo reale e non deve
       // attendere il re-render del context.
       const utente = await login(email, password);
+      // Primo accesso: si va direttamente al cambio password. ProtectedRoute farebbe
+      // comunque da rete di sicurezza, ma passare dalla dashboard mostrerebbe un lampo
+      // di pagina vuota (il backend respinge già tutte le sue chiamate).
+      if (utente.mustChangePassword) {
+        navigate('/change-password', { replace: true });
+        return;
+      }
       toast({ title: 'Accesso effettuato', description: 'Benvenuto in Sostituto in Cloud' });
       switch (utente.role) {
         case 'super_admin':

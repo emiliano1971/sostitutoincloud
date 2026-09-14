@@ -102,6 +102,9 @@ public class UserManagementService {
                 .ruolo(ruolo)
                 .attivo(true)
                 .fkOwnerId(fkOwnerId)
+                // La password è scelta dall'amministratore che crea l'utente: è temporanea,
+                // va sostituita dall'interessato al primo accesso.
+                .mustChangePassword(true)
                 .build();
 
         Utente saved = utenteDAO.insert(utente);

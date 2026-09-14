@@ -21,3 +21,12 @@ export async function confirmPasswordReset(token: string, newPassword: string): 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<MessageResponse> {
   return post<MessageResponse>('/auth/change-password', { currentPassword, newPassword });
 }
+
+/**
+ * Cambio password al primo accesso: non serve quella corrente perché l'utente non
+ * conosce la temporanea assegnata dall'amministratore. 400 se l'utente non ha il
+ * flag must_change_password attivo o se la nuova password non rispetta i requisiti.
+ */
+export async function forceChangePassword(newPassword: string): Promise<MessageResponse> {
+  return post<MessageResponse>('/auth/force-change-password', { newPassword });
+}

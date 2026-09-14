@@ -200,4 +200,6 @@ export interface UserContext {
   tenant_id?: string;
   tenant_name?: string;
   owner_id?: string;
+  /** true = l'utente deve impostare una nuova password prima di usare l'applicazione. */
+  mustChangePassword?: boolean;
 }
