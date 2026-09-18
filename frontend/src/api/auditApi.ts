@@ -11,6 +11,8 @@ export interface AuditLogItem {
   details: string;
   ipAddress?: string;
   createdAt: string;
+  /** Valorizzato solo nella vista globale del super_admin; assente per i log del proprio tenant. */
+  tenantDisplayName?: string;
 }
 
 export async function getAuditLog(params?: {

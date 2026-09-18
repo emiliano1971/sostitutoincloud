@@ -23,4 +23,6 @@ public class AuditLogDTO {
     private String details;
     private String ipAddress;
     private LocalDateTime createdAt;
+    /** Valorizzato solo nella vista globale del super_admin; null per i log del proprio tenant. */
+    private String tenantDisplayName;
 }

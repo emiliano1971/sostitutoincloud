@@ -128,6 +128,31 @@ export async function deleteBooking(id: number): Promise<void> {
   await del<unknown>(`/bookings/${id}`);
 }
 
+export interface BookingCreateRequest {
+  fkPropertyId: number;
+  fkCanaleOtaId?: number;
+  externalBookingId?: string;
+  checkinDate: string;
+  checkoutDate: string;
+  guests: number;
+  grossAmount: number;
+  guestName: string;
+  guestTaxCode?: string;
+  guestBirthDate?: string;
+  guestSesso?: string;
+  guestBirthPlace?: string;
+  guestDocType?: string;
+  guestDocNumber?: string;
+  guestCountry?: string;
+  guestAddress?: string;
+  guestPhone?: string;
+}
+
+/** Inserimento manuale. Split economico, ritenuta e stato sono calcolati dal backend. */
+export async function createBooking(data: BookingCreateRequest): Promise<BookingDetail> {
+  return post<BookingDetail>('/bookings', data);
+}
+
 export interface GuestUpdateRequest {
   guestName: string;
   guestTaxCode?: string;

@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.controller;
 
+import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
@@ -99,6 +100,23 @@ public class BookingController {
                 .size(size)
                 .build();
         return ResponseEntity.ok(bookingService.findByTenantId(tenantId, filter));
+    }
+
+    /**
+     * Inserimento manuale di una prenotazione. L'accesso per ruolo è già filtrato dalla
+     * SecurityChain su /api/bookings/** (tenant_admin, pm_user, super_admin).
+     */
+    @PostMapping
+    public ResponseEntity<?> create(@RequestBody BookingCreateDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            BookingDetailDTO created = bookingService.createManuale(tenantId, dto);
+            log.info("BookingController.create() - tenantId={} bookingId={}", tenantId, created.getId());
+            return ResponseEntity.status(HttpStatus.CREATED).body(created);
+        } catch (IllegalArgumentException e) {
+            log.warn("BookingController.create() - tenantId={} richiesta non valida: {}", tenantId, e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
     }
 
     @GetMapping("/{id}")

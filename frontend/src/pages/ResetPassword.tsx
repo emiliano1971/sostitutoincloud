@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import PasswordInput from '@/components/PasswordInput';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
@@ -9,8 +9,7 @@ import appLogoIcon from '@/assets/logo-icon.png';
 import loginBg from '@/assets/login-bg.jpg';
 import { confirmPasswordReset } from '@/api/authApi';
 import { toast } from '@/hooks/use-toast';
-
-const MIN_PASSWORD_LENGTH = 8;
+import { MIN_PASSWORD_LENGTH } from '@/lib/passwordUtils';
 
 const ResetPassword = () => {
   const [searchParams] = useSearchParams();
@@ -56,7 +55,7 @@ const ResetPassword = () => {
   if (!token) return null;
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative" style={{ backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+    <div className="min-h-screen flex items-center justify-center p-4 pb-24 relative" style={{ backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
       <div className="w-full max-w-md space-y-8 relative z-10">
         <div className="flex flex-col items-center gap-2">
@@ -74,9 +73,8 @@ const ResetPassword = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="new-password">Nuova password</Label>
-                <Input
+                <PasswordInput
                   id="new-password"
-                  type="password"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="••••••••"
@@ -86,9 +84,8 @@ const ResetPassword = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Conferma password</Label>
-                <Input
+                <PasswordInput
                   id="confirm-password"
-                  type="password"
                   value={confirmPwd}
                   onChange={e => setConfirmPwd(e.target.value)}
                   placeholder="••••••••"

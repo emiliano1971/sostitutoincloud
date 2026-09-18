@@ -89,7 +89,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Il JWT è stateless: la chiamata serve solo a registrare l'uscita nell'audit.
+    // Un errore non deve impedire il logout lato client, quindi viene ignorato.
+    await post('/auth/logout', {}).catch(() => {});
     clearToken();
     setUser(null);
   }, []);

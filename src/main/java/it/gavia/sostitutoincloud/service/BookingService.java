@@ -13,6 +13,7 @@ import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
+import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
@@ -37,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -270,6 +272,149 @@ public class BookingService {
 
     private String emptyToNull(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    // ── inserimento manuale ─────────────────────────────────────────────────
+
+    /**
+     * Crea una prenotazione digitata a mano dall'operatore (POST /api/bookings).
+     *
+     * <p>Segue lo stesso percorso dell'import da file: split economico dalle regole del
+     * contratto, tassa di soggiorno dal comune dell'immobile, stato risolto da
+     * {@link #aggiornaStato(Integer)}. Dal client arrivano solo i dati digitati —
+     * ogni importo derivato è calcolato qui.
+     */
+    @Transactional
+    public BookingDetailDTO createManuale(Integer tenantId, BookingCreateDTO dto) {
+        // 1. Validazioni
+        if (dto.getFkPropertyId() == null) {
+            throw new IllegalArgumentException("Immobile obbligatorio");
+        }
+        if (dto.getCheckinDate() == null || dto.getCheckoutDate() == null) {
+            throw new IllegalArgumentException("Check-in e check-out sono obbligatori");
+        }
+        if (!dto.getCheckinDate().isBefore(dto.getCheckoutDate())) {
+            throw new IllegalArgumentException("Check-out deve essere dopo check-in");
+        }
+        if (dto.getGrossAmount() == null || dto.getGrossAmount().signum() <= 0) {
+            throw new IllegalArgumentException("Il lordo ospite deve essere maggiore di zero");
+        }
+        if (dto.getGuests() == null || dto.getGuests() < 1) {
+            throw new IllegalArgumentException("Il numero di ospiti deve essere almeno 1");
+        }
+        if (!isNotBlank(dto.getGuestName())) {
+            throw new IllegalArgumentException("Nome ospite obbligatorio");
+        }
+
+        Property property = propertyDAO.findById(dto.getFkPropertyId())
+                .filter(p -> tenantId.equals(p.getFkTenantId()))
+                .orElseThrow(() -> new IllegalArgumentException("Immobile non trovato"));
+
+        int nights = (int) ChronoUnit.DAYS.between(dto.getCheckinDate(), dto.getCheckoutDate());
+
+        // 2. ID esterno: quello digitato oppure generato
+        String extId = isNotBlank(dto.getExternalBookingId())
+                ? dto.getExternalBookingId().trim()
+                : "MAN-" + System.currentTimeMillis();
+
+        // Il vincolo uq_external_booking (tenant, canale, external_id) scatterebbe come
+        // errore SQL opaco: intercettiamo prima per restituire un 400 leggibile.
+        if (bookingDAO.findByExternalBookingId(extId, tenantId, dto.getFkCanaleOtaId()).isPresent()) {
+            throw new IllegalArgumentException("Esiste già una prenotazione con ID " + extId + " su questo canale");
+        }
+
+        // 3. CF ospite: mai ricalcolato se già digitato. Il nome completo è "Cognome Nome",
+        //    stessa convenzione di updateBookingGuest() e di GuestEditDialog lato frontend.
+        String cf = emptyToNull(dto.getGuestTaxCode());
+        if (cf == null && dto.getGuestBirthDate() != null
+                && emptyToNull(dto.getGuestSesso()) != null
+                && emptyToNull(dto.getGuestBirthPlace()) != null) {
+            String full = dto.getGuestName().trim();
+            int sp = full.indexOf(' ');
+            String cognome = sp < 0 ? full : full.substring(0, sp);
+            String nome = sp < 0 ? full : full.substring(sp + 1).trim();
+            cf = codiceFiscaleService.calcolaSafe(cognome, nome, dto.getGuestBirthDate(),
+                    dto.getGuestSesso().trim(), dto.getGuestBirthPlace().trim()).orElse(null);
+        }
+
+        // 4. Split economico dalle regole del contratto. Nessun override di commissione OTA:
+        //    l'inserimento manuale non ha un dato reale del canale da cui partire.
+        ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
+                tenantId,
+                dto.getFkPropertyId(),
+                dto.getFkCanaleOtaId(),
+                dto.getGrossAmount(),
+                null,
+                nights,
+                dto.getGuests());
+
+        if (calcolo.getWarnings() != null && !calcolo.getWarnings().isEmpty()) {
+            calcolo.getWarnings().forEach(w ->
+                    log.warn("BookingService.createManuale() - booking {}: {}", extId, w));
+        }
+
+        // 5. Tassa di soggiorno: non inclusa nel lordo digitato dall'operatore.
+        BigDecimal touristTax = touristTaxService.calcolaPerBooking(
+                tenantId, property.getCity(), dto.getCheckinDate(), nights, dto.getGuests(), false);
+
+        // 6. Modalità di riscossione della tassa: dal canale se indicato, altrimenti contanti
+        //    (stesso fallback dell'import). La colonna è NOT NULL.
+        String touristTaxCollection = dto.getFkCanaleOtaId() != null
+                ? canaleOtaDAO.findById(dto.getFkCanaleOtaId())
+                        .map(CanaleOta::getTouristTaxCollection)
+                        .filter(this::isNotBlank)
+                        .orElse("contanti")
+                : "contanti";
+
+        Booking booking = Booking.builder()
+                .fkTenantId(tenantId)
+                .fkPropertyId(dto.getFkPropertyId())
+                .fkCanaleOtaId(dto.getFkCanaleOtaId())
+                .fkOwnerId(property.getFkOwnerId())
+                .externalBookingId(extId)
+                .checkinDate(dto.getCheckinDate())
+                .checkoutDate(dto.getCheckoutDate())
+                .nights(nights)
+                .guests(dto.getGuests())
+                .grossAmount(dto.getGrossAmount())
+                .otaCommissionAmount(calcolo.getOtaCommissionAmount())
+                .cleaningAmount(calcolo.getCleaningAmount())
+                .pmFeeAmount(calcolo.getPmFeeAmount())
+                .ownerNetAmount(calcolo.getOwnerNetAmount())
+                .withholdingAmount(calcolo.getWithholdingAmount())
+                .aliquotaRitenuta(calcolo.getAliquotaRitenuta())
+                .touristTaxAmount(touristTax)
+                .touristTaxIncludedInGross(false)
+                .touristTaxCollection(touristTaxCollection)
+                .guestName(dto.getGuestName().trim())
+                .guestTaxCode(cf)
+                .guestBirthDate(dto.getGuestBirthDate())
+                .guestSesso(emptyToNull(dto.getGuestSesso()))
+                .guestBirthPlace(emptyToNull(dto.getGuestBirthPlace()))
+                .guestDocType(emptyToNull(dto.getGuestDocType()))
+                .guestDocNumber(emptyToNull(dto.getGuestDocNumber()))
+                .guestCountry(emptyToNull(dto.getGuestCountry()))
+                .guestAddress(emptyToNull(dto.getGuestAddress()))
+                .guestPhone(emptyToNull(dto.getGuestPhone()))
+                // Colonne NOT NULL senza valore derivato: l'INSERT le scrive sempre,
+                // quindi il DEFAULT dello schema non entrerebbe mai in gioco.
+                .fkStatoPrenotazioneId(BookingDAO.STATO_IMPORTED)
+                .paymentStatus("pending")
+                .settlementStatus("pending")
+                .build();
+
+        Booking saved = bookingDAO.insert(booking);
+
+        // 7. Stato reale dai dati disponibili (imported / enriched / ready), come all'import.
+        aggiornaStato(saved.getId());
+
+        auditService.log("booking.create.manual", "Booking", saved.getId(),
+                "Inserimento manuale: " + extId);
+
+        BookingDetailDTO result = findById(tenantId, saved.getId())
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato dopo l'inserimento: id=" + saved.getId()));
+        log.info("BookingService.createManuale() - id={} stato={}", result.getId(), result.getStatoPrenotazione());
+        return result;
     }
 
     /**

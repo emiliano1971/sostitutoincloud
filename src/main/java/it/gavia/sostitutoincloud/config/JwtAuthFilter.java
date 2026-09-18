@@ -71,6 +71,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         return path.startsWith("/api/public/")
                 || path.equals("/api/auth/me")
                 || path.equals("/api/auth/force-change-password")
+                // Uscire deve restare sempre possibile, altrimenti chi ha il cambio
+                // pendente resterebbe senza logout e senza la relativa riga di audit.
+                || path.equals("/api/auth/logout")
                 || !path.startsWith("/api/");
     }
 }

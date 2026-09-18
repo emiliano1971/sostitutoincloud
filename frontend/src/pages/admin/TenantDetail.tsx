@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import PasswordInput from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -501,12 +502,14 @@ const TenantDetail = () => {
               </div>
             </div>
             <div className="space-y-1">
-              <Label>Password * (min 8 caratteri)</Label>
-              <Input
-                type="password"
+              <Label>Password *</Label>
+              <PasswordInput
                 value={adminForm.password}
                 onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))}
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                Minimo 8 caratteri. L'utente dovrà cambiare la password al primo accesso.
+              </p>
             </div>
           </div>
 

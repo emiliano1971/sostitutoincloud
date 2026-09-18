@@ -33,7 +33,9 @@ const tenantMainNav = [
   { title: 'Anagrafica OTA', url: '/ota', icon: Globe },
   { title: 'Tassa di Soggiorno', url: '/tourist-tax', icon: MapPin },
   { title: 'Configurazione', url: '/settings', icon: Settings },
-  { title: 'Audit Log', url: '/audit', icon: ScrollText },
+  // Voce nascosta dal menu: l'audit resta raggiungibile via URL diretto /audit
+  // e l'endpoint /api/audit-log è ancora aperto a tenant_admin.
+  // { title: 'Audit Log', url: '/audit', icon: ScrollText },
 ];
 
 const tenantAccountingNav = [

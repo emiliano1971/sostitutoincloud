@@ -27,7 +27,10 @@ public class AuditLogController {
             @RequestParam(required = false) String entity,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
-        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        // Il super_admin non ha un proprio tenant: null = vista globale su tutti i tenant.
+        // La scelta è sul ruolo e non sul fk_tenant_id, così un utente senza tenant per
+        // errore di configurazione non ottiene una vista che non gli spetta.
+        Integer tenantId = SecurityUtils.hasRole("SUPER_ADMIN") ? null : SecurityUtils.getCurrentTenantId();
         return ResponseEntity.ok(auditLogService.findByTenantId(tenantId, q, action, entity, page, size));
     }
 }

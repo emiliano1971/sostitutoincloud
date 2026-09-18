@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import PasswordInput from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -264,8 +265,10 @@ const UsersList = () => {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={form.password} onChange={e => update('password', e.target.value)} />
-              <p className="text-xs text-muted-foreground">Minimo 8 caratteri.</p>
+              <PasswordInput id="password" value={form.password} onChange={e => update('password', e.target.value)} />
+              <p className="text-xs text-muted-foreground mt-1">
+                Minimo 8 caratteri. L'utente dovrà cambiare la password al primo accesso.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Ruolo</Label>

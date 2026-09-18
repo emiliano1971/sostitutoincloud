@@ -55,6 +55,17 @@ public class AuditLogDAO {
         return jdbcTemplate.query(sql, auditLogRowMapper, tenantId, limit);
     }
 
+    /**
+     * Vista globale su tutti i tenant — solo per il super_admin, che non ha un proprio
+     * tenant. Senza questa query un tenantId null cadrebbe su "fk_tenant_id = NULL",
+     * che in SQL non è mai vero e restituirebbe zero righe.
+     */
+    public List<AuditLog> findAllOrderByCreatedAtDesc(Integer limit) {
+        log.debug("AuditLogDAO.findAllOrderByCreatedAtDesc() - limit={}", limit);
+        String sql = SELECT_ALL + " ORDER BY created_at DESC LIMIT ?";
+        return jdbcTemplate.query(sql, auditLogRowMapper, limit);
+    }
+
     public AuditLog insert(AuditLog entry) {
         String sql = "INSERT INTO audit_log " +
                      "(fk_tenant_id, fk_utente_id, user_email, action, entity_type, entity_id, details, ip_address) " +

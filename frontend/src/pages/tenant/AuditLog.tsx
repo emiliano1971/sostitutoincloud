@@ -18,9 +18,17 @@ const ENTITA_FILTER = [
   { value: 'RegolaTassaSoggiorno', label: 'Tassa Soggiorno' },
 ];
 
+// Il backend filtra le azioni per prefisso (AuditLogService: action.startsWith),
+// quindi "auth." raccoglie tutti gli eventi di accesso.
+const AZIONE_FILTER = [
+  { value: 'auth.', label: 'Accessi' },
+  { value: 'auth.login_failed', label: 'Login falliti' },
+];
+
 const AuditLog = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const entityFilter = searchParams.get('entity') ?? 'all';
+  const actionFilter = searchParams.get('action') ?? 'all';
   const [search, setSearch] = useState('');
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,17 +43,27 @@ const AuditLog = () => {
     });
   };
 
+  const setActionFilter = (value: string) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (value === 'all') next.delete('action');
+      else next.set('action', value);
+      return next;
+    });
+  };
+
   useEffect(() => {
     setIsLoading(true);
     setError(null);
     getAuditLog({
       q: search || undefined,
       entity: entityFilter !== 'all' ? entityFilter : undefined,
+      action: actionFilter !== 'all' ? actionFilter : undefined,
     })
       .then(setLogs)
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
-  }, [search, entityFilter]);
+  }, [search, entityFilter, actionFilter]);
 
   return (
     <div className="space-y-6">
@@ -67,6 +85,15 @@ const AuditLog = () => {
                 <SelectItem value="all">Tutte le entità</SelectItem>
                 {ENTITA_FILTER.map(e => (
                   <SelectItem key={e.value} value={e.value}>{e.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={actionFilter} onValueChange={setActionFilter}>
+              <SelectTrigger className="w-[180px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tutte le azioni</SelectItem>
+                {AZIONE_FILTER.map(a => (
+                  <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -105,6 +132,11 @@ const AuditLog = () => {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
+                    {/* Solo nella vista globale del super_admin: il backend valorizza
+                        tenantDisplayName unicamente lì, quindi non serve il ruolo qui. */}
+                    {log.tenantDisplayName && (
+                      <Badge className="text-[10px]">{log.tenantDisplayName}</Badge>
+                    )}
                     <Badge variant="outline" className="text-[10px]">{log.action}</Badge>
                     <Badge variant="secondary" className="text-[10px]">{log.entityType}</Badge>
                   </div>

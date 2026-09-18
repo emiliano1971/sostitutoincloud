@@ -118,6 +118,9 @@ public class PasswordResetService {
         }
 
         validateNewPassword(newPassword);
+        // L'hash va letto a parte: SELECT_COLS di UtenteDAO non espone password_hash,
+        // quindi utente.getPasswordHash() qui sarebbe sempre null.
+        assertDiversaDallaCorrente(utenteDAO.findPasswordHashById(utente.getId()).orElse(null), newPassword);
         utenteDAO.updatePassword(utente.getId(), passwordEncoder.encode(newPassword));
         log.info("PasswordResetService.confirmReset() - utenteId={}", utente.getId());
     }
@@ -133,6 +136,7 @@ public class PasswordResetService {
         }
 
         validateNewPassword(newPassword);
+        assertDiversaDallaCorrente(currentHash, newPassword);
         utenteDAO.updatePassword(utenteId, passwordEncoder.encode(newPassword));
         log.info("PasswordResetService.changePassword() - utenteId={}", utenteId);
     }
@@ -155,6 +159,9 @@ public class PasswordResetService {
         }
 
         validateNewPassword(newPassword);
+        // L'hash va letto a parte: SELECT_COLS di UtenteDAO non espone password_hash,
+        // quindi utente.getPasswordHash() qui sarebbe sempre null.
+        assertDiversaDallaCorrente(utenteDAO.findPasswordHashById(utenteId).orElse(null), newPassword);
         // updatePassword riporta must_change_password a false.
         utenteDAO.updatePassword(utenteId, passwordEncoder.encode(newPassword));
         log.info("PasswordResetService.forceChangePassword() - utenteId={} password impostata al primo accesso",
@@ -180,6 +187,17 @@ public class PasswordResetService {
         if (!maiuscola || !minuscola || !cifra) {
             throw new IllegalArgumentException(
                     "La password deve contenere almeno una maiuscola, una minuscola e una cifra");
+        }
+    }
+
+    /**
+     * Impedisce di reimpostare la password già in uso. Vale per tutti i flussi (reset via
+     * email, cambio ordinario, cambio forzato): il confronto è sull'hash a DB, quindi
+     * richiede la password in chiaro appena ricevuta, prima della codifica.
+     */
+    private void assertDiversaDallaCorrente(String currentHash, String newPassword) {
+        if (currentHash != null && passwordEncoder.matches(newPassword, currentHash)) {
+            throw new IllegalArgumentException("La nuova password non può essere uguale a quella attuale");
         }
     }
 

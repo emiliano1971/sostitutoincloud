@@ -2,51 +2,19 @@ import { useState } from 'react';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import PasswordInput from '@/components/PasswordInput';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, Check, Loader2, X } from 'lucide-react';
 import { changePassword } from '@/api/authApi';
 import { getConfig } from '@/config/AppConfig';
 import { toast } from '@/hooks/use-toast';
-
-const MIN_PASSWORD_LENGTH = 8;
-const SPECIAL_CHARS = /[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/;
+import { MIN_PASSWORD_LENGTH, checkPassword } from '@/lib/passwordUtils';
 
 interface ChangePasswordDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-interface PasswordStrength {
-  hasMinLength: boolean;
-  hasUppercase: boolean;
-  hasLowercase: boolean;
-  hasNumber: boolean;
-  hasSpecial: boolean;
-  isValid: boolean;
-}
-
-/**
- * In locale vale solo la lunghezza minima, così le password di test restano semplici;
- * negli altri ambienti servono tutti i requisiti.
- */
-const checkPassword = (pwd: string, isLocal: boolean): PasswordStrength => {
-  const hasMinLength = pwd.length >= MIN_PASSWORD_LENGTH;
-  const hasUppercase = /[A-Z]/.test(pwd);
-  const hasLowercase = /[a-z]/.test(pwd);
-  const hasNumber = /[0-9]/.test(pwd);
-  const hasSpecial = SPECIAL_CHARS.test(pwd);
-  return {
-    hasMinLength,
-    hasUppercase,
-    hasLowercase,
-    hasNumber,
-    hasSpecial,
-    isValid: hasMinLength
-      && (isLocal || (hasUppercase && hasLowercase && hasNumber && hasSpecial)),
-  };
-};
 
 /** Riga del banner requisiti: grigia a campo vuoto, poi verde se soddisfatta e rossa se no. */
 function Requisito({ ok, vuoto, testo }: { ok: boolean; vuoto: boolean; testo: string }) {
@@ -77,8 +45,16 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
   const strength = checkPassword(newPassword, isLocal);
   const passwordsMatch = newPassword === confirmPwd;
   const campoVuoto = newPassword.length === 0;
+  // A campi entrambi vuoti il confronto sarebbe vero: il length > 0 evita di mostrare
+  // l'avviso prima ancora che l'utente digiti.
+  const stessaPassword = newPassword.length > 0 && newPassword === currentPassword;
   // Il banner compare solo fuori dal locale, e solo con campo attivo o già compilato.
   const mostraRequisiti = !isLocal && (newPwdFocused || !campoVuoto);
+
+  // Il pulsante è disabilitato in questo caso, quindi handleSubmit non scatterebbe mai:
+  // l'avviso va derivato dallo stato o resterebbe invisibile.
+  const messaggioErrore = error
+    || (stessaPassword ? 'La nuova password non può essere uguale a quella attuale' : '');
 
   const reset = () => {
     setCurrentPassword(''); setNewPassword(''); setConfirmPwd('');
@@ -102,6 +78,10 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
     }
     if (!passwordsMatch) {
       setError('Le due nuove password non coincidono');
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setError('La nuova password non può essere uguale a quella attuale');
       return;
     }
 
@@ -133,9 +113,8 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="cp-current">Password corrente</Label>
-            <Input
+            <PasswordInput
               id="cp-current"
-              type="password"
               value={currentPassword}
               onChange={e => setCurrentPassword(e.target.value)}
               placeholder="••••••••"
@@ -144,9 +123,8 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
           </div>
           <div className="space-y-2">
             <Label htmlFor="cp-new">Nuova password</Label>
-            <Input
+            <PasswordInput
               id="cp-new"
-              type="password"
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               onFocus={() => setNewPwdFocused(true)}
@@ -175,9 +153,8 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
           </div>
           <div className="space-y-2">
             <Label htmlFor="cp-confirm">Conferma nuova password</Label>
-            <Input
+            <PasswordInput
               id="cp-confirm"
-              type="password"
               value={confirmPwd}
               onChange={e => setConfirmPwd(e.target.value)}
               placeholder="••••••••"
@@ -185,10 +162,10 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
             />
           </div>
 
-          {error && (
+          {messaggioErrore && (
             <div className="flex items-center gap-2 text-destructive text-sm">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{error}</span>
+              <span>{messaggioErrore}</span>
             </div>
           )}
 
@@ -198,7 +175,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
             </Button>
             <Button
               type="submit"
-              disabled={loading || !currentPassword || !strength.isValid || !passwordsMatch}
+              disabled={loading || !currentPassword || !strength.isValid || !passwordsMatch || stessaPassword}
             >
               {loading ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Aggiornamento…</>

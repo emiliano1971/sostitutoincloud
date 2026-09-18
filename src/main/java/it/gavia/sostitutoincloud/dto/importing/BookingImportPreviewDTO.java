@@ -22,4 +22,6 @@ public class BookingImportPreviewDTO {
     private Integer excludedCount;   // righe escluse perché cancellate (STATO)
     private List<BookingImportPreviewRowDTO> rows;
     private String importSessionId;
+    /** Avvisi sull'anteprima nel suo complesso (es. colonne non mappate), non sulla singola riga. */
+    private List<String> warnings;
 }

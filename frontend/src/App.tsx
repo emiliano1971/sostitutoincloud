@@ -22,6 +22,7 @@ import TenantDetail from "./pages/admin/TenantDetail";
 // Tenant pages
 import TenantDashboard from "./pages/tenant/TenantDashboard";
 import BookingsList from "./pages/tenant/BookingsList";
+import BookingNew from "./pages/tenant/BookingNew";
 import BookingDetail from "./pages/tenant/BookingDetail";
 import OwnersList from "./pages/tenant/OwnersList";
 import OwnerCreate from "./pages/tenant/OwnerCreate";
@@ -116,6 +117,8 @@ function AppRoutes() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<TenantDashboard />} />
         <Route path="bookings" element={<BookingsList />} />
+        {/* Deve precedere bookings/:id, altrimenti "new" verrebbe letto come id */}
+        <Route path="bookings/new" element={<BookingNew />} />
         <Route path="bookings/:id" element={<BookingDetail />} />
         <Route path="owners" element={<OwnersList />} />
         <Route path="owners/new" element={<OwnerCreate />} />

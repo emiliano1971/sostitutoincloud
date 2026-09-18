@@ -25,12 +25,24 @@ public class AuditService {
      */
     public void log(String azione, String entita, Integer entitaId, String descrizione,
                     Integer tenantId, Integer utenteId, String ipAddress) {
+        log(azione, entita, entitaId, descrizione, tenantId, utenteId, ipAddress, null);
+    }
+
+    /**
+     * Variante con email esplicita, per gli eventi che avvengono FUORI da un contesto di
+     * sicurezza già popolato — il login su tutti: lì getCurrentUserEmail() cadrebbe sul
+     * placeholder "system" e la colonna user_email diventerebbe inutile per la ricerca.
+     */
+    public void log(String azione, String entita, Integer entitaId, String descrizione,
+                    Integer tenantId, Integer utenteId, String ipAddress, String userEmail) {
         try {
-            String email;
-            try {
-                email = SecurityUtils.getCurrentUserEmail();
-            } catch (Exception e) {
-                email = SYSTEM;
+            String email = userEmail;
+            if (email == null || email.isBlank()) {
+                try {
+                    email = SecurityUtils.getCurrentUserEmail();
+                } catch (Exception e) {
+                    email = SYSTEM;
+                }
             }
             AuditLog entry = AuditLog.builder()
                     .fkTenantId(tenantId)

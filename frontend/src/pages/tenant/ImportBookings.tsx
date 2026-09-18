@@ -619,6 +619,19 @@ const ImportBookings = () => {
               )}
             </div>
 
+            {/* Avvisi sull'intero import (es. colonne non mappate): riguardano il mapping,
+                non le singole righe, quindi restano fuori dal conteggio degli avvisi di riga. */}
+            {preview.warnings && preview.warnings.length > 0 && (
+              <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 space-y-1">
+                {preview.warnings.map((w, i) => (
+                  <p key={i} className="flex items-start gap-2 text-sm text-warning">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{w}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
             <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader>

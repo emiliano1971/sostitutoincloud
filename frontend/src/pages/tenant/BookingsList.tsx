@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Search, Filter, Eye, Upload, AlertTriangle, Trash2, X, ChevronDown } from 'lucide-react';
+import { Search, Filter, Eye, Upload, Plus, AlertTriangle, Trash2, X, ChevronDown } from 'lucide-react';
 import { getBookings, deleteBooking, type BookingListItem } from '@/api/bookingApi';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -172,15 +172,15 @@ const BookingsList = () => {
     setSelectedIds(allSelected ? new Set() : new Set(visible.map(b => b.id)));
   };
 
-  // Preset in avanti: il filtro agisce sulla data di check-in, che è tipicamente futura.
+  // Preset all'indietro: il filtro agisce sulla data di check-in nel periodo appena trascorso.
   const applyPreset = (preset: string) => {
     const oggi = new Date();
     let from = '', to = '';
     switch (preset) {
       case 'oggi': { from = toLocalISO(oggi); to = toLocalISO(oggi); break; }
-      case '+7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() + 7); from = toLocalISO(oggi); to = toLocalISO(d); break; }
-      case '+14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() + 14); from = toLocalISO(oggi); to = toLocalISO(d); break; }
-      case '+30gg': { const d = new Date(oggi); d.setDate(oggi.getDate() + 30); from = toLocalISO(oggi); to = toLocalISO(d); break; }
+      case '-7gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 7); from = toLocalISO(d); to = toLocalISO(oggi); break; }
+      case '-14gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 14); from = toLocalISO(d); to = toLocalISO(oggi); break; }
+      case '-30gg': { const d = new Date(oggi); d.setDate(oggi.getDate() - 30); from = toLocalISO(d); to = toLocalISO(oggi); break; }
       default: preset = '';
     }
     setSearchParams(prev => {
@@ -252,6 +252,9 @@ const BookingsList = () => {
               <X className="h-4 w-4" /> Reset filtri
             </Button>
           )}
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => navigate('/bookings/new')}>
+            <Plus className="h-4 w-4" /> Nuova prenotazione
+          </Button>
           <Button size="sm" className="gap-2" onClick={() => navigate('/import/bookings')}>
             <Upload className="h-4 w-4" /> Import
           </Button>
@@ -380,9 +383,9 @@ const BookingsList = () => {
             <div className="flex items-center gap-2">
               {[
                 { key: 'oggi', label: 'Oggi' },
-                { key: '+7gg', label: '+7gg' },
-                { key: '+14gg', label: '+14gg' },
-                { key: '+30gg', label: '+30gg' },
+                { key: '-7gg', label: '-7gg' },
+                { key: '-14gg', label: '-14gg' },
+                { key: '-30gg', label: '-30gg' },
               ].map(p => (
                 <Button
                   key={p.key}

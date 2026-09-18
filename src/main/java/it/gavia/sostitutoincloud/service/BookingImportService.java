@@ -125,9 +125,24 @@ public class BookingImportService {
             Map.entry("cognome", "COGNOME"),
             Map.entry("data di nascita", "DATA_NASCITA"),
             Map.entry("sesso", "SESSO"),
+            // Comune di nascita: i file dei vari canali usano nomi diversi per la stessa
+            // colonna. Il match parziale di buildSuggestedMapping() non basta, perché nessuna
+            // di queste varianti è sottostringa di "comune emittente" (né viceversa).
             Map.entry("comune emittente", "COMUNE_NASCITA"),
+            Map.entry("comune di nascita", "COMUNE_NASCITA"),
+            Map.entry("comune nascita", "COMUNE_NASCITA"),
+            Map.entry("luogo di nascita", "COMUNE_NASCITA"),
+            Map.entry("luogo nascita", "COMUNE_NASCITA"),
+            // normalize() non toglie gli accenti: serve anche la variante senza.
+            Map.entry("città di nascita", "COMUNE_NASCITA"),
+            Map.entry("citta di nascita", "COMUNE_NASCITA"),
             Map.entry("documento", "DOCUMENTO"),
+            // Match esatto per le varianti del numero documento: senza, il match parziale
+            // le aggancerebbe a "documento" → DOCUMENTO (colonna sbagliata).
             Map.entry("nº documento", "NUM_DOCUMENTO"),
+            Map.entry("numero documento", "NUM_DOCUMENTO"),
+            Map.entry("n. documento", "NUM_DOCUMENTO"),
+            Map.entry("nr documento", "NUM_DOCUMENTO"),
             Map.entry("nazione", "NAZIONE"),
             Map.entry("codice fiscale", "CODICE_FISCALE"),
             Map.entry("codicefiscale", "CODICE_FISCALE"),
@@ -428,6 +443,17 @@ public class BookingImportService {
         String fileName = importSessionCache.getFileName(bookingSessionId);
         ParsedTable bookingTable = readTable(bookingBytes, fileName, importSessionCache.getHeaderRow(bookingSessionId));
 
+        // Avvisi sull'anteprima nel suo complesso: una colonna non mappata non produce righe
+        // in errore, quindi passerebbe inosservata. Il caso del comune di nascita è silenzioso
+        // per le righe che hanno già il CF nel file, dove nessun warning di riga viene emesso.
+        List<String> previewWarnings = new ArrayList<>();
+        boolean fileOspitiPresente = guestSessionId != null && !guestSessionId.isBlank();
+        Map<String, String> guestMapping = mapping.getGuestMapping();
+        if (fileOspitiPresente && (guestMapping == null || !guestMapping.containsKey("COMUNE_NASCITA"))) {
+            previewWarnings.add("Attenzione: la colonna 'Comune di nascita' non è mappata. "
+                    + "Il CF non potrà essere calcolato automaticamente per gli ospiti senza CF nel file.");
+        }
+
         // merge ospiti per BOOKING_ID
         Map<String, GuestData> guestByBookingId = new LinkedHashMap<>();
         if (guestSessionId != null && !guestSessionId.isBlank()
@@ -439,7 +465,8 @@ public class BookingImportService {
                 Map<String, String> gMap = mapping.getGuestMapping();
                 for (Map<String, String> gRow : guestTable.rows()) {
                     String bookingId = mapVal(gRow, gMap, "BOOKING_ID");
-                    if (bookingId.isBlank()) continue;
+                    // blank() e non isBlank(): con BOOKING_ID non mappato mapVal() ora dà null.
+                    if (blank(bookingId)) continue;
                     guestByBookingId.put(bookingId, GuestData.builder()
                             .firstName(mapVal(gRow, gMap, "NOME"))
                             .lastName(mapVal(gRow, gMap, "COGNOME"))
@@ -504,8 +531,9 @@ public class BookingImportService {
         String sessionId = UUID.randomUUID().toString();
         importSessionCache.store(sessionId, nuoveRows);
 
-        log.info("BookingImportService.previewWithMapping() - tenantId={} file={} rows={} new={} dupe={} err={} warn={} excluded={}",
-                tenantId, fileName, bookingTable.rows().size(), newCount, dupeCount, errorCount, warningCount, excludedCount);
+        log.info("BookingImportService.previewWithMapping() - tenantId={} file={} rows={} new={} dupe={} err={} warn={} excluded={} previewWarnings={}",
+                tenantId, fileName, bookingTable.rows().size(), newCount, dupeCount, errorCount, warningCount,
+                excludedCount, previewWarnings.size());
 
         return BookingImportPreviewDTO.builder()
                 .fileName(fileName)
@@ -517,6 +545,7 @@ public class BookingImportService {
                 .excludedCount(excludedCount)
                 .rows(previewRows)
                 .importSessionId(sessionId)
+                .warnings(previewWarnings)
                 .build();
     }
 
@@ -793,7 +822,9 @@ public class BookingImportService {
 
     private String mapVal(Map<String, String> row, Map<String, String> mapping, String field) {
         String col = mapping.get(field);
-        if (col == null || col.isBlank()) return "";
+        // Campo non mappato → null, per distinguerlo da una cella mappata ma vuota ("").
+        // Senza questa distinzione una colonna non mappata finiva a DB come stringa vuota.
+        if (col == null || col.isBlank()) return null;
         String v = row.get(col);
         return v != null ? v.trim() : "";
     }
@@ -1012,11 +1043,11 @@ public class BookingImportService {
     }
 
     private int parseIntOr(String s, int def) {
-        try { return s.isBlank() ? def : Integer.parseInt(s); } catch (Exception e) { return def; }
+        try { return blank(s) ? def : Integer.parseInt(s); } catch (Exception e) { return def; }
     }
 
     private BigDecimal parseDecimalOr(String s, BigDecimal def) {
-        try { return s.isBlank() ? def : new BigDecimal(s); } catch (Exception e) { return def; }
+        try { return blank(s) ? def : new BigDecimal(s); } catch (Exception e) { return def; }
     }
 
     private BigDecimal orZero(BigDecimal v) {

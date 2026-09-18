@@ -68,7 +68,7 @@ public class UserManagementService {
         }
         // Valida password
         if (dto.getPassword() == null || dto.getPassword().length() < 8) {
-            throw new IllegalArgumentException("Password obbligatoria, minimo 8 caratteri");
+            throw new IllegalArgumentException("La password deve essere di almeno 8 caratteri");
         }
         // Valida nome/cognome
         if (dto.getFirstName() == null || dto.getFirstName().isBlank()

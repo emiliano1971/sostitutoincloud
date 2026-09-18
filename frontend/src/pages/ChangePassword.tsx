@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import PasswordInput from '@/components/PasswordInput';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, KeyRound, Loader2, LogOut } from 'lucide-react';
@@ -11,9 +11,8 @@ import { forceChangePassword } from '@/api/authApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { getConfig } from '@/config/AppConfig';
 import { toast } from '@/hooks/use-toast';
+import { MIN_PASSWORD_LENGTH } from '@/lib/passwordUtils';
 import type { UserRole } from '@/types';
-
-const MIN_PASSWORD_LENGTH = 8;
 
 // Stesse rotte iniziali di App.tsx: dopo il cambio si entra nella home del proprio ruolo.
 const HOME_BY_ROLE: Record<UserRole, string> = {
@@ -77,7 +76,7 @@ const ChangePassword = () => {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4 relative"
+      className="min-h-screen flex items-center justify-center p-4 pb-24 relative"
       style={{ backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
     >
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
@@ -99,9 +98,8 @@ const ChangePassword = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="new-password">Nuova password</Label>
-                <Input
+                <PasswordInput
                   id="new-password"
-                  type="password"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="••••••••"
@@ -115,9 +113,8 @@ const ChangePassword = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Conferma nuova password</Label>
-                <Input
+                <PasswordInput
                   id="confirm-password"
-                  type="password"
                   value={confirmPwd}
                   onChange={e => setConfirmPwd(e.target.value)}
                   placeholder="••••••••"

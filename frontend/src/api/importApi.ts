@@ -30,6 +30,8 @@ export interface ImportPreview {
   excludedCount: number;
   rows: ImportPreviewRow[];
   importSessionId: string;
+  /** Avvisi sull'anteprima nel suo complesso (es. colonne non mappate), non sulla singola riga. */
+  warnings?: string[];
 }
 
 export interface ImportUploadResponse {
