@@ -11,8 +11,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Eye, CheckCircle2, Loader2, AlertCircle, Plus, Info, X, RefreshCw, Filter, Download } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { Eye, CheckCircle2, Loader2, AlertCircle, Plus, Info, X, RefreshCw, Filter, Download, Printer } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import {
   getF24List, generaF24, getF24Detail, marcaF24Pagato, ricalcolaF24, downloadF24Pdf,
@@ -45,6 +45,7 @@ const fmtPeriodo = (mese: number, anno: number) => `${String(mese).padStart(2, '
 
 const F24List = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   // Arrivo da un documento fiscale: l'owner è passato come query param.
   // I modelli F24 aggregano le ritenute di TUTTI i proprietari del periodo,
@@ -399,7 +400,7 @@ const F24List = () => {
 
       {/* Dialog: dettaglio ritenute collegate */}
       <Dialog open={dettaglioOpen} onOpenChange={setDettaglioOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>
               Dettaglio F24 {dettaglio && fmtPeriodo(dettaglio.periodoMese, dettaglio.periodoAnno)}
@@ -408,7 +409,22 @@ const F24List = () => {
               {dettaglio && `${dettaglio.numeroRitenute} ritenute — ${fmtEuro(dettaglio.totaleRitenute)}`}
             </DialogDescription>
           </DialogHeader>
-          {dettaglio && <RitenuteTable ritenute={dettaglio.ritenute} />}
+          {dettaglio && (
+            <RitenuteTable
+              ritenute={dettaglio.ritenute}
+              periodoF24={{ mese: dettaglio.periodoMese, anno: dettaglio.periodoAnno }}
+              onApriBooking={(bookingId) => {
+                setDettaglioOpen(false);
+                navigate(`/bookings/${bookingId}`);
+              }}
+            />
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDettaglioOpen(false)}>Chiudi</Button>
+            <Button onClick={() => dettaglio && stampaDettaglioF24(dettaglio)} className="gap-2">
+              <Printer className="h-4 w-4" /> Stampa dettaglio
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -433,33 +449,133 @@ const F24List = () => {
   );
 };
 
-const RitenuteTable = ({ ritenute }: { ritenute: F24GenerazioneResult['ritenute'] }) => (
-  <div className="max-h-80 overflow-x-auto overflow-y-auto">
-    <Table className="min-w-[640px]">
+/** Ritenuta di un periodo diverso da quello dell'F24: è un arretrato recuperato. */
+const isArretrato = (
+  r: F24GenerazioneResult['ritenute'][number],
+  periodoF24: { mese: number; anno: number },
+) => r.periodoMese != null && r.periodoAnno != null
+  && (r.periodoMese !== periodoF24.mese || r.periodoAnno !== periodoF24.anno);
+
+const RitenuteTable = ({
+  ritenute, periodoF24, onApriBooking,
+}: {
+  ritenute: F24GenerazioneResult['ritenute'];
+  periodoF24: { mese: number; anno: number };
+  onApriBooking: (bookingId: number) => void;
+}) => (
+  <div className="max-h-96 overflow-x-auto overflow-y-auto">
+    <Table className="min-w-[1000px]">
       <TableHeader>
         <TableRow>
-          <TableHead className="whitespace-nowrap">Proprietario</TableHead>
           <TableHead className="whitespace-nowrap">Prenotazione</TableHead>
-          <TableHead className="whitespace-nowrap">Documento</TableHead>
+          <TableHead className="whitespace-nowrap">Ospite</TableHead>
+          <TableHead className="whitespace-nowrap">Immobile</TableHead>
+          <TableHead className="whitespace-nowrap">Proprietario</TableHead>
+          <TableHead className="whitespace-nowrap">Check-in</TableHead>
+          <TableHead className="whitespace-nowrap">Check-out</TableHead>
+          <TableHead className="whitespace-nowrap">Periodo</TableHead>
           <TableHead className="text-right whitespace-nowrap">Canone €</TableHead>
           <TableHead className="text-right whitespace-nowrap">Aliq. %</TableHead>
           <TableHead className="text-right whitespace-nowrap">Ritenuta €</TableHead>
+          <TableHead className="whitespace-nowrap">Documento</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {ritenute.map(r => (
           <TableRow key={r.id}>
-            <TableCell>{r.ownerName ?? '—'}</TableCell>
-            <TableCell className="font-mono text-xs">{r.bookingExternalId ?? '—'}</TableCell>
-            <TableCell className="font-mono text-xs">{r.documentNumber ?? '—'}</TableCell>
+            <TableCell className="font-mono text-xs">
+              {r.bookingId ? (
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  title="Apri la prenotazione"
+                  onClick={() => onApriBooking(r.bookingId!)}
+                >
+                  {r.bookingExternalId ?? `#${r.bookingId}`}
+                </button>
+              ) : (r.bookingExternalId ?? '—')}
+            </TableCell>
+            <TableCell className="text-sm">{r.guestName ?? '—'}</TableCell>
+            <TableCell className="text-sm">{r.propertyName ?? '—'}</TableCell>
+            <TableCell className="text-sm">{r.ownerName ?? '—'}</TableCell>
+            <TableCell className="text-sm">{r.checkinDate ?? '—'}</TableCell>
+            <TableCell className="text-sm">{r.checkoutDate ?? '—'}</TableCell>
+            <TableCell className="whitespace-nowrap text-sm">
+              {r.periodoMese != null && r.periodoAnno != null
+                ? fmtPeriodo(r.periodoMese, r.periodoAnno) : '—'}
+              {isArretrato(r, periodoF24) && (
+                <Badge className="ml-1.5 bg-warning/10 text-warning">arretrato</Badge>
+              )}
+            </TableCell>
             <TableCell className="text-right">{fmtEuro(r.canoneLocazione)}</TableCell>
             <TableCell className="text-right">{r.aliquotaRitenuta}</TableCell>
             <TableCell className="text-right font-medium">{fmtEuro(r.ritenutaAmount)}</TableCell>
+            <TableCell className="font-mono text-xs">{r.documentNumber ?? '—'}</TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
   </div>
 );
+
+/**
+ * Stampa del dettaglio in una finestra dedicata: il contenuto del dialog vive in un
+ * portal di Radix, quindi nasconderlo via @media print sulla pagina non funziona.
+ * Stesso approccio già usato per l'anteprima del modello F24.
+ */
+const stampaDettaglioF24 = (d: F24GenerazioneResult) => {
+  const periodo = fmtPeriodo(d.periodoMese, d.periodoAnno);
+  const esc = (v: unknown) => String(v ?? '—')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const righe = d.ritenute.map(r => `
+    <tr>
+      <td class="mono">${esc(r.bookingExternalId)}</td>
+      <td>${esc(r.guestName)}</td>
+      <td>${esc(r.propertyName)}</td>
+      <td>${esc(r.ownerName)}</td>
+      <td>${esc(r.checkinDate)}</td>
+      <td>${esc(r.checkoutDate)}</td>
+      <td>${r.periodoMese != null && r.periodoAnno != null ? fmtPeriodo(r.periodoMese, r.periodoAnno) : '—'}${
+        isArretrato(r, { mese: d.periodoMese, anno: d.periodoAnno }) ? ' <span class="arr">arretrato</span>' : ''}</td>
+      <td class="num">${esc(fmtEuro(r.canoneLocazione))}</td>
+      <td class="num">${esc(r.aliquotaRitenuta)}</td>
+      <td class="num bold">${esc(fmtEuro(r.ritenutaAmount))}</td>
+      <td class="mono">${esc(r.documentNumber)}</td>
+    </tr>`).join('');
+
+  const win = window.open('', '_blank');
+  if (!win) return;
+  win.document.write(`<html><head><title>Dettaglio F24 ${periodo}</title><style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 24px; color: #1a1a1a; }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: #555; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th { background: #f0f2f5; border: 1px solid #b0bec5; padding: 5px 6px; text-align: left;
+         font-size: 9px; text-transform: uppercase; color: #546e7a; }
+    td { border: 1px solid #b0bec5; padding: 5px 6px; }
+    .mono { font-family: 'Courier New', monospace; }
+    .num { text-align: right; }
+    .bold { font-weight: bold; }
+    .arr { background: #fef3c7; color: #92400e; padding: 1px 5px; border-radius: 3px; font-size: 9px; }
+    tfoot td { background: #e8edf3; font-weight: bold; }
+    @media print { body { margin: 0; } }
+  </style></head><body>
+    <h1>Dettaglio F24 — periodo ${periodo}</h1>
+    <div class="sub">${d.numeroRitenute} ritenute — totale ${fmtEuro(d.totaleRitenute)} — stato ${esc(d.stato)}</div>
+    <table>
+      <thead><tr>
+        <th>Prenotazione</th><th>Ospite</th><th>Immobile</th><th>Proprietario</th>
+        <th>Check-in</th><th>Check-out</th><th>Periodo</th>
+        <th class="num">Canone €</th><th class="num">Aliq. %</th><th class="num">Ritenuta €</th><th>Documento</th>
+      </tr></thead>
+      <tbody>${righe}</tbody>
+      <tfoot><tr><td colspan="9">TOTALE</td><td class="num">${fmtEuro(d.totaleRitenute)}</td><td></td></tr></tfoot>
+    </table>
+  </body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+};
 
 export default F24List;

@@ -100,7 +100,7 @@ export interface Booking {
   payment_status: PaymentStatus;
   document_status: DocumentStatus;
   settlement_status: SettlementStatus;
-  fiscal_scenario_code: string;
+  regime_fiscale_codice: string;
   created_at: string;
   documenti?: FiscalDocumentSummary[];
 }

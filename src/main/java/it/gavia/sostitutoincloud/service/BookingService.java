@@ -5,7 +5,7 @@ import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
-import it.gavia.sostitutoincloud.dao.ScenarioFiscaleDAO;
+import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
 import it.gavia.sostitutoincloud.dao.SettlementDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
@@ -26,11 +26,12 @@ import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
-import it.gavia.sostitutoincloud.model.ScenarioFiscale;
+import it.gavia.sostitutoincloud.model.RegimeFiscale;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
+import it.gavia.sostitutoincloud.util.NazioneUtils;
 import it.gavia.sostitutoincloud.util.TenantAddressUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -60,7 +61,7 @@ public class BookingService {
     private final CanaleOtaDAO canaleOtaDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
-    private final ScenarioFiscaleDAO scenarioFiscaleDAO;
+    private final RegimeFiscaleDAO regimeFiscaleDAO;
     private final TenantDAO tenantDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final FiscalDocumentDAO fiscalDocumentDAO;
@@ -78,7 +79,7 @@ public class BookingService {
                           CanaleOtaDAO canaleOtaDAO,
                           StatoPrenotazioneDAO statoPrenotazioneDAO,
                           StatoDocumentoDAO statoDocumentoDAO,
-                          ScenarioFiscaleDAO scenarioFiscaleDAO,
+                          RegimeFiscaleDAO regimeFiscaleDAO,
                           TenantDAO tenantDAO,
                           TipoDocumentoDAO tipoDocumentoDAO,
                           FiscalDocumentDAO fiscalDocumentDAO,
@@ -95,7 +96,7 @@ public class BookingService {
         this.canaleOtaDAO = canaleOtaDAO;
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
         this.statoDocumentoDAO = statoDocumentoDAO;
-        this.scenarioFiscaleDAO = scenarioFiscaleDAO;
+        this.regimeFiscaleDAO = regimeFiscaleDAO;
         this.tenantDAO = tenantDAO;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
@@ -240,6 +241,14 @@ public class BookingService {
                     .orElse(null);
         }
 
+        // Se straniero generico e CF assente → genera CF fittizio come in
+        // createManuale() e confirm().
+        if ((guestTaxCode == null || guestTaxCode.isBlank())
+                && NazioneUtils.isNazioneEstera(guestCountry)) {
+            guestTaxCode = codiceFiscaleService.generaCfEstero(tenantId, LocalDate.now().getYear());
+            log.info("BookingService.updateBookingGuest() - CF fittizio generato: {}", guestTaxCode);
+        }
+
         Booking g = Booking.builder()
                 .guestName(guestName)
                 .guestTaxCode(guestTaxCode)
@@ -337,6 +346,13 @@ public class BookingService {
                     dto.getGuestSesso().trim(), dto.getGuestBirthPlace().trim()).orElse(null);
         }
 
+        // Ospite straniero (opzione "Straniero" del form) senza CF: si genera il codice
+        // fittizio EST+anno+progressivo, come fa l'import alla conferma.
+        if ((cf == null || cf.isBlank()) && NazioneUtils.isNazioneEstera(dto.getGuestCountry())) {
+            cf = codiceFiscaleService.generaCfEstero(tenantId, LocalDate.now().getYear());
+            log.info("BookingService.createManuale() - CF fittizio generato: {}", cf);
+        }
+
         // 4. Split economico dalle regole del contratto. Nessun override di commissione OTA:
         //    l'inserimento manuale non ha un dato reale del canale da cui partire.
         ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
@@ -366,11 +382,20 @@ public class BookingService {
                         .orElse("contanti")
                 : "contanti";
 
+        // Regime fiscale fotografato dal proprietario dell'immobile: l'owner può cambiarlo
+        // in seguito, la prenotazione deve restare legata a quello in vigore oggi.
+        Integer fkRegimeFiscaleId = property.getFkOwnerId() != null
+                ? ownerProfileDAO.findById(property.getFkOwnerId())
+                        .map(OwnerProfile::getFkRegimeFiscaleId)
+                        .orElse(null)
+                : null;
+
         Booking booking = Booking.builder()
                 .fkTenantId(tenantId)
                 .fkPropertyId(dto.getFkPropertyId())
                 .fkCanaleOtaId(dto.getFkCanaleOtaId())
                 .fkOwnerId(property.getFkOwnerId())
+                .fkRegimeFiscaleId(fkRegimeFiscaleId)
                 .externalBookingId(extId)
                 .checkinDate(dto.getCheckinDate())
                 .checkoutDate(dto.getCheckoutDate())
@@ -490,13 +515,13 @@ public class BookingService {
                 .collect(Collectors.toMap(StatoPrenotazione::getId, s -> s));
         Map<Integer, StatoDocumento> statiDocumentoById = statoDocumentoDAO.findAll().stream()
                 .collect(Collectors.toMap(StatoDocumento::getId, s -> s));
-        Map<Integer, ScenarioFiscale> scenariById = scenarioFiscaleDAO.findAll().stream()
-                .collect(Collectors.toMap(ScenarioFiscale::getId, s -> s));
+        Map<Integer, RegimeFiscale> regimiById = regimeFiscaleDAO.findAll().stream()
+                .collect(Collectors.toMap(RegimeFiscale::getId, s -> s));
         Map<Integer, TipoDocumento> tipiDocumentoById = tipoDocumentoDAO.findAll().stream()
                 .collect(Collectors.toMap(TipoDocumento::getId, t -> t));
         Tenant tenant = tenantDAO.findById(tenantId).orElse(null);
         return new LookupMaps(propertiesById, ownersById, canaliById,
-                statiPrenotazioneById, statiDocumentoById, scenariById, tipiDocumentoById, tenant);
+                statiPrenotazioneById, statiDocumentoById, regimiById, tipiDocumentoById, tenant);
     }
 
     private String statoCodiceDa(Integer id, Map<Integer, StatoPrenotazione> map) {
@@ -577,7 +602,7 @@ public class BookingService {
     private BookingDetailDTO toDetailDTO(Booking b, LookupMaps maps) {
         Property prop = maps.propertiesById.get(b.getFkPropertyId());
         CanaleOta canale = maps.canaliById.get(b.getFkCanaleOtaId());
-        ScenarioFiscale scenario = maps.scenariById.get(b.getFkScenarioFiscaleId());
+        RegimeFiscale regime = maps.regimiById.get(b.getFkRegimeFiscaleId());
         OwnerProfile owner = b.getFkOwnerId() != null
                 ? maps.ownersById.get(b.getFkOwnerId()) : null;
         Tenant tenant = maps.tenant;
@@ -647,7 +672,7 @@ public class BookingService {
                 .propertyName(prop != null ? prop.getDisplayName() : null)
                 .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)
-                .fiscalScenarioCode(scenario != null ? scenario.getCodice() : null)
+                .regimeFiscaleCodice(regime != null ? regime.getCodice() : null)
                 .checkinDate(b.getCheckinDate())
                 .checkoutDate(b.getCheckoutDate())
                 .nights(b.getNights())
@@ -730,7 +755,7 @@ public class BookingService {
             Map<Integer, CanaleOta> canaliById,
             Map<Integer, StatoPrenotazione> statiPrenotazioneById,
             Map<Integer, StatoDocumento> statiDocumentoById,
-            Map<Integer, ScenarioFiscale> scenariById,
+            Map<Integer, RegimeFiscale> regimiById,
             Map<Integer, TipoDocumento> tipiDocumentoById,
             Tenant tenant) {
     }

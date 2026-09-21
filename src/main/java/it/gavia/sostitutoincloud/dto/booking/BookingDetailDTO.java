@@ -36,7 +36,7 @@ public class BookingDetailDTO {
     private String propertyName;
     private String ownerName;
     private String channelName;
-    private String fiscalScenarioCode;
+    private String regimeFiscaleCodice;
     private LocalDate checkinDate;
     private LocalDate checkoutDate;
     private Integer nights;

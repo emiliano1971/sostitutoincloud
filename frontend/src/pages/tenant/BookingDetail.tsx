@@ -55,7 +55,7 @@ function toDialogBooking(b: BookingDetailType): Booking {
     owner_name: b.ownerName,
     guest_name: b.guestName,
     external_booking_id: b.externalBookingId,
-    channel_name: b.channelName,
+    channel_name: b.channelName ?? '',
     guest_tax_code: b.guestTaxCode ?? '',
     checkin_date: b.checkinDate,
     checkout_date: b.checkoutDate,
@@ -74,7 +74,7 @@ function toDialogBooking(b: BookingDetailType): Booking {
     payment_status: b.paymentStatus as Booking['payment_status'],
     document_status: b.documentStatus as Booking['document_status'],
     settlement_status: b.settlementStatus as Booking['settlement_status'],
-    fiscal_scenario_code: b.fiscalScenarioCode ?? '',
+    regime_fiscale_codice: b.regimeFiscaleCodice ?? '',
     created_at: b.createdAt,
     documenti: b.documenti,
   };
@@ -247,7 +247,7 @@ const BookingDetail = () => {
         </Button>
         <div>
           <h1 className="text-xl font-bold">Prenotazione {booking.externalBookingId}</h1>
-          <p className="text-sm text-muted-foreground">{booking.channelName} · {booking.propertyName}</p>
+          <p className="text-sm text-muted-foreground">{[booking.channelName, booking.propertyName].filter(Boolean).join(' · ')}</p>
         </div>
         <Badge className="ml-auto">{booking.statoPrenotazione}</Badge>
       </div>
@@ -261,7 +261,16 @@ const BookingDetail = () => {
             <div className="flex justify-between"><span className="text-muted-foreground">Notti</span><span className="font-medium">{booking.nights}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Ospiti</span><span className="font-medium">{booking.guests}</span></div>
             <Separator />
-            <div className="flex justify-between"><span className="text-muted-foreground">Scenario fiscale</span><Badge variant="outline">{booking.fiscalScenarioCode}</Badge></div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Regime fiscale</span>
+              {booking.regimeFiscaleCodice && (
+                // Descrizione dalla lookup regimiFiscali (es. "Cedolare secca"); se il
+                // codice non è in lookup getLabelByCodice ricade sul codice stesso.
+                <Badge variant="outline">
+                  {getLabelByCodice(lookups.regimiFiscali, booking.regimeFiscaleCodice)}
+                </Badge>
+              )}
+            </div>
           </CardContent>
         </Card>
 

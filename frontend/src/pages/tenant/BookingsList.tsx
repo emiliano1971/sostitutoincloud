@@ -135,9 +135,9 @@ const BookingsList = () => {
   const filtered = allBookings
     .filter(b =>
       search === '' ||
-      b.guestName.toLowerCase().includes(search.toLowerCase()) ||
-      b.propertyName.toLowerCase().includes(search.toLowerCase()) ||
-      b.externalBookingId.toLowerCase().includes(search.toLowerCase()) ||
+      (b.guestName ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (b.propertyName ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (b.externalBookingId ?? '').toLowerCase().includes(search.toLowerCase()) ||
       (b.ownerName ?? '').toLowerCase().includes(search.toLowerCase())
     )
     // Filtro date sul solo check-in: include il booking se la data di arrivo cade nel range.
@@ -468,7 +468,7 @@ const BookingsList = () => {
                   const daysSinceCheckout = Math.floor((todayDate.getTime() - checkoutDate.getTime()) / (1000 * 60 * 60 * 24));
                   const isOverdue = daysSinceCheckout > 0 && !isFinalStatus(b.statoPrenotazione);
                   const isPenalty = daysSinceCheckout > penaltyThreshold && isOverdue;
-                  const channelKey = b.channelName.toLowerCase();
+                  const channelKey = (b.channelName ?? '').toLowerCase();
 
                   return (
                     <TableRow key={b.id} className={`cursor-pointer ${isPenalty ? 'bg-destructive/8 hover:bg-destructive/12' : isOverdue ? 'bg-warning/6 hover:bg-warning/10' : ''}`} onClick={() => navigate(`/bookings/${b.id}`)}>
@@ -482,9 +482,11 @@ const BookingsList = () => {
                       <TableCell>
                         <div>
                           <p className="text-xs font-mono text-muted-foreground">{b.externalBookingId}</p>
-                          <Badge variant="outline" className={`text-[10px] mt-0.5 ${channelColors[channelKey] || ''}`}>
-                            {b.channelName}
-                          </Badge>
+                          {b.channelName && (
+                            <Badge variant="outline" className={`text-[10px] mt-0.5 ${channelColors[channelKey] || ''}`}>
+                              {b.channelName}
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="font-medium text-sm">{b.guestName}</TableCell>

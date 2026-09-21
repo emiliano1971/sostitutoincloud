@@ -15,10 +15,19 @@ export interface F24Record {
 
 export interface WithholdingLedgerItem {
   id: number;
-  ownerName: string;
-  bookingExternalId: string;
-  documentNumber: string;
+  ownerName?: string;
+  // Prenotazione collegata: bookingId serve al link verso la scheda,
+  // il periodo (mese/anno del ledger) a segnalare gli arretrati.
+  bookingId?: number;
+  bookingExternalId?: string;
+  guestName?: string;
+  propertyName?: string;
+  checkinDate?: string;
+  checkoutDate?: string;
+  documentNumber?: string;
   dataEvento: string;
+  periodoMese?: number;
+  periodoAnno?: number;
   canoneLocazione: number;
   aliquotaRitenuta: number;
   ritenutaAmount: number;

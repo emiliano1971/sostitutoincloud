@@ -132,7 +132,7 @@ export const mockBookings: Booking[] = Array.from({ length: 50 }, (_, i) => {
     payment_status: si >= 3 ? 'received' : 'pending',
     document_status: docStatuses[si],
     settlement_status: settlStatuses[si],
-    fiscal_scenario_code: 'scenario_A',
+    regime_fiscale_codice: 'cedolare_secca',
     created_at: checkin,
   };
 });

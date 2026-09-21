@@ -1,14 +1,22 @@
 package it.gavia.sostitutoincloud.dao;
 
 import it.gavia.sostitutoincloud.dao.mapper.WithholdingLedgerRowMapper;
+import it.gavia.sostitutoincloud.dto.fiscal.WithholdingLedgerDTO;
 import it.gavia.sostitutoincloud.model.WithholdingLedger;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.util.StreamUtils;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -68,6 +76,60 @@ public class WithholdingLedgerDAO {
     public List<WithholdingLedger> findByF24Record(Integer f24RecordId) {
         log.debug("WithholdingLedgerDAO.findByF24Record() - f24RecordId={}", f24RecordId);
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_f24_record_id = ? ORDER BY id", rowMapper, f24RecordId);
+    }
+
+    /**
+     * Righe di ritenuta di un F24 con i dati di prenotazione e immobile già risolti.
+     * Query esternalizzata in sql/withholding_ledger/righe_f24.sql.
+     */
+    public List<WithholdingLedgerDTO> findRigheF24(Integer f24RecordId, Integer tenantId) {
+        String sql = loadSql("sql/withholding_ledger/righe_f24.sql");
+        List<WithholdingLedgerDTO> result = jdbcTemplate.query(sql, DETTAGLIO_MAPPER, f24RecordId, tenantId);
+        log.debug("WithholdingLedgerDAO.findRigheF24() - f24RecordId={} tenantId={} righe={}",
+                f24RecordId, tenantId, result.size());
+        return result;
+    }
+
+    /**
+     * Righe di ritenuta di un periodo con gli stessi dati risolti di {@link #findRigheF24}.
+     * Query esternalizzata in sql/withholding_ledger/righe_periodo.sql.
+     */
+    public List<WithholdingLedgerDTO> findRighePeriodo(Integer tenantId, Integer anno, Integer mese) {
+        String sql = loadSql("sql/withholding_ledger/righe_periodo.sql");
+        List<WithholdingLedgerDTO> result = jdbcTemplate.query(sql, DETTAGLIO_MAPPER, tenantId, anno, mese);
+        log.debug("WithholdingLedgerDAO.findRighePeriodo() - tenantId={} periodo={}/{} righe={}",
+                tenantId, mese, anno, result.size());
+        return result;
+    }
+
+    /** Proiezione condivisa dalle due query di dettaglio (righe_f24.sql, righe_periodo.sql). */
+    private static final RowMapper<WithholdingLedgerDTO> DETTAGLIO_MAPPER = (rs, rowNum) ->
+            WithholdingLedgerDTO.builder()
+                    .id(rs.getInt("id"))
+                    .bookingId(rs.getObject("booking_id", Integer.class))
+                    .bookingExternalId(rs.getString("external_booking_id"))
+                    .guestName(rs.getString("guest_name"))
+                    .ownerName(rs.getString("owner_name"))
+                    .propertyName(rs.getString("property_name"))
+                    .checkinDate(rs.getObject("checkin_date", LocalDate.class))
+                    .checkoutDate(rs.getObject("checkout_date", LocalDate.class))
+                    .documentNumber(rs.getString("document_number"))
+                    .dataEvento(rs.getObject("data_evento", LocalDate.class))
+                    .periodoMese(rs.getObject("periodo_mese", Integer.class))
+                    .periodoAnno(rs.getObject("periodo_anno", Integer.class))
+                    .canoneLocazione(rs.getBigDecimal("canone_locazione"))
+                    .aliquotaRitenuta(rs.getBigDecimal("aliquota_ritenuta"))
+                    .ritenutaAmount(rs.getBigDecimal("ritenuta_amount"))
+                    .stato(rs.getString("stato"))
+                    .fkF24RecordId(rs.getObject("fk_f24_record_id", Integer.class))
+                    .build();
+
+    private String loadSql(String classpath) {
+        try (InputStream is = new ClassPathResource(classpath).getInputStream()) {
+            return StreamUtils.copyToString(is, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("Impossibile caricare SQL: " + classpath, e);
+        }
     }
 
     /** Ritenute 'da_versare' del periodo non ancora agganciate ad alcun F24. */

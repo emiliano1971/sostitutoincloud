@@ -46,8 +46,13 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
   const [docNumber, setDocNumber] = useState(guest.guestDocNumber ?? '');
   const [indirizzo, setIndirizzo] = useState(guest.guestAddress ?? '');
   const [telefono, setTelefono] = useState(guest.guestPhone ?? '');
-  const [nazione, setNazione] = useState<'Italia' | 'Straniero'>(
-    guest.guestCountry === 'Straniero' ? 'Straniero' : 'Italia');
+  // Considera straniero tutto ciò che non è esplicitamente Italia (100000100)
+  // o le stringhe legacy 'Italia'/'italy'
+  const isItalia = (c?: string) =>
+    !c || c === '100000100' || c.toLowerCase() === 'italia' || c.toLowerCase() === 'italy';
+
+  const [nazione, setNazione] = useState<'100000100' | '999999999'>(
+    isItalia(guest.guestCountry) ? '100000100' : '999999999');
   const [taxCode, setTaxCode] = useState(guest.guestTaxCode ?? '');
   const [calcolando, setCalcolando] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -96,13 +101,20 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
       const payload: GuestUpdateRequest = {
         guestName: guestName.trim(),
         guestTaxCode: taxCode || undefined,
-        guestBirthDate: birthDate || undefined,
-        guestSesso: sesso || undefined,
-        guestBirthPlace: birthPlace || undefined,
-        guestBirthBelfiore: birthBelfiore || undefined,
+        // Dati di nascita: hanno senso solo per l'Italia e con "Straniero" sono nascosti,
+        // quindi non si rimandano i valori residui nello state.
+        guestBirthDate: nazione === '100000100' ? birthDate || undefined : undefined,
+        guestSesso: nazione === '100000100' ? sesso || undefined : undefined,
+        guestBirthPlace: nazione === '100000100' ? birthPlace || undefined : undefined,
+        guestBirthBelfiore: nazione === '100000100' ? birthBelfiore || undefined : undefined,
         guestDocType: docType || undefined,
         guestDocNumber: docNumber || undefined,
-        guestCountry: nazione,
+        // Se la scelta del select coincide già con la classificazione del valore salvato,
+        // si conserva quello originale: un 100000219 non va appiattito sul generico 999999999.
+        guestCountry:
+          guest.guestCountry && isItalia(guest.guestCountry) === (nazione === '100000100')
+            ? guest.guestCountry
+            : nazione,
         guestAddress: indirizzo.trim() || undefined,
         guestPhone: telefono.trim() || undefined,
       };
@@ -133,16 +145,16 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
 
           <div className="space-y-1">
             <Label className="text-xs">Nazione</Label>
-            <Select value={nazione} onValueChange={v => setNazione(v as 'Italia' | 'Straniero')}>
+            <Select value={nazione} onValueChange={v => setNazione(v as '100000100' | '999999999')}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="Italia">Italia</SelectItem>
-                <SelectItem value="Straniero">Straniero</SelectItem>
+                <SelectItem value="100000100">Italia</SelectItem>
+                <SelectItem value="999999999">Straniero</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {nazione === 'Italia' && (
+          {nazione === '100000100' && (
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -206,9 +218,9 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
                 value={taxCode}
                 readOnly
                 className="font-mono"
-                placeholder={nazione === 'Straniero' ? 'Verrà generato automaticamente' : '—'}
+                placeholder={nazione === '999999999' ? 'Verrà generato automaticamente' : '—'}
               />
-              {nazione === 'Italia' ? (
+              {nazione === '100000100' ? (
                 <Button type="button" variant="outline" onClick={handleCalcCf} disabled={!canCalc || calcolando} className="gap-2 shrink-0">
                   {calcolando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
                   Calcola CF

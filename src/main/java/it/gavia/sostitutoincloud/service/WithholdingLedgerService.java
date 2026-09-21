@@ -126,47 +126,29 @@ public class WithholdingLedgerService {
     }
 
     /**
-     * Ritenute del periodo arricchite con i dati di owner/booking/documento per la UI.
-     * L'enrichment resta nel service (i controller non accedono ai DAO).
+     * Ritenute del periodo arricchite con i dati di prenotazione, immobile, proprietario
+     * e documento. Stessa proiezione del dettaglio F24, in una sola query.
      */
     public List<WithholdingLedgerDTO> findDettaglioByPeriodo(Integer tenantId, Integer anno, Integer mese) {
-        return withholdingLedgerDAO.findByTenantAndPeriodo(tenantId, anno, mese).stream()
-                .map(w -> toDTO(tenantId, w))
-                .toList();
+        List<WithholdingLedgerDTO> righe = withholdingLedgerDAO.findRighePeriodo(tenantId, anno, mese);
+        log.debug("WithholdingLedgerService.findDettaglioByPeriodo() - periodo={}/{} righe={}",
+                mese, anno, righe.size());
+        return righe;
     }
 
-    /** Ritenute collegate a un F24, arricchite per la UI. */
+    /**
+     * Ritenute collegate a un F24, arricchite per la UI con i dati della prenotazione
+     * (ospite, immobile, date) e del documento.
+     *
+     * <p>Una sola query con JOIN invece dell'enrichment riga per riga di {@link #toDTO}:
+     * quello richiamava {@code BookingService.findById()} per ogni ritenuta, che ricalcola
+     * l'intero split economico dal contratto e carica documenti e lookup.
+     */
     public List<WithholdingLedgerDTO> findDettaglioByF24Record(Integer tenantId, Integer f24RecordId) {
-        return withholdingLedgerDAO.findByF24Record(f24RecordId).stream()
-                .map(w -> toDTO(tenantId, w))
-                .toList();
+        List<WithholdingLedgerDTO> righe = withholdingLedgerDAO.findRigheF24(f24RecordId, tenantId);
+        log.debug("WithholdingLedgerService.findDettaglioByF24Record() - f24RecordId={} righe={}",
+                f24RecordId, righe.size());
+        return righe;
     }
 
-    private WithholdingLedgerDTO toDTO(Integer tenantId, WithholdingLedger w) {
-        String ownerName = null;
-        String bookingExternalId = null;
-        BookingDetailDTO booking = bookingService.findById(tenantId, w.getFkBookingId()).orElse(null);
-        if (booking != null) {
-            ownerName = booking.getOwnerName();
-            bookingExternalId = booking.getExternalBookingId();
-        }
-        String documentNumber = fiscalDocumentDAO.findById(w.getFkFiscalDocumentId())
-                .map(FiscalDocument::getDocumentNumber)
-                .orElse(null);
-
-        return WithholdingLedgerDTO.builder()
-                .id(w.getId())
-                .ownerName(ownerName)
-                .bookingExternalId(bookingExternalId)
-                .documentNumber(documentNumber)
-                .dataEvento(w.getDataEvento())
-                .periodoMese(w.getPeriodoMese())
-                .periodoAnno(w.getPeriodoAnno())
-                .canoneLocazione(w.getCanoneLocazione())
-                .aliquotaRitenuta(w.getAliquotaRitenuta())
-                .ritenutaAmount(w.getRitenutaAmount())
-                .stato(w.getStato())
-                .fkF24RecordId(w.getFkF24RecordId())
-                .build();
-    }
 }

@@ -64,7 +64,8 @@ const BookingNew = () => {
   const [birthPlace, setBirthPlace] = useState('');
   const [docType, setDocType] = useState('');
   const [docNumber, setDocNumber] = useState('');
-  const [country, setCountry] = useState('Italia');
+  // 100000100 = Italia, 999999999 = straniero generico (stessa codifica dei file di import)
+  const [country, setCountry] = useState('100000100');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
 
@@ -115,7 +116,7 @@ const BookingNew = () => {
         guestBirthPlace: birthPlace.trim() || undefined,
         guestDocType: docType || undefined,
         guestDocNumber: docNumber.trim() || undefined,
-        guestCountry: country.trim() || undefined,
+        guestCountry: country,
         guestAddress: address.trim() || undefined,
         guestPhone: phone.trim() || undefined,
       };
@@ -298,7 +299,13 @@ const BookingNew = () => {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Paese</Label>
-                <Input value={country} onChange={e => setCountry(e.target.value)} />
+                <Select value={country} onValueChange={setCountry}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="100000100">Italia</SelectItem>
+                    <SelectItem value="999999999">Straniero</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Telefono</Label>

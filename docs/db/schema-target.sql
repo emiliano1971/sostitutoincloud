@@ -518,7 +518,7 @@ CREATE TABLE booking (
     fk_property_id                  INTEGER                 NOT NULL REFERENCES property(id) ON DELETE RESTRICT,
     fk_owner_id                     INTEGER                 REFERENCES owner_profile(id) ON DELETE RESTRICT, -- proprietario, denormalizzato dalla catena booking→property per query dirette
     fk_canale_ota_id                INTEGER                 REFERENCES canale_ota(id) ON DELETE SET NULL,
-    fk_scenario_fiscale_id          INTEGER                 REFERENCES scenario_fiscale(id) ON DELETE SET NULL,
+    fk_regime_fiscale_id            INTEGER                 REFERENCES regime_fiscale(id) ON DELETE SET NULL, -- regime del proprietario fotografato all'inserimento (migration 017); la FK non vincola metadata='REGIME_FISCALE'
     external_booking_id             VARCHAR(100),           -- ID prenotazione sul canale OTA
     guest_name                      VARCHAR(150)            NOT NULL,
     guest_tax_code                  VARCHAR(20),            -- VARCHAR perché può essere codice fiscale estero
@@ -992,9 +992,9 @@ CREATE INDEX idx_booking_guest_tax_code
 CREATE INDEX idx_booking_checkin_checkout
     ON booking(fk_property_id, checkin_date, checkout_date);
     -- verifica disponibilità e overlap date
-CREATE INDEX idx_booking_fk_scenario_fiscale_id
-    ON booking(fk_scenario_fiscale_id);
-    -- filtro prenotazioni per scenario fiscale applicato
+CREATE INDEX idx_booking_fk_regime_fiscale_id
+    ON booking(fk_regime_fiscale_id);
+    -- filtro prenotazioni per regime fiscale applicato
 
 -- fiscal_document
 CREATE INDEX idx_fiscal_doc_fk_tenant_id

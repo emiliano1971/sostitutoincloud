@@ -585,6 +585,7 @@ progetto/
 | `docs/db/analisi-mock.md` | Analisi entità e campi estratti dal frontend mock |
 | `docs/db/schema-target.sql` | Schema PostgreSQL 18 definitivo — tabelle, lookup, enum, indici, viste |
 | `docs/db/seed-data.sql` | Dati di esempio per sviluppo e test — NON eseguire in prod |
+| `docs/db/migrations/` | Migration incrementali numerate (`NNN_descrizione.sql`), da applicare in ordine dopo lo schema base |
 
 ### Convenzioni schema
 - Tutte le colonne FK hanno prefisso `fk_`
@@ -599,6 +600,14 @@ progetto/
 - Per modificare un enum esistente aprire una migration dedicata e discuterla prima
 - I DAO devono usare i nomi colonna esatti da `schema-target.sql`
 - Per le query sui workflow usare sempre il `codice` della tabella lookup, non l'`id` numerico
+- Ogni modifica allo schema va scritta come nuova migration in `docs/db/migrations/`
+  (numerazione progressiva) e riportata anche in `schema-target.sql`
+- `booking.fk_regime_fiscale_id` punta a `regime_fiscale` (migration 017, sostituisce
+  `fk_scenario_fiscale_id` → `scenario_fiscale`). Contiene il regime del proprietario
+  **fotografato al momento dell'inserimento**: lo assegnano `BookingService.createManuale()`
+  e `BookingImportService.confirm()` leggendo `owner_profile.fk_regime_fiscale_id`.
+  `regime_fiscale` è una lookup multi-uso: la FK non vincola `metadata='REGIME_FISCALE'`,
+  il filtro è responsabilità del codice
 
 ## Cosa NON fare
 - Non generare codice Supabase client

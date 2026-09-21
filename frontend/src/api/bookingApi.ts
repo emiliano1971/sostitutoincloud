@@ -41,7 +41,9 @@ export interface BookingListItem {
   propertyName: string;
   fkOwnerId?: number;
   ownerName: string;
-  channelName: string;
+  // Il backend omette il campo (Jackson NON_NULL) quando la prenotazione
+  // non ha un canale OTA associato — es. inserimento manuale senza canale.
+  channelName?: string;
   checkinDate: string;
   checkoutDate: string;
   nights: number;
@@ -69,7 +71,7 @@ export interface BookingDetail extends BookingListItem {
   guestCountry?: string;
   guestAddress?: string;
   guestPhone?: string;
-  fiscalScenarioCode?: string;
+  regimeFiscaleCodice?: string;
   otaCommissionAmount?: number;
   cleaningAmount?: number;
   pmFeeAmount?: number;

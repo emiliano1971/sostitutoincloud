@@ -34,7 +34,7 @@ public class BookingDAO {
     public static final int STATO_CANCELLED  = 6;
 
     private static final String SELECT_ALL =
-            "SELECT b.id, b.fk_tenant_id, b.fk_property_id, b.fk_owner_id, b.fk_canale_ota_id, b.fk_scenario_fiscale_id, " +
+            "SELECT b.id, b.fk_tenant_id, b.fk_property_id, b.fk_owner_id, b.fk_canale_ota_id, b.fk_regime_fiscale_id, " +
             "b.external_booking_id, b.guest_name, b.guest_tax_code, " +
             "b.guest_birth_date, b.guest_sesso, b.guest_birth_place, b.guest_birth_belfiore, " +
             "b.guest_doc_type, b.guest_doc_number, b.guest_country, b.guest_address, b.guest_phone, " +
@@ -136,7 +136,7 @@ public class BookingDAO {
 
     public Booking insert(Booking booking) {
         String sql = "INSERT INTO booking (" +
-                "fk_tenant_id, fk_property_id, fk_owner_id, fk_canale_ota_id, fk_scenario_fiscale_id, " +
+                "fk_tenant_id, fk_property_id, fk_owner_id, fk_canale_ota_id, fk_regime_fiscale_id, " +
                 "external_booking_id, guest_name, guest_tax_code, " +
                 // Anagrafica ospite: va scritta già in fase di import, non solo con updateGuestData().
                 "guest_birth_date, guest_sesso, guest_birth_place, guest_birth_belfiore, " +
@@ -154,7 +154,7 @@ public class BookingDAO {
             ps.setObject(2, booking.getFkPropertyId());
             ps.setObject(3, booking.getFkOwnerId());
             ps.setObject(4, booking.getFkCanaleOtaId());
-            ps.setObject(5, booking.getFkScenarioFiscaleId());
+            ps.setObject(5, booking.getFkRegimeFiscaleId());
             ps.setObject(6, booking.getExternalBookingId());
             ps.setString(7, booking.getGuestName());
             ps.setObject(8, booking.getGuestTaxCode());

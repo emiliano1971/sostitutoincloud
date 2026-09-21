@@ -6,6 +6,7 @@ import it.gavia.sostitutoincloud.config.ImportSessionCache;
 import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
+import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.PropertyOtaCodeDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
@@ -18,8 +19,10 @@ import it.gavia.sostitutoincloud.dto.importing.ImportColumnMappingDTO;
 import it.gavia.sostitutoincloud.dto.importing.ImportUploadResponseDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.CanaleOta;
+import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
+import it.gavia.sostitutoincloud.util.NazioneUtils;
 import lombok.extern.log4j.Log4j2;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
@@ -38,6 +41,7 @@ import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.Year;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -56,6 +60,7 @@ public class BookingImportService {
 
     private final BookingDAO bookingDAO;
     private final PropertyDAO propertyDAO;
+    private final OwnerProfileDAO ownerProfileDAO;
     private final CanaleOtaDAO canaleOtaDAO;
     private final PropertyOtaCodeDAO propertyOtaCodeDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
@@ -68,6 +73,7 @@ public class BookingImportService {
 
     public BookingImportService(BookingDAO bookingDAO,
                                 PropertyDAO propertyDAO,
+                                OwnerProfileDAO ownerProfileDAO,
                                 CanaleOtaDAO canaleOtaDAO,
                                 PropertyOtaCodeDAO propertyOtaCodeDAO,
                                 StatoPrenotazioneDAO statoPrenotazioneDAO,
@@ -79,6 +85,7 @@ public class BookingImportService {
                                 TouristTaxService touristTaxService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
+        this.ownerProfileDAO = ownerProfileDAO;
         this.canaleOtaDAO = canaleOtaDAO;
         this.propertyOtaCodeDAO = propertyOtaCodeDAO;
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
@@ -276,14 +283,34 @@ public class BookingImportService {
                                     row.getExternalBookingId(), w));
                 }
 
+                // CF ospite: quello del file (o calcolato in preview) ha la precedenza. Per gli
+                // stranieri senza CF il codice fittizio si genera QUI e non in preview: il
+                // progressivo EST conta le righe già presenti a DB, quindi assegnandolo appena
+                // prima dell'insert ogni prenotazione ne riceve uno distinto.
+                String cfOspite = row.getGuestTaxCode();
+                if (blank(cfOspite) && NazioneUtils.isNazioneEstera(row.getGuestCountry())) {
+                    cfOspite = codiceFiscaleService.generaCfEstero(tenantId, Year.now().getValue());
+                    log.debug("BookingImportService.confirm() - booking {}: CF fittizio estero {} (nazione={})",
+                            row.getExternalBookingId(), cfOspite, row.getGuestCountry());
+                }
+
+                // Regime fiscale fotografato dal proprietario dell'immobile: l'owner può
+                // cambiarlo in seguito, la prenotazione resta legata a quello di oggi.
+                Integer fkRegimeFiscaleId = property != null && property.getFkOwnerId() != null
+                        ? ownerProfileDAO.findById(property.getFkOwnerId())
+                                .map(OwnerProfile::getFkRegimeFiscaleId)
+                                .orElse(null)
+                        : null;
+
                 Booking booking = Booking.builder()
                         .fkTenantId(tenantId)
                         .fkPropertyId(fkPropertyId)
                         .fkOwnerId(property != null ? property.getFkOwnerId() : null)
+                        .fkRegimeFiscaleId(fkRegimeFiscaleId)
                         .fkCanaleOtaId(fkCanaleOtaId)
                         .externalBookingId(row.getExternalBookingId())
                         .guestName(guestName)
-                        .guestTaxCode(row.getGuestTaxCode())
+                        .guestTaxCode(cfOspite)
                         // Anagrafica ospite letta dal file ospiti: da persistere già all'import.
                         // normalizzaSesso è idempotente: copre anche le righe di sessioni
                         // create prima della normalizzazione in lettura.
@@ -291,7 +318,7 @@ public class BookingImportService {
                         .guestSesso(normalizzaSesso(row.getGuestGender()))
                         .guestBirthPlace(row.getGuestBirthPlace())
                         // Il Belfiore non è nel tracciato: si ricava dal CF (posizioni 12-15).
-                        .guestBirthBelfiore(belfioreDaCf(row.getGuestTaxCode()))
+                        .guestBirthBelfiore(belfioreDaCf(cfOspite))
                         .guestDocType(row.getGuestDocType())
                         .guestDocNumber(row.getGuestDocNumber())
                         .guestCountry(row.getGuestCountry())
@@ -632,6 +659,19 @@ public class BookingImportService {
                         warnings.removeIf(w -> w.startsWith("CF non calcolabile"));
                     }
                 }
+            }
+
+            // Ospite straniero senza CF: il codice fittizio (EST+anno+progressivo) NON si genera
+            // qui. Il progressivo dipende dalle righe realmente presenti a DB e in preview nulla
+            // è ancora inserito: generarlo ora darebbe lo stesso codice a tutte le righe del file.
+            // Viene assegnato riga per riga in confirm(), al momento dell'insert.
+            if (cfOspite == null && guest != null && NazioneUtils.isNazioneEstera(guest.getCountry())) {
+                // Per uno straniero comune e data di nascita italiani non servono: i warning
+                // sul CF non calcolabile sarebbero fuorvianti.
+                warnings.removeIf(w -> w.startsWith("CF non calcolabile"));
+                warnings.add("Codice Nazione straniero: il CF verrà generato alla conferma");
+                log.debug("BookingImportService - riga {}: ospite straniero (nazione={}), "
+                        + "CF fittizio rimandato alla conferma", rowNum, guest.getCountry());
             }
 
             boolean duplicata = bookingDAO
@@ -1030,7 +1070,12 @@ public class BookingImportService {
      */
     /** Codice Belfiore del comune di nascita: posizioni 12-15 del codice fiscale. */
     private String belfioreDaCf(String cf) {
-        return cf != null && cf.trim().length() == 16 ? cf.trim().toUpperCase().substring(11, 15) : null;
+        if (cf == null) return null;
+        String v = cf.trim().toUpperCase();
+        // Il CF fittizio per stranieri (EST+anno+progressivo) è lungo 16 come uno vero, ma nelle
+        // posizioni 12-15 ha cifre del progressivo: estrarle produrrebbe un Belfiore inesistente.
+        if (v.startsWith("EST")) return null;
+        return v.length() == 16 ? v.substring(11, 15) : null;
     }
 
     private String normalizzaSesso(String v) {

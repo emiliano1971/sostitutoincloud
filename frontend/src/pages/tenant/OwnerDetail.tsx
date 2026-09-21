@@ -325,7 +325,7 @@ const OwnerDetail = () => {
                 <TableRow key={b.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/bookings/${b.id}`)}>
                   <TableCell className="font-medium">{b.guestName}</TableCell>
                   <TableCell className="text-sm">{b.propertyName}</TableCell>
-                  <TableCell><Badge variant="outline" className="text-xs">{b.channelName}</Badge></TableCell>
+                  <TableCell>{b.channelName && <Badge variant="outline" className="text-xs">{b.channelName}</Badge>}</TableCell>
                   <TableCell className="text-sm">{b.checkinDate}</TableCell>
                   <TableCell className="text-sm">{b.checkoutDate}</TableCell>
                   <TableCell className="text-right font-mono">€{b.grossAmount.toFixed(2)}</TableCell>

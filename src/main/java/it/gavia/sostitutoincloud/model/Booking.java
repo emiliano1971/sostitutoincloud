@@ -22,7 +22,9 @@ public class Booking {
     private Integer fkPropertyId;
     private Integer fkOwnerId;
     private Integer fkCanaleOtaId;
-    private Integer fkScenarioFiscaleId;
+    // Regime fiscale del proprietario al momento della prenotazione (lookup regime_fiscale
+    // con metadata='REGIME_FISCALE'): fotografato qui perché l'owner può cambiarlo nel tempo.
+    private Integer fkRegimeFiscaleId;
     private String externalBookingId;
     private String guestName;
     private String guestTaxCode;
