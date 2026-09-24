@@ -23,7 +23,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 
 type CostRuleType = 'pulizie' | 'commissione_ota' | 'cambio_biancheria' | 'commissione_pm' | 'provvigione_proprietario';
-type CalcMode = 'fisso' /*| 'percentuale'*/ | 'fisso_per_notte' | 'fisso_per_persona' | 'percentuale_lordo' | 'rimanenza';
+type CalcMode = 'fisso' /*| 'percentuale'*/ | 'fisso_per_notte' | 'fisso_per_persona' | 'percentuale_lordo' | 'percentuale_netto' | 'rimanenza';
 
 interface CanaleOtaDTO {
   id: number;
@@ -51,6 +51,7 @@ const calcModeLabels: Record<CalcMode, string> = {
   fisso_per_persona: 'Fisso per Persona (€/persona)',
   /*percentuale: 'Percentuale (%)',*/
   percentuale_lordo: 'Percentuale sul Lordo (%)',
+  percentuale_netto: 'Percentuale sul Netto (%)',
   rimanenza: 'Rimanenza automatica',
 };
 
@@ -68,8 +69,16 @@ const calcModeOrder: CalcMode[] = [
 // stesso vincolo applicato dal backend (PropertyContractService.TIPI_RIMANENZA_AMMESSA).
 const tipiRimanenzaAmmessa: CostRuleType[] = ['commissione_pm', 'provvigione_proprietario'];
 
-const calcModesForType = (tipo: CostRuleType): CalcMode[] =>
-  tipiRimanenzaAmmessa.includes(tipo) ? [...calcModeOrder, 'rimanenza'] : calcModeOrder;
+// La percentuale sul netto ha senso solo sul compenso del PM, perché la sua base è il
+// lordo meno tutte le altre voci (PropertyContractService.TIPI_PERCENTUALE_NETTO_AMMESSA).
+const tipiPercentualeNettoAmmessa: CostRuleType[] = ['commissione_pm'];
+
+const calcModesForType = (tipo: CostRuleType): CalcMode[] => {
+  const modes = [...calcModeOrder];
+  if (tipiPercentualeNettoAmmessa.includes(tipo)) modes.push('percentuale_netto');
+  if (tipiRimanenzaAmmessa.includes(tipo)) modes.push('rimanenza');
+  return modes;
+};
 
 const PropertyContracts = () => {
   const { id } = useParams();
@@ -143,7 +152,9 @@ const PropertyContracts = () => {
   const hasRemainder = rules.some(r => r.isRemainder);
   const remainderRuleType = rules.find(r => r.isRemainder)?.tipo;
 
-  // Calculate non-remainder rule amount
+  // Calculate non-remainder rule amount.
+  // 'percentuale_netto' non è calcolabile qui: la sua base dipende dal totale delle altre
+  // voci, quindi è gestita nel secondo passaggio di buildSimulation().
   const calculateRuleAmount = (rule: ContractRule, gross: number, nights: number, guests: number): number => {
     if (rule.isRemainder) return 0; // calculated separately
     switch (rule.calcMode) {
@@ -167,10 +178,24 @@ const PropertyContracts = () => {
     const otaRule = otaRulesInContract.find(r => (r.canaleName || 'N/D') === channelName);
     const activeRules = otaRule ? [...nonOtaRules, otaRule] : [...nonOtaRules];
 
-    const items = activeRules.filter(r => !r.isRemainder).map(r => ({
-      rule: r,
-      amount: calculateRuleAmount(r, sampleGross, sampleNights, sampleGuests),
-    }));
+    // Passaggio 1: tutte le voci tranne quelle in percentuale sul netto.
+    const items = activeRules
+      .filter(r => !r.isRemainder && r.calcMode !== 'percentuale_netto')
+      .map(r => ({
+        rule: r,
+        amount: calculateRuleAmount(r, sampleGross, sampleNights, sampleGuests),
+      }));
+
+    // Passaggio 2: percentuale sul netto, con base = lordo meno le voci del passaggio 1.
+    // Stessa logica di ContrattoCalcolatoreService: base unica, mai negativa.
+    const totalePassaggio1 = items.reduce((s, i) => s + i.amount, 0);
+    const baseNetto = Math.max(0, Math.round((sampleGross - totalePassaggio1) * 100) / 100);
+    activeRules
+      .filter(r => !r.isRemainder && r.calcMode === 'percentuale_netto')
+      .forEach(r => items.push({
+        rule: r,
+        amount: Math.round(baseNetto * r.valore / 100 * 100) / 100,
+      }));
 
     const totalNonRemainder = items.reduce((s, i) => s + i.amount, 0);
     const remainderRule = activeRules.find(r => r.isRemainder);
@@ -449,7 +474,12 @@ const PropertyContracts = () => {
           <Separator />
           <div><span className="font-medium text-foreground">Cambio Biancheria</span> — Importo fisso per persona (× ospiti) oppure importo totale fisso.</div>
           <Separator />
-          <div><span className="font-medium text-foreground">Commissione PM</span> — Compenso del PM: fisso per notte, % sul lordo, oppure <strong>rimanenza</strong>.</div>
+          <div><span className="font-medium text-foreground">Commissione PM</span> — Compenso del PM: fisso per notte, % sul lordo, <strong>% sul netto</strong>, oppure <strong>rimanenza</strong>.</div>
+          <div className="text-xs pl-4">
+            <span className="font-medium text-foreground">Percentuale sul Netto</span> — Percentuale calcolata sul lordo
+            residuo dopo aver sottratto tutte le altre voci di costo (OTA, pulizie, ecc.).
+            Disponibile solo per la Commissione PM.
+          </div>
           <Separator />
           <div><span className="font-medium text-foreground">Provvigione Proprietario</span> — Quota proprietario: % sul lordo, fisso per notte, oppure <strong>rimanenza</strong>.</div>
           <Separator />
@@ -527,6 +557,12 @@ const PropertyContracts = () => {
                   ))}
                 </SelectContent>
               </Select>
+              {newCalcMode === 'percentuale_netto' && (
+                <p className="text-xs text-muted-foreground">
+                  Percentuale calcolata sul lordo residuo dopo aver sottratto tutte le altre
+                  voci di costo (OTA, pulizie, ecc.).
+                </p>
+              )}
             </div>
 
             {newCalcMode !== 'rimanenza' && (

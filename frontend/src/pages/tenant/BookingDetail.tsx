@@ -4,9 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X } from 'lucide-react';
 import GuestEditDialog from '@/components/GuestEditDialog';
-import { getBookingById, type BookingDetail as BookingDetailType } from '@/api/bookingApi';
+import {
+  getBookingById,
+  updateBookingSplit,
+  type BookingDetail as BookingDetailType,
+  type BookingUpdateSplitRequest,
+} from '@/api/bookingApi';
 import { generateDocument, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { toast } from '@/hooks/use-toast';
@@ -94,11 +101,39 @@ const BookingDetail = () => {
   const [generatedInvoice, setGeneratedInvoice] = useState<DocumentGenerateResponse | null>(null);
   const [savingReceipt, setSavingReceipt] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
+  const [isUpdatingSplit, setIsUpdatingSplit] = useState(false);
+  const [editingOta, setEditingOta] = useState(false);
+  const [otaValue, setOtaValue] = useState('');
+  // Editor della commissione OTA: si digita in percentuale o in euro. I due valori
+  // restano sincronizzati, ma al server si manda sempre e solo l'importo.
+  const [otaEditMode, setOtaEditMode] = useState<'pct' | 'eur'>('pct');
+  const [otaPctValue, setOtaPctValue] = useState('');
 
   const reloadBooking = async () => {
     if (!id) return;
     const refreshed = await getBookingById(Number(id));
     setBooking(refreshed);
+  };
+
+  // Gli importi non si mandano mai al server: si manda l'input (flag tassa / override
+  // commissione) e si riceve indietro la prenotazione con lo split ricalcolato.
+  const handleUpdateSplit = async (patch: BookingUpdateSplitRequest) => {
+    if (!id) return;
+    setIsUpdatingSplit(true);
+    try {
+      const updated = await updateBookingSplit(Number(id), patch);
+      setBooking(updated);
+      toast({ title: 'Split ricalcolato' });
+    } catch (err) {
+      toast({
+        title: 'Errore',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdatingSplit(false);
+      setEditingOta(false);
+    }
   };
 
   const handleEmetti = async (
@@ -193,11 +228,54 @@ const BookingDetail = () => {
             * 100
           )
         : 21;
+  // Blocco delle modifiche allo split: stessa condizione del backend (documenti fiscali
+  // presenti), perché gli importi sono già stampati su fattura/ricevuta.
+  const hasDocuments = (booking.documenti?.length ?? 0) > 0;
+
+  // Base su cui il contratto applica le percentuali: col flag attivo la tassa è già stata
+  // scorporata dal lordo, quindi la % della commissione va letta su quella base o non
+  // corrisponderebbe a quella del contratto.
+  const baseCalcolo = split.grossAmount
+    - (split.touristTaxIncludedInGross ? (split.touristTaxAmount ?? 0) : 0);
+  // Due decimali come nell'editor (otaPctDaImporto): con precisioni diverse il badge e il
+  // valore precompilato nel campo sembravano due percentuali differenti.
+  const pctOf = (v: number) => (baseCalcolo > 0 ? ((v / baseCalcolo) * 100).toFixed(2) : '0.00');
+  const otaPct = pctOf(split.otaCommissionAmount ?? 0);
+
+  // Conversioni dell'editor OTA: baseCalcolo è già la base corretta (al netto della tassa
+  // se inclusa), quindi le due funzioni sono l'unico punto che la usa.
+  const otaPctDaImporto = (importo: number) =>
+    baseCalcolo > 0 ? ((importo / baseCalcolo) * 100).toFixed(2) : '0.00';
+  const otaImportoDaPct = (pct: number) => ((pct / 100) * baseCalcolo).toFixed(2);
+
+  const apriEditorOta = () => {
+    const importo = split.otaCommissionAmount ?? 0;
+    setEditingOta(true);
+    setOtaEditMode('pct');
+    setOtaPctValue(otaPctDaImporto(importo));
+    setOtaValue(String(importo));
+  };
+
+  const chiudiEditorOta = () => {
+    setEditingOta(false);
+    setOtaEditMode('pct');
+  };
+
   const splitRows = [
     { label: 'Lordo ospite', value: split.grossAmount },
-    { label: 'Commissione OTA', value: -split.otaCommissionAmount },
+    // Tassa già compresa nel lordo: si rende esplicito lo scorporo e la base effettiva su cui
+    // il backend calcola provvigioni, netto proprietario e ritenuta (la tassa è incassata per
+    // conto del Comune, non è reddito del proprietario).
+    ...(split.touristTaxIncludedInGross && split.touristTaxAmount > 0
+      ? [
+          { label: 'Tassa soggiorno (scorporata dal lordo)', value: -split.touristTaxAmount },
+          { label: 'Base di calcolo', value: split.grossAmount - split.touristTaxAmount, bold: true },
+        ]
+      : []),
+    // descrizione = regola di contratto applicata, assente sugli split storici
+    { label: 'Commissione OTA', value: -split.otaCommissionAmount, editable: 'ota', descrizione: split.otaDescrizione },
     { label: 'Pulizie', value: -split.cleaningAmount },
-    { label: 'Provvigione PM', value: -split.pmFeeAmount },
+    { label: 'Provvigione PM', value: -split.pmFeeAmount, descrizione: split.pmFeeDescrizione },
     ...(split.ivaScorporataPm && split.ivaScorporataPm > 0
       ? [{ label: 'di cui IVA 22% (scorporata sui servizi PM)', value: split.ivaScorporataPm, note: true }]
       : []),
@@ -331,13 +409,142 @@ const BookingDetail = () => {
               </ul>
             </div>
           )}
+          {/* Input dello split, non una voce di costo: cambia la base su cui tutto il resto
+              è calcolato, quindi sta sopra alle righe degli importi. */}
+          <div className="flex items-center justify-between py-2 border-b mb-2">
+            <div>
+              <span className="text-sm font-medium">Tassa soggiorno inclusa nel lordo</span>
+              {hasDocuments && (
+                <p className="text-xs text-muted-foreground">Non modificabile: documenti fiscali emessi</p>
+              )}
+            </div>
+            <Switch
+              checked={split.touristTaxIncludedInGross ?? false}
+              disabled={hasDocuments || isUpdatingSplit}
+              // Si ripassa l'OTA attuale: senza, il backend riceverebbe null ("torna alle
+              // regole") e il cambio del flag azzererebbe la commissione impostata dal PM.
+              onCheckedChange={(val) => handleUpdateSplit({
+                touristTaxIncludedInGross: val,
+                otaCommissionOverride: split.otaCommissionAmount ?? 0,
+              })}
+            />
+          </div>
           <div className="space-y-2">
             {splitRows.map((row, i) => (
               <div key={i} className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
-                <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
-                <span className={`text-sm ${'note' in row && row.note ? 'text-muted-foreground' : row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
-                  {'note' in row && row.note ? '' : row.value < 0 ? '-' : ''}{fmt(row.value)}
-                </span>
+                <div className="flex flex-col">
+                  <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
+                  {'descrizione' in row && row.descrizione && (
+                    <span className="text-xs text-muted-foreground">{row.descrizione}</span>
+                  )}
+                </div>
+                {'editable' in row && row.editable === 'ota' ? (
+                  editingOta ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm text-destructive">-</span>
+                      {/* Toggle % / € — cambiando modalità il valore dell'altra unità viene
+                          ricalcolato, così non si perde quanto già digitato. */}
+                      <button
+                        onClick={() => {
+                          setOtaEditMode('pct');
+                          setOtaPctValue(otaPctDaImporto(parseFloat(otaValue || '0')));
+                        }}
+                        title="Modifica in percentuale"
+                        className={`text-xs px-1 rounded border ${
+                          otaEditMode === 'pct'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        %
+                      </button>
+                      <button
+                        onClick={() => {
+                          setOtaEditMode('eur');
+                          setOtaValue(otaImportoDaPct(parseFloat(otaPctValue || '0')));
+                        }}
+                        title="Modifica in euro"
+                        className={`text-xs px-1 rounded border ${
+                          otaEditMode === 'eur'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        €
+                      </button>
+
+                      {otaEditMode === 'pct' ? (
+                        <Input
+                          type="number"
+                          value={otaPctValue}
+                          onChange={e => {
+                            setOtaPctValue(e.target.value);
+                            setOtaValue(otaImportoDaPct(parseFloat(e.target.value || '0')));
+                          }}
+                          className="w-20 h-6 text-xs"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          autoFocus
+                          placeholder="0.00"
+                        />
+                      ) : (
+                        <Input
+                          type="number"
+                          value={otaValue}
+                          onChange={e => {
+                            setOtaValue(e.target.value);
+                            setOtaPctValue(otaPctDaImporto(parseFloat(e.target.value || '0')));
+                          }}
+                          className="w-24 h-6 text-xs"
+                          min="0"
+                          step="0.01"
+                          autoFocus
+                          placeholder="0.00"
+                        />
+                      )}
+
+                      {/* L'altra unità sempre visibile come riferimento */}
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {otaEditMode === 'pct'
+                          ? `= €${(parseFloat(otaValue || '0') || 0).toFixed(2)}`
+                          : `= ${otaPctValue || '0.00'}%`}
+                      </span>
+
+                      <button
+                        onClick={() => handleUpdateSplit({ otaCommissionOverride: parseFloat(otaValue) })}
+                        disabled={isUpdatingSplit || otaValue.trim() === '' || Number.isNaN(parseFloat(otaValue))}
+                        title="Applica"
+                        className="disabled:opacity-40"
+                      >
+                        <Check className="h-3 w-3 text-green-600" />
+                      </button>
+                      <button onClick={chiudiEditorOta} title="Annulla">
+                        <X className="h-3 w-3 text-destructive" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">({otaPct}%)</span>
+                      <span className="text-sm text-destructive">-{fmt(row.value)}</span>
+
+                      {!hasDocuments && (
+                        <button
+                          onClick={apriEditorOta}
+                          disabled={isUpdatingSplit}
+                          title="Modifica commissione"
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  <span className={`text-sm ${'note' in row && row.note ? 'text-muted-foreground' : row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
+                    {'note' in row && row.note ? '' : row.value < 0 ? '-' : ''}{fmt(row.value)}
+                  </span>
+                )}
               </div>
             ))}
           </div>

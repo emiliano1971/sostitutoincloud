@@ -4,6 +4,7 @@ import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportConfirmDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
@@ -137,6 +138,28 @@ public class BookingController {
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Modifica gli input dello split economico (tassa inclusa nel lordo, override commissione
+     * OTA) e restituisce la prenotazione con lo split ricalcolato.
+     * 400 se la prenotazione ha già documenti fiscali emessi.
+     */
+    @PatchMapping("/{id}/split")
+    public ResponseEntity<?> updateSplit(@PathVariable Integer id, @RequestBody BookingUpdateSplitDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            BookingDetailDTO updated = bookingService.updateSplit(tenantId, id, dto);
+            log.info("BookingController.updateSplit() - tenantId={} bookingId={}", tenantId, id);
+            return ResponseEntity.ok(updated);
+        } catch (NoSuchElementException e) {
+            log.warn("BookingController.updateSplit() - tenantId={} bookingId={} non trovato", tenantId, id);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("BookingController.updateSplit() - tenantId={} bookingId={} rifiutato: {}",
+                    tenantId, id, e.getMessage());
             return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
         }
     }

@@ -146,7 +146,7 @@ per includere anche i nuovi campi.
 
 mvn -Plocal -DskipTests clean package
 cd frontend && npm run build &&
-npx tsc --noEmit
+npm run typecheck
 
 Verifica importando un file ospiti
 con colonna "Codice Fiscale" valorizzata:

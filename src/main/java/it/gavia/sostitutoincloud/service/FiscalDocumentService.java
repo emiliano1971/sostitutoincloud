@@ -45,7 +45,8 @@ import java.util.stream.Collectors;
 @Log4j2
 public class FiscalDocumentService {
 
-    private static final BigDecimal IVA_22 = new BigDecimal("0.22");
+    /** Divisore per passare dall'aliquota in percentuale al moltiplicatore (22.00 → 0.22). */
+    private static final BigDecimal CENTO = new BigDecimal("100");
 
     /** Codice della lookup tipo_documento per la ricevuta owner (il dominio la chiama ricevuta_owner). */
     private static final String CODICE_RICEVUTA = "ricevuta";
@@ -127,37 +128,89 @@ public class FiscalDocumentService {
         return owner.getLegalName();
     }
 
+    /**
+     * Righe del documento, coerenti con gli importi memorizzati su fiscal_document:
+     * la somma delle righe deve quadrare con imponibile / vat_amount / total_amount,
+     * che il frontend mostra come riga totali.
+     */
     private List<DocumentRowDTO> buildRighe(FiscalDocument doc, Booking booking, TipoDocumento tipo) {
         if (tipo == null || booking == null) return Collections.emptyList();
         List<DocumentRowDTO> righe = new ArrayList<>();
         if (Boolean.TRUE.equals(tipo.getRichiedeIva())) {
-            righe.add(buildRigaConIva("Riaddebito commissione OTA", booking.getOtaCommissionAmount()));
-            righe.add(buildRigaConIva("Riaddebito pulizie", booking.getCleaningAmount()));
-            righe.add(buildRigaConIva("Provvigione PM", booking.getPmFeeAmount()));
+            // Gli importi dei servizi sono GIÀ LORDI (IVA inclusa): l'IVA va scorporata dal
+            // lordo, non aggiunta sopra — stessa regola di DocumentGenerationService.
+            // L'aliquota è quella memorizzata sul documento (0 in regime forfettario),
+            // mai una costante: il regime del PM può cambiare fra un documento e l'altro.
+            BigDecimal aliquota = doc.getAliquotaIva() != null ? doc.getAliquotaIva() : BigDecimal.ZERO;
+            righe.add(buildRigaScorporata("Riaddebito commissione OTA", booking.getOtaCommissionAmount(), aliquota));
+            righe.add(buildRigaScorporata("Riaddebito pulizie", booking.getCleaningAmount(), aliquota));
+            righe.add(buildRigaScorporata("Provvigione PM", booking.getPmFeeAmount(), aliquota));
+            allineaResiduoScorporo(righe, doc);
         } else {
-            BigDecimal gross = booking.getGrossAmount() != null ? booking.getGrossAmount() : BigDecimal.ZERO;
+            // Ricevuta owner: la riga è il canone del proprietario (= imponibile del documento),
+            // non il lordo ospite — dal lordo sono già stati tolti i servizi PM, che il PM
+            // fattura a parte. Il lordo ospite qui gonfiava la riga rispetto al documento.
+            BigDecimal canone = primoNonNullo(doc.getCanoneLocazione(), doc.getImponibile(),
+                    doc.getTotalAmount(), BigDecimal.ZERO);
             righe.add(DocumentRowDTO.builder()
-                    .descrizione("Compenso lordo ospite")
-                    .importoNetto(gross)
+                    .descrizione("Canone locazione breve")
+                    .importoNetto(canone)
                     .aliquotaIva(BigDecimal.ZERO)
                     .importoIva(BigDecimal.ZERO)
-                    .importoLordo(gross)
+                    .importoLordo(canone)
                     .build());
         }
         return righe;
     }
 
-    private DocumentRowDTO buildRigaConIva(String descrizione, BigDecimal netto) {
-        BigDecimal n = netto != null ? netto : BigDecimal.ZERO;
-        BigDecimal iva = n.multiply(IVA_22).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal lordo = n.add(iva).setScale(2, RoundingMode.HALF_UP);
+    /**
+     * Riga da importo lordo IVA inclusa: imponibile = lordo / (1 + aliquota/100).
+     * Aliquota 0 (forfettario o fuori campo IVA) → imponibile = lordo, IVA = 0.
+     */
+    private DocumentRowDTO buildRigaScorporata(String descrizione, BigDecimal lordo, BigDecimal aliquota) {
+        BigDecimal l = (lordo != null ? lordo : BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal netto = l;
+        BigDecimal iva = BigDecimal.ZERO.setScale(2);
+        if (aliquota != null && aliquota.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal divisore = BigDecimal.ONE.add(aliquota.divide(CENTO, 4, RoundingMode.HALF_UP));
+            netto = l.divide(divisore, 2, RoundingMode.HALF_UP);
+            iva = l.subtract(netto);
+        }
         return DocumentRowDTO.builder()
                 .descrizione(descrizione)
-                .importoNetto(n)
-                .aliquotaIva(IVA_22)
+                .importoNetto(netto)
+                .aliquotaIva(aliquota != null ? aliquota : BigDecimal.ZERO)
                 .importoIva(iva)
-                .importoLordo(lordo)
+                .importoLordo(l)
                 .build();
+    }
+
+    /**
+     * Lo scorporo riga per riga può differire di qualche centesimo da quello fatto una volta
+     * sola sul totale in fase di emissione. Il residuo va sull'ultima riga, così la somma
+     * delle righe coincide esattamente con l'imponibile e l'IVA del documento.
+     */
+    private void allineaResiduoScorporo(List<DocumentRowDTO> righe, FiscalDocument doc) {
+        if (righe.isEmpty() || doc.getImponibile() == null) return;
+        BigDecimal sommaNetti = righe.stream()
+                .map(DocumentRowDTO::getImportoNetto)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal residuo = doc.getImponibile().subtract(sommaNetti);
+        if (residuo.compareTo(BigDecimal.ZERO) == 0) return;
+
+        DocumentRowDTO ultima = righe.get(righe.size() - 1);
+        ultima.setImportoNetto(ultima.getImportoNetto().add(residuo));
+        ultima.setImportoIva(ultima.getImportoLordo().subtract(ultima.getImportoNetto()));
+        log.debug("FiscalDocumentService.buildRighe() - residuo scorporo {} allocato sull'ultima riga del doc={}",
+                residuo, doc.getId());
+    }
+
+    /** Primo valore non null fra quelli passati. */
+    private BigDecimal primoNonNullo(BigDecimal... valori) {
+        for (BigDecimal v : valori) {
+            if (v != null) return v;
+        }
+        return BigDecimal.ZERO;
     }
 
     public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
@@ -336,6 +389,7 @@ public class FiscalDocumentService {
                 .recipientTaxCode(doc.getRecipientTaxCode())
                 .totalAmount(doc.getTotalAmount())
                 .vatAmount(doc.getVatAmount())
+                .aliquotaIva(doc.getAliquotaIva())
                 .imponibile(doc.getImponibile())
                 .ritenutaAmount(doc.getRitenutaAmount())
                 .bolloAmount(doc.getBolloAmount())

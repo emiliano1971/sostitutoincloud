@@ -330,7 +330,7 @@ Test Runner
 
 mvn -Plocal -DskipTests clean package
 cd frontend && npm run build &&
-npx tsc --noEmit
+npm run typecheck
 
 TOKEN=$(curl -s -X POST \
 http://localhost:8081/sostitutoincloud/\

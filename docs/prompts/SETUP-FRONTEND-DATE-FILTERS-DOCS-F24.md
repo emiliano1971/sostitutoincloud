@@ -101,7 +101,7 @@ Persisti nell'URL:
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 cd frontend && npm run build
-npx tsc --noEmit
+npm run typecheck
 
 Verifica che:
 - DocumentsList filtra per data emissione

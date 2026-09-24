@@ -508,7 +508,18 @@ const BookingsList = () => {
                       <TableCell className="text-sm">{b.checkinDate}</TableCell>
                       <TableCell className="text-sm">{b.checkoutDate}</TableCell>
                       <TableCell className="text-right text-sm">{b.nights}</TableCell>
-                      <TableCell className="text-right text-sm font-medium">€{b.grossAmount.toLocaleString('it-IT')}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">
+                        <div className="flex flex-col">
+                          <span>€{b.grossAmount.toLocaleString('it-IT')}</span>
+                          {/* Tassa già dentro il lordo: la si segnala perché non è reddito
+                              del proprietario e viene scorporata dalla base dello split. */}
+                          {b.touristTaxIncludedInGross && (b.touristTaxAmount ?? 0) > 0 && (
+                            <span className="text-xs font-normal text-muted-foreground">
+                              di cui €{b.touristTaxAmount!.toLocaleString('it-IT')} tassa sogg.
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           {isPenalty && <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />}

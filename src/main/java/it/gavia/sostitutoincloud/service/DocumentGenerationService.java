@@ -149,18 +149,23 @@ public class DocumentGenerationService {
         Integer fkDocumentoCollegatoId;
 
         if (TIPO_RICEVUTA_OWNER.equals(tipo)) {
-            // La ricevuta owner è di norma emessa DOPO la fattura PM.
-            // Canone = lordo ospite - totale fattura PM (riaddebiti + provvigione + IVA).
-            // Se la fattura PM non esiste ancora (ricevuta emessa prima): fallback su owner_net_amount.
             Optional<FiscalDocument> fatturaPM = fiscalDocumentDAO.findByBookingId(request.getBookingId()).stream()
                     .filter(d -> tipoFattura.getId().equals(d.getFkTipoDocumentoId()))
                     .findFirst();
-            BigDecimal canone = fatturaPM
-                    .map(f -> gross.subtract(nz(f.getTotalAmount())))
-                    .orElseGet(() -> split.getOwnerNetAmount() != null
-                            ? split.getOwnerNetAmount()
-                            : gross.subtract(otaCommission).subtract(cleaning).subtract(pmFee))
-                    .setScale(2, RoundingMode.HALF_UP);
+            // Il canone è sempre il netto proprietario già calcolato nello split: tiene conto
+            // dello scorporo della tassa di soggiorno quando è inclusa nel lordo.
+            // Ricavarlo da "lordo - totale fattura PM" lo gonfiava dell'importo della tassa,
+            // e faceva dipendere il risultato dall'ordine di emissione ricevuta/fattura.
+            BigDecimal canone;
+            if (split.getOwnerNetAmount() != null) {
+                canone = split.getOwnerNetAmount();
+            } else {
+                // Fallback per i booking senza netto calcolato: lordo meno i servizi PM.
+                canone = fatturaPM
+                        .map(f -> gross.subtract(nz(f.getTotalAmount())))
+                        .orElseGet(() -> gross.subtract(otaCommission).subtract(cleaning).subtract(pmFee));
+            }
+            canone = canone.setScale(2, RoundingMode.HALF_UP);
             bollo = canone.compareTo(bolloSoglia) > 0 ? bolloImporto : BigDecimal.ZERO.setScale(2);
             // Il bollo resta salvato per tracciabilità e compare nel dettaglio come voce
             // informativa, ma NON concorre al total_amount: non fa parte del compenso del

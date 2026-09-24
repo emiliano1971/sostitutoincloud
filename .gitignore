@@ -63,3 +63,6 @@ frontend/public/config.json
 frontend/test-results/
 frontend/tests/e2e/report/
 frontend/playwright-report/
+
+# Cache incrementale di `tsc --build` (npm run typecheck)
+*.tsbuildinfo

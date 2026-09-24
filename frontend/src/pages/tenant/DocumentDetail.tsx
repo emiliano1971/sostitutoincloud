@@ -160,7 +160,9 @@ const DocumentDetail = () => {
     );
   }
 
-  const imponibile = doc.imponibile ?? ((doc.totalAmount ?? 0) - (doc.vatAmount ?? 0));
+  // Importi letti dal DTO, mai ricalcolati: imponibile, IVA e totale sono persistiti su
+  // fiscal_document al momento dell'emissione ed è quello il valore fiscalmente valido.
+  const imponibile = doc.imponibile ?? 0;
   const showIva = (doc.vatAmount ?? 0) > 0;
   const showBollo = (doc.bolloAmount ?? 0) > 0;
 
@@ -484,6 +486,14 @@ const DocumentDetail = () => {
                     <TableCell className="text-right text-sm font-medium">{fmt(r.importoLordo)}</TableCell>
                   </TableRow>
                 ))}
+                {/* Totali letti dal documento (imponibile / vat_amount / total_amount),
+                    non sommati dalle righe: il documento emesso è la fonte autorevole. */}
+                <TableRow className="border-t-2 font-semibold hover:bg-transparent">
+                  <TableCell className="text-sm">Totale documento</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(doc.imponibile)}</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(doc.vatAmount)}</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(doc.totalAmount)}</TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </CardContent>

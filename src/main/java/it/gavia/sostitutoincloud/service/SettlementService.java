@@ -223,6 +223,9 @@ public class SettlementService {
                             .ownerNetAmount(booking.getOwnerNetAmount())
                             .withholdingAmount(booking.getWithholdingAmount())
                             .bolloCents(bolloCentsPerBooking(booking.getId(), tipiDocumentoById))
+                            .touristTaxAmount(nullSafe(booking.getTouristTaxAmount()))
+                            .touristTaxIncludedInGross(
+                                    Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()))
                             .build();
                 })
                 .filter(dto -> dto != null)

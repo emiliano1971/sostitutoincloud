@@ -146,7 +146,7 @@ e al cestino, solo per utenti non tenant_admin.
 
 mvn -Plocal -DskipTests clean package
 cd frontend && npm run build &&
-npx tsc --noEmit
+npm run typecheck
 
 TOKEN=$(curl -s -X POST \
 http://localhost:8081/sostitutoincloud/\

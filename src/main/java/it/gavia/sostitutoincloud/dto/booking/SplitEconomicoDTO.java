@@ -29,4 +29,9 @@ public class SplitEconomicoDTO {
     private BigDecimal fatturaPmTotale;      // totale lordo della fattura PM
     private List<String> warnings;
     private Boolean calcoloCompleto;
+    // Descrizione della regola di contratto applicata, mostrata sotto la voce nel dettaglio.
+    // Assenti sugli split storici (documenti già emessi): la regola configurata oggi può
+    // non essere quella con cui i documenti sono stati emessi.
+    private String pmFeeDescrizione;   // es. "Commissione PM (10% sul netto)"
+    private String otaDescrizione;     // es. "Commissione OTA (18%)"
 }

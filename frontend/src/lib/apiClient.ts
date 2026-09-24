@@ -43,7 +43,10 @@ async function handleResponse<T>(res: Response): Promise<T> {
     let message = text;
     try {
       const json = JSON.parse(text);
+      // Il backend risponde {"error": "..."} sugli errori applicativi, {"message": "..."}
+      // sugli errori standard di Spring: senza il fallback il toast mostra il JSON grezzo.
       if (json.message) message = json.message;
+      else if (json.error) message = json.error;
     } catch { /* non-JSON body */ }
     throw new Error(message);
   }

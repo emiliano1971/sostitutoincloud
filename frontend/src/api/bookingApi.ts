@@ -16,6 +16,10 @@ export interface SplitEconomico {
   fatturaPmTotale?: number;
   warnings?: string[];
   calcoloCompleto?: boolean;
+  // Regola di contratto applicata, mostrata sotto la voce. Assenti sugli split storici
+  // (prenotazioni con documenti fiscali già emessi).
+  pmFeeDescrizione?: string;
+  otaDescrizione?: string;
 }
 
 export interface FiscalDocumentSummary {
@@ -50,6 +54,9 @@ export interface BookingListItem {
   guests: number;
   grossAmount: number;
   ownerNetAmount: number;
+  // Assenti (Jackson NON_NULL) sulle prenotazioni senza tassa di soggiorno valorizzata.
+  touristTaxIncludedInGross?: boolean;
+  touristTaxAmount?: number;
   statoPrenotazione: string;
   paymentStatus: string;
   documentStatus: string;
@@ -138,6 +145,8 @@ export interface BookingCreateRequest {
   checkoutDate: string;
   guests: number;
   grossAmount: number;
+  /** true = il lordo comprende già la tassa di soggiorno, che il backend scorpora dallo split. */
+  touristTaxIncludedInGross?: boolean;
   guestName: string;
   guestTaxCode?: string;
   guestBirthDate?: string;
@@ -171,6 +180,21 @@ export interface GuestUpdateRequest {
 
 export async function updateBookingGuest(id: number, data: GuestUpdateRequest): Promise<BookingDetail> {
   return patch<BookingDetail>(`/bookings/${id}/guest`, data);
+}
+
+export interface BookingUpdateSplitRequest {
+  /** Omesso = flag invariato. */
+  touristTaxIncludedInGross?: boolean;
+  /** null = nessun override, torna alla commissione delle regole di contratto. */
+  otaCommissionOverride?: number | null;
+}
+
+/** Modifica gli input dello split e lo fa ricalcolare al backend. 400 se ci sono documenti emessi. */
+export async function updateBookingSplit(
+  id: number,
+  data: BookingUpdateSplitRequest,
+): Promise<BookingDetail> {
+  return patch<BookingDetail>(`/bookings/${id}/split`, data);
 }
 
 /** Calcola il codice fiscale via backend; ritorna solo la stringa CF. */

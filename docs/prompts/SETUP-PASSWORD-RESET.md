@@ -474,7 +474,7 @@ Aggiungi in App.tsx (o router):
 
 mvn -Plocal -DskipTests clean package
 cd frontend && npm run build &&
-npx tsc --noEmit
+npm run typecheck
 
 # Test request reset
 curl -s -X POST \
@@ -565,7 +565,7 @@ Esiti:
   corretta"
 - nuova password < 8 caratteri → 400
 - chiamata senza JWT → 403
-- npx tsc --noEmit → 0 errori
+- npm run typecheck → 0 errori
 
 Verifica della consegna (2026-09-01):
 nessuno degli utenti in DB ha di serie un indirizzo

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import ComuneAutocomplete from '@/components/ComuneAutocomplete';
 import { get } from '@/lib/apiClient';
@@ -55,6 +56,7 @@ const BookingNew = () => {
   const [checkout, setCheckout] = useState('');
   const [guests, setGuests] = useState('1');
   const [grossAmount, setGrossAmount] = useState('');
+  const [touristTaxIncluded, setTouristTaxIncluded] = useState(false);
 
   // Dati ospite
   const [guestName, setGuestName] = useState('');
@@ -109,6 +111,7 @@ const BookingNew = () => {
         checkoutDate: checkout,
         guests: Number(guests),
         grossAmount: Number(grossAmount),
+        touristTaxIncludedInGross: touristTaxIncluded,
         guestName: guestName.trim(),
         guestTaxCode: taxCode.trim() || undefined,
         guestBirthDate: birthDate || undefined,
@@ -224,6 +227,17 @@ const BookingNew = () => {
                   placeholder="0,00"
                 />
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Tassa soggiorno inclusa nel lordo</Label>
+                <Switch checked={touristTaxIncluded} onCheckedChange={setTouristTaxIncluded} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Attiva se il lordo ospite include già la tassa di soggiorno: verrà scorporata
+                prima del calcolo di provvigioni, netto proprietario e ritenuta
+              </p>
             </div>
           </CardContent>
         </Card>

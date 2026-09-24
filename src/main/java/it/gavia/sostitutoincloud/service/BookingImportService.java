@@ -122,7 +122,12 @@ public class BookingImportService {
             Map.entry("neonati", "NEONATI"),
             Map.entry("commissione del canale", "COMMISSIONE"),
             Map.entry("stato", "STATO"),
-            Map.entry("cliente", "CLIENTE_NOME")
+            Map.entry("cliente", "CLIENTE_NOME"),
+            // Flag booleano: il lordo della riga comprende già la tassa di soggiorno.
+            // Colonna opzionale — se non mappata il flag resta false (tassa a parte).
+            Map.entry("tassa inclusa", "TASSA_INCLUSA"),
+            Map.entry("tassa soggiorno inclusa", "TASSA_INCLUSA"),
+            Map.entry("tourist tax included", "TASSA_INCLUSA")
     );
 
     // Mapping suggerito: header atteso (normalizzato) → campo di sistema. File ospiti.
@@ -266,13 +271,37 @@ public class BookingImportService {
                 // Nome ospite: dal merge con il file ospiti se disponibile, altrimenti CLIENTE_NOME del mapping.
                 String guestName = resolveGuestName(row);
 
+                // Tassa di soggiorno: calcolata PRIMA dello split e prima dell'insert, perché
+                // se è inclusa nel lordo va scorporata dalla base di calcolo (è incassata per
+                // conto del Comune, non è reddito del proprietario e non entra nella ritenuta).
+                boolean tassaInclusa = tassaInclusaEffettiva(row.getTouristTaxIncluded(), canale);
+
+                // Importo tassa: quello del file se valorizzato, altrimenti la regola del
+                // comune dell'immobile. Un unico valore per lo scorporo e per il booking:
+                // usarne due diversi lasciava lo split incoerente con l'importo salvato.
+                BigDecimal tassaDaRegola = orZero(touristTaxService.calcolaPerBooking(
+                        tenantId,
+                        property != null ? property.getCity() : null,
+                        row.getCheckinDate(),
+                        row.getNights(),
+                        row.getGuests()));
+                BigDecimal tassa = orZero(row.getTouristTaxAmount()).signum() > 0
+                        ? orZero(row.getTouristTaxAmount())
+                        : tassaDaRegola;
+
+                // Tassa inclusa ma nessuna regola per il comune e nessun importo nel file →
+                // tassa 0: il flag resta true e lo scorporo lascia il lordo invariato.
+                BigDecimal grossPerCalcolo = tassaInclusa && tassa.signum() > 0
+                        ? orZero(row.getGrossAmount()).subtract(tassa)
+                        : orZero(row.getGrossAmount());
+
                 // Calcolo dello split economico tramite le regole del contratto immobile.
                 // La commissione OTA dal CSV è passata come override.
                 ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
                         tenantId,
                         fkPropertyId,
                         fkCanaleOtaId,
-                        row.getGrossAmount(),
+                        grossPerCalcolo,
                         row.getOtaCommissionAmount(),  // override dal CSV
                         row.getNights(),
                         row.getGuests());
@@ -335,8 +364,9 @@ public class BookingImportService {
                         .ownerNetAmount(calcolo.getOwnerNetAmount())
                         .withholdingAmount(calcolo.getWithholdingAmount())
                         .aliquotaRitenuta(calcolo.getAliquotaRitenuta())
-                        .touristTaxAmount(orZero(row.getTouristTaxAmount()))
-                        .touristTaxIncludedInGross(Boolean.TRUE.equals(row.getTouristTaxIncluded()))
+                        // Stesso importo usato per lo scorporo del lordo (vedi sopra).
+                        .touristTaxAmount(tassa)
+                        .touristTaxIncludedInGross(tassaInclusa)
                         .touristTaxCollection(canale != null
                                 ? canale.getTouristTaxCollection() : "contanti")
                         .fkStatoPrenotazioneId(statoImportedId)
@@ -344,17 +374,8 @@ public class BookingImportService {
                         .settlementStatus("pending")
                         .build();
                 Booking saved = bookingDAO.insert(booking);
-                // Tassa di soggiorno: calcolo e persistenza già all'import (comune property con regola attiva).
-                BigDecimal tassa = touristTaxService.calcolaPerBooking(
-                        tenantId,
-                        property != null ? property.getCity() : null,
-                        saved.getCheckinDate(),
-                        saved.getNights(),
-                        saved.getGuests(),
-                        saved.getTouristTaxIncludedInGross());
-                if (tassa != null && tassa.signum() > 0) {
-                    bookingDAO.updateTouristTax(saved.getId(), tassa);
-                }
+                // La tassa di soggiorno è già nel booking: calcolata prima dello split, non
+                // serve più l'UPDATE dopo l'insert.
                 // Avanzamento automatico dello stato in base ai dati disponibili (imported/enriched/ready)
                 bookingService.aggiornaStato(saved.getId());
                 imported++;
@@ -617,9 +638,32 @@ public class BookingImportService {
             boolean nomeMancante = guestName.isBlank();
             if (guestName.isBlank()) guestName = externalId;
 
+            // Tassa di soggiorno inclusa nel lordo: va scorporata dalla base dello split,
+            // perché è incassata per conto del Comune, non è reddito del proprietario e non
+            // deve entrare nella base della ritenuta.
+            // La colonna TASSA_INCLUSA è opzionale: se non è mappata il flag resta null
+            // ("non specificato") e vale il default del canale OTA. Il valore grezzo del file
+            // finisce nella riga in cache, così confirm() riapplica la stessa regola.
+            Boolean tassaInclusaFile = flagTassaInclusaDalFile(mapVal(row, bMap, "TASSA_INCLUSA"));
+            CanaleOta canaleRiga = tassaInclusaFile == null
+                    ? canaleOtaDAO.findById(m.canaleId()).orElse(null)
+                    : null;   // il file decide: nessuna query per il default del canale
+            boolean tassaInclusa = tassaInclusaEffettiva(tassaInclusaFile, canaleRiga);
+
+            // La tassa si calcola solo se inclusa nel lordo: così la query per riga in
+            // anteprima si paga solo sulle righe che hanno davvero bisogno dello scorporo.
+            BigDecimal touristTax = BigDecimal.ZERO;
+            if (tassaInclusa) {
+                String comuneImmobile = propertyDAO.findById(m.propertyId())
+                        .map(Property::getCity).orElse(null);
+                touristTax = orZero(touristTaxService.calcolaPerBooking(
+                        tenantId, comuneImmobile, checkin, nights, guests));
+            }
+            BigDecimal grossPerCalcolo = tassaInclusa ? gross.subtract(touristTax) : gross;
+
             // calcolo split economico
             ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
-                    tenantId, m.propertyId(), m.canaleId(), gross, commissione, nights, guests);
+                    tenantId, m.propertyId(), m.canaleId(), grossPerCalcolo, commissione, nights, guests);
 
             String comuneNascita = guest != null ? guest.getBirthPlace() : null;
             String dataNascita   = guest != null ? guest.getBirthDate()  : null;
@@ -701,7 +745,9 @@ public class BookingImportService {
                     .grossAmount(gross)
                     .otaCommissionAmount(commissione)
                     .status(mapVal(row, bMap, "STATO"))
-                    .touristTaxIncluded(Boolean.FALSE)
+                    // Valore grezzo del file (null = non specificato): il default del canale
+                    // lo riapplica confirm(), che ha già il canale risolto da fkCanaleOtaId.
+                    .touristTaxIncluded(tassaInclusaFile)
                     .currency("EUR")
                     .splitWarnings(warnings)
                     .build();
@@ -748,6 +794,31 @@ public class BookingImportService {
                 .status("errore")
                 .errorMessage(msg)
                 .build();
+    }
+
+    /**
+     * Flag "tassa inclusa nel lordo" letto dal file: true per true/1/si/sì/yes, false per
+     * qualsiasi altro valore esplicito, null se la colonna manca o è vuota. Il null è
+     * significativo: distingue "non specificato" da "false esplicito" e fa scattare il
+     * default del canale OTA.
+     */
+    private Boolean flagTassaInclusaDalFile(String valore) {
+        if (blank(valore)) return null;
+        String v = valore.trim();
+        return "true".equalsIgnoreCase(v)
+                || "1".equals(v)
+                || "si".equalsIgnoreCase(v)
+                || "sì".equalsIgnoreCase(v)
+                || "yes".equalsIgnoreCase(v);
+    }
+
+    /**
+     * Flag effettivo: vince il valore esplicito del file (anche false), altrimenti vale il
+     * default del canale OTA — es. Airbnb incassa la tassa dentro il lordo, Booking.com no.
+     */
+    private boolean tassaInclusaEffettiva(Boolean dalFile, CanaleOta canale) {
+        if (dalFile != null) return dalFile;
+        return canale != null && Boolean.TRUE.equals(canale.getTassaSoggiornoInclusa());
     }
 
     /** Nome ospite per la fase di confirm: firstName+lastName se presenti, altrimenti guestName precalcolato. */
@@ -1023,7 +1094,7 @@ public class BookingImportService {
                 .otaCommissionAmount(parseDecimalOr(col(cols, 13), BigDecimal.ZERO))
                 .cleaningAmount(parseDecimalOr(col(cols, 14), BigDecimal.ZERO))
                 .touristTaxAmount(parseDecimalOr(col(cols, 15), BigDecimal.ZERO))
-                .touristTaxIncluded("true".equalsIgnoreCase(col(cols, 16)))
+                .touristTaxIncluded(flagTassaInclusaDalFile(col(cols, 16)))
                 .currency(col(cols, 17).isBlank() ? "EUR" : col(cols, 17))
                 .build();
     }

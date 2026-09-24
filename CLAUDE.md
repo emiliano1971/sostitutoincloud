@@ -509,6 +509,22 @@ mvn -Plocal compile
 mvn -Pprod clean package
 ```
 
+### Frontend — build e typecheck
+```bash
+cd frontend
+npm run build       # bundle Vite — NON fa type-checking (esbuild, transpile-only)
+npm run typecheck   # controllo dei tipi TypeScript — 0 errori attesi
+```
+
+**Il comando per i tipi è `npm run typecheck` (`tsc --build`), mai `npx tsc --noEmit`.**
+`tsconfig.json` è un file "solution" con `"files": []` e due `references`
+(`tsconfig.app.json`, `tsconfig.node.json`): senza `-p` o `--build` tsc non ha input,
+quindi `npx tsc --noEmit` **esce 0 senza controllare nulla** e lascia passare errori reali.
+In alternativa allo script: `npx tsc --build` oppure `npx tsc --noEmit -p tsconfig.app.json`.
+
+Regola per Claude: dopo ogni modifica al frontend eseguire **sia** `npm run build`
+**sia** `npm run typecheck` — la build da sola non intercetta gli errori di tipo.
+
 ### Run
 ```bash
 # Avvia backend locale

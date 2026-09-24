@@ -29,6 +29,13 @@ export interface SettlementBookingItem {
   withholdingAmount: number;
   bolloCents: number;   // bollo in centesimi (0 o 200)
   /**
+   * Tassa di soggiorno della prenotazione. Se inclusa nel lordo è già stata scorporata
+   * dalla base dello split, quindi non incide sul canone: serve solo a spiegare perché
+   * il canone non corrisponde al lordo meno le altre voci.
+   */
+  touristTaxAmount?: number;
+  touristTaxIncludedInGross?: boolean;
+  /**
    * Competenza della ritenuta (es. "08/2026") quando differisce dal periodo del
    * settlement: la prenotazione è entrata come arretrato. null/assente nel caso normale.
    */

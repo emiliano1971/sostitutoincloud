@@ -47,13 +47,17 @@ public class TouristTaxService {
 
     /**
      * Calcola la tassa di soggiorno per un booking cercando la regola attiva del comune.
-     * Ritorna 0 se la tassa è già inclusa nel lordo OTA o se non c'è una regola per il comune.
+     * Ritorna 0 solo se non c'è una regola per il comune o mancano i dati minimi.
+     *
+     * <p>La tassa è calcolata SEMPRE, anche quando è già inclusa nel lordo: il flag
+     * {@code tourist_tax_included_in_gross} del booking dice dove si trova l'importo, non
+     * che non esista — per questo non è più un parametro di questo metodo. Sta al chiamante
+     * decidere se scorporarlo dal lordo prima dello split economico: la tassa è incassata
+     * per conto del Comune, non è reddito del proprietario e non deve entrare nella base
+     * della ritenuta.
      */
     public BigDecimal calcolaPerBooking(Integer tenantId, String comune, LocalDate checkinDate,
-                                        Integer nights, Integer guests, Boolean touristTaxIncludedInGross) {
-        if (Boolean.TRUE.equals(touristTaxIncludedInGross)) {
-            return BigDecimal.ZERO;
-        }
+                                        Integer nights, Integer guests) {
         if (comune == null || comune.isBlank() || checkinDate == null) {
             return BigDecimal.ZERO;
         }

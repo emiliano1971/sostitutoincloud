@@ -29,4 +29,8 @@ public class ContrattoCalcoloResult {
     private String regimeFiscalePm;         // RF01 o RF19
     private Boolean calcoloCompleto;        // true se trovate tutte le regole
     private List<String> warnings;          // messaggi se regole mancanti
+    // Descrizione leggibile della regola applicata, per il dettaglio prenotazione.
+    // null quando non esiste una regola per quella voce.
+    private String pmFeeDescrizione;        // es. "Commissione PM (10% sul netto)"
+    private String otaDescrizione;          // es. "Commissione OTA (18%)"
 }

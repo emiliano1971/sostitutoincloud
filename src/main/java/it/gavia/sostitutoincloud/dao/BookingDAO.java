@@ -202,6 +202,37 @@ public class BookingDAO {
         log.info("BookingDAO.updateTouristTax() - id={} amount={}", id, touristTaxAmount);
     }
 
+    /**
+     * Riscrive in blocco le voci dello split economico dopo un ricalcolo.
+     * Il filtro sul tenant fa parte della protezione: id di un altro tenant → 0 righe.
+     */
+    public int updateSplit(Integer id,
+                           Integer tenantId,
+                           Boolean touristTaxIncludedInGross,
+                           BigDecimal touristTaxAmount,
+                           BigDecimal otaCommission,
+                           BigDecimal cleaning,
+                           BigDecimal pmFee,
+                           BigDecimal ownerNet,
+                           BigDecimal withholding) {
+        String sql = "UPDATE booking SET " +
+                "tourist_tax_included_in_gross = ?, " +
+                "tourist_tax_amount = ?, " +
+                "ota_commission_amount = ?, " +
+                "cleaning_amount = ?, " +
+                "pm_fee_amount = ?, " +
+                "owner_net_amount = ?, " +
+                "withholding_amount = ?, " +
+                "updated_at = NOW() " +
+                "WHERE id = ? AND fk_tenant_id = ?";
+        int updated = jdbcTemplate.update(sql,
+                Boolean.TRUE.equals(touristTaxIncludedInGross),
+                touristTaxAmount, otaCommission, cleaning, pmFee, ownerNet, withholding,
+                id, tenantId);
+        log.info("BookingDAO.updateSplit() - id={} tenantId={}", id, tenantId);
+        return updated;
+    }
+
     public void updateStato(Integer bookingId, Integer fkStatoPrenotazioneId) {
         String sql = "UPDATE booking SET fk_stato_prenotazione_id = ?, updated_at = NOW() WHERE id = ?";
         jdbcTemplate.update(sql, fkStatoPrenotazioneId, bookingId);

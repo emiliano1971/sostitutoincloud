@@ -26,10 +26,14 @@ public class PropertyContractService {
 
     private static final Set<String> CALC_MODE_VALIDI = Set.of(
             "fisso", "percentuale", "fisso_per_notte",
-            "fisso_per_persona", "percentuale_lordo", "rimanenza");
+            "fisso_per_persona", "percentuale_lordo", "percentuale_netto", "rimanenza");
 
     private static final Set<String> TIPI_RIMANENZA_AMMESSA = Set.of(
             "commissione_pm", "provvigione_proprietario");
+
+    // 'percentuale sul netto': la base è il lordo meno tutte le altre voci, quindi ha senso
+    // solo sul compenso del PM. Stesso vincolo applicato da ContrattoCalcolatoreService.
+    private static final Set<String> TIPI_PERCENTUALE_NETTO_AMMESSA = Set.of("commissione_pm");
 
     private static final Map<String, String> TIPO_LABELS = Map.of(
             "pulizie", "Pulizie Abitazione",
@@ -46,6 +50,7 @@ public class PropertyContractService {
             "fisso_per_notte", "Fisso per Notte (€/notte)",
             "fisso_per_persona", "Fisso per Persona (€/persona)",
             "percentuale_lordo", "Percentuale sul Lordo (%)",
+            "percentuale_netto", "Percentuale sul Netto (%)",
             "rimanenza", "Rimanenza automatica");
 
     private final PropertyContractRuleDAO contractRuleDAO;
@@ -148,6 +153,13 @@ public class PropertyContractService {
         if (isRemainder && !TIPI_RIMANENZA_AMMESSA.contains(dto.getTipo())) {
             throw new IllegalArgumentException(
                     "La rimanenza è ammessa solo per Commissione PM o Provvigione Proprietario");
+        }
+
+        // percentuale sul netto solo per commissione_pm
+        if ("percentuale_netto".equals(dto.getCalcMode())
+                && !TIPI_PERCENTUALE_NETTO_AMMESSA.contains(dto.getTipo())) {
+            throw new IllegalArgumentException(
+                    "La percentuale sul netto è ammessa solo per la Commissione PM");
         }
 
         // una sola regola rimanenza per immobile

@@ -17,6 +17,7 @@ import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
 import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
@@ -270,6 +271,71 @@ public class BookingService {
         return findById(tenantId, bookingId);
     }
 
+    /**
+     * Modifica gli input dello split economico e lo ricalcola: flag "tassa inclusa nel lordo"
+     * e override della commissione OTA.
+     *
+     * <p>PATCH parziale sul flag (null = invariato), ma NON sull'override: null significa
+     * "nessun override", cioè ritorno alla commissione delle regole di contratto. È
+     * l'unico modo per annullare un override già applicato.
+     *
+     * <p>Bloccato se esistono documenti fiscali emessi: gli importi sono già stampati su
+     * fattura/ricevuta e cambiarli renderebbe il documento incoerente col DB.
+     */
+    @Transactional
+    public BookingDetailDTO updateSplit(Integer tenantId, Integer bookingId, BookingUpdateSplitDTO dto) {
+        Booking booking = bookingDAO.findById(bookingId)
+                .filter(b -> tenantId.equals(b.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+
+        if (!fiscalDocumentDAO.findByBookingId(bookingId).isEmpty()) {
+            throw new IllegalStateException(
+                    "Impossibile modificare: esistono documenti fiscali emessi per questa prenotazione");
+        }
+
+        boolean taxIncluded = dto.getTouristTaxIncludedInGross() != null
+                ? dto.getTouristTaxIncludedInGross()
+                : Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross());
+        BigDecimal otaOverride = dto.getOtaCommissionOverride();
+
+        // La tassa si ricalcola sempre dalla regola del comune: il flag dice dove si trova
+        // l'importo (dentro o fuori dal lordo), non se esiste.
+        String comune = propertyDAO.findById(booking.getFkPropertyId())
+                .map(Property::getCity).orElse(null);
+        BigDecimal nuovaTassa = safeVal(touristTaxService.calcolaPerBooking(
+                tenantId, comune, booking.getCheckinDate(), booking.getNights(), booking.getGuests()));
+
+        // Tassa inclusa → va scorporata dalla base: è incassata per conto del Comune, non è
+        // reddito del proprietario e non deve entrare nella base della ritenuta.
+        BigDecimal grossPerCalcolo = taxIncluded
+                ? safeVal(booking.getGrossAmount()).subtract(nuovaTassa)
+                : booking.getGrossAmount();
+
+        ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
+                tenantId,
+                booking.getFkPropertyId(),
+                booking.getFkCanaleOtaId(),
+                grossPerCalcolo,
+                otaOverride,
+                booking.getNights(),
+                booking.getGuests());
+
+        bookingDAO.updateSplit(bookingId, tenantId,
+                taxIncluded,
+                nuovaTassa,
+                calcolo.getOtaCommissionAmount(),
+                calcolo.getCleaningAmount(),
+                calcolo.getPmFeeAmount(),
+                calcolo.getOwnerNetAmount(),
+                calcolo.getWithholdingAmount());
+
+        aggiornaStato(bookingId);
+        log.info("BookingService.updateSplit() - id={} taxIncluded={} otaOverride={}",
+                bookingId, taxIncluded, otaOverride);
+        return findById(tenantId, bookingId)
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+    }
+
     private boolean isNotBlank(String s) {
         return s != null && !s.isBlank();
     }
@@ -353,13 +419,25 @@ public class BookingService {
             log.info("BookingService.createManuale() - CF fittizio generato: {}", cf);
         }
 
-        // 4. Split economico dalle regole del contratto. Nessun override di commissione OTA:
+        // 4. Tassa di soggiorno: calcolata PRIMA dello split, perché se è inclusa nel lordo
+        //    va scorporata dalla base di calcolo.
+        boolean tassaInclusa = Boolean.TRUE.equals(dto.getTouristTaxIncludedInGross());
+        BigDecimal touristTax = touristTaxService.calcolaPerBooking(
+                tenantId, property.getCity(), dto.getCheckinDate(), nights, dto.getGuests());
+
+        // 5. Split economico dalle regole del contratto. Nessun override di commissione OTA:
         //    l'inserimento manuale non ha un dato reale del canale da cui partire.
+        //    La tassa di soggiorno è incassata per conto del Comune: non è reddito del
+        //    proprietario e non deve finire nella base della ritenuta.
+        BigDecimal grossPerCalcolo = tassaInclusa
+                ? dto.getGrossAmount().subtract(safeVal(touristTax))
+                : dto.getGrossAmount();
+
         ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
                 tenantId,
                 dto.getFkPropertyId(),
                 dto.getFkCanaleOtaId(),
-                dto.getGrossAmount(),
+                grossPerCalcolo,
                 null,
                 nights,
                 dto.getGuests());
@@ -368,10 +446,6 @@ public class BookingService {
             calcolo.getWarnings().forEach(w ->
                     log.warn("BookingService.createManuale() - booking {}: {}", extId, w));
         }
-
-        // 5. Tassa di soggiorno: non inclusa nel lordo digitato dall'operatore.
-        BigDecimal touristTax = touristTaxService.calcolaPerBooking(
-                tenantId, property.getCity(), dto.getCheckinDate(), nights, dto.getGuests(), false);
 
         // 6. Modalità di riscossione della tassa: dal canale se indicato, altrimenti contanti
         //    (stesso fallback dell'import). La colonna è NOT NULL.
@@ -409,7 +483,7 @@ public class BookingService {
                 .withholdingAmount(calcolo.getWithholdingAmount())
                 .aliquotaRitenuta(calcolo.getAliquotaRitenuta())
                 .touristTaxAmount(touristTax)
-                .touristTaxIncludedInGross(false)
+                .touristTaxIncludedInGross(tassaInclusa)
                 .touristTaxCollection(touristTaxCollection)
                 .guestName(dto.getGuestName().trim())
                 .guestTaxCode(cf)
@@ -591,6 +665,8 @@ public class BookingService {
                 .guests(b.getGuests())
                 .grossAmount(b.getGrossAmount())
                 .ownerNetAmount(b.getOwnerNetAmount())
+                .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
+                .touristTaxAmount(b.getTouristTaxAmount())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))
                 .paymentStatus(b.getPaymentStatus())
                 .documentStatus(computeDocumentStatus(b.getId(), maps))
@@ -607,50 +683,111 @@ public class BookingService {
                 ? maps.ownersById.get(b.getFkOwnerId()) : null;
         Tenant tenant = maps.tenant;
 
-        // Ricalcolo dello split economico tramite le regole del contratto immobile.
-        // L'otaCommission già presente nel DB è usato come override (il valore importato dal CSV).
-        ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
-                b.getFkTenantId(),
-                b.getFkPropertyId(),
-                b.getFkCanaleOtaId(),
-                b.getGrossAmount(),
-                b.getOtaCommissionAmount(),
-                b.getNights(),
-                b.getGuests());
-
-        // Ricalcolo tassa di soggiorno per booking importati senza tassa (comune con regola attiva).
-        if (safeVal(b.getTouristTaxAmount()).signum() == 0
-                && !Boolean.TRUE.equals(b.getTouristTaxIncludedInGross())) {
+        // Ricalcolo tassa di soggiorno per i booking importati senza tassa (comune con regola
+        // attiva). Va PRIMA dello split: se la tassa è inclusa nel lordo, lo scorporo qui sotto
+        // ha bisogno del valore aggiornato. Vale anche per i booking con tassa inclusa, che
+        // fino alla migration del calcolo restavano a zero.
+        if (safeVal(b.getTouristTaxAmount()).signum() == 0) {
             BigDecimal tassa = touristTaxService.calcolaPerBooking(
                     b.getFkTenantId(),
                     prop != null ? prop.getCity() : null,
                     b.getCheckinDate(),
                     b.getNights(),
-                    b.getGuests(),
-                    b.getTouristTaxIncludedInGross());
+                    b.getGuests());
             if (tassa != null && tassa.signum() > 0) {
                 bookingDAO.updateTouristTax(b.getId(), tassa);
                 b.setTouristTaxAmount(tassa);
             }
         }
 
-        SplitEconomicoDTO split = SplitEconomicoDTO.builder()
-                .grossAmount(b.getGrossAmount())
-                .otaCommissionAmount(calcolo.getOtaCommissionAmount())
-                .cleaningAmount(calcolo.getCleaningAmount())
-                .pmFeeAmount(calcolo.getPmFeeAmount())
-                .ownerNetAmount(calcolo.getOwnerNetAmount())
-                .withholdingAmount(b.getWithholdingAmount())   // mantieni il valore del DB
-                .aliquotaRitenuta(b.getAliquotaRitenuta())     // % storicizzata sul booking
-                .liquidazioneOwner(calcolo.getLiquidazioneOwner())
-                .imponibileFatturaPm(calcolo.getImponibileFatturaPm())
-                .ivaScorporataPm(calcolo.getIvaScorporata())
-                .fatturaPmTotale(calcolo.getFatturaPmTotale())
-                .warnings(calcolo.getWarnings())
-                .calcoloCompleto(calcolo.getCalcoloCompleto())
-                .touristTaxAmount(b.getTouristTaxAmount())
-                .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
-                .build();
+        // Documenti fiscali della prenotazione: letti una volta sola, servono sia a decidere
+        // come costruire lo split sia a popolare la lista del DTO.
+        List<FiscalDocument> documentiBooking = fiscalDocumentDAO.findByBookingId(b.getId());
+
+        // Split economico: se esistono documenti fiscali emessi si mostrano i valori
+        // STORICI salvati sul booking, che sono quelli con cui i documenti sono stati
+        // emessi. Ricalcolarli dalle regole di contratto correnti farebbe divergere il
+        // dettaglio dalla ricevuta e dalla fattura ogni volta che una regola cambia.
+        // Coerente con updateSplit(), che sui booking con documenti rifiuta le modifiche.
+        SplitEconomicoDTO split;
+        if (!documentiBooking.isEmpty()) {
+            BigDecimal ownerNet = safeVal(b.getOwnerNetAmount());
+            BigDecimal ritenuta = safeVal(b.getWithholdingAmount());
+            // Lordo dei servizi PM dai valori storici, usato se la fattura PM non è stata emessa.
+            BigDecimal lordoServizi = safeVal(b.getOtaCommissionAmount())
+                    .add(safeVal(b.getCleaningAmount()))
+                    .add(safeVal(b.getPmFeeAmount()));
+            // Imponibile e IVA della fattura PM già emessa: è il dato storico reale, non
+            // una riproduzione del calcolo. ("fattura" è il codice della lookup tipo_documento.)
+            Optional<FiscalDocument> fatturaPm = documentiBooking.stream()
+                    .filter(d -> {
+                        TipoDocumento t = d.getFkTipoDocumentoId() != null
+                                ? maps.tipiDocumentoById.get(d.getFkTipoDocumentoId()) : null;
+                        return t != null && "fattura".equals(t.getCodice());
+                    })
+                    .findFirst();
+
+            split = SplitEconomicoDTO.builder()
+                    .grossAmount(b.getGrossAmount())
+                    .otaCommissionAmount(safeVal(b.getOtaCommissionAmount()))
+                    .cleaningAmount(safeVal(b.getCleaningAmount()))
+                    .pmFeeAmount(safeVal(b.getPmFeeAmount()))
+                    .ownerNetAmount(ownerNet)
+                    .withholdingAmount(ritenuta)
+                    .aliquotaRitenuta(b.getAliquotaRitenuta())
+                    .liquidazioneOwner(ownerNet.subtract(ritenuta))
+                    .imponibileFatturaPm(fatturaPm.map(FiscalDocument::getImponibile).orElse(null))
+                    .ivaScorporataPm(fatturaPm.map(FiscalDocument::getVatAmount).orElse(null))
+                    .fatturaPmTotale(fatturaPm.map(FiscalDocument::getTotalAmount).orElse(lordoServizi))
+                    .warnings(List.of())
+                    .calcoloCompleto(true)
+                    .touristTaxAmount(b.getTouristTaxAmount())
+                    .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
+                    .build();
+            log.debug("BookingService.toDetailDTO() - id={} split da valori storici ({} documenti emessi)",
+                    b.getId(), documentiBooking.size());
+        } else {
+            // Nessun documento emesso: lo split è ancora un'anteprima, si ricalcola dalle
+            // regole di contratto correnti.
+            // L'otaCommission già presente nel DB è usato come override (il valore importato dal CSV).
+            // Se la tassa di soggiorno è inclusa nel lordo va scorporata: è incassata per conto del
+            // Comune, non è reddito del proprietario e non deve entrare nella base della ritenuta.
+            BigDecimal grossPerCalcolo = Boolean.TRUE.equals(b.getTouristTaxIncludedInGross())
+                    ? safeVal(b.getGrossAmount()).subtract(safeVal(b.getTouristTaxAmount()))
+                    : b.getGrossAmount();
+
+            ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
+                    b.getFkTenantId(),
+                    b.getFkPropertyId(),
+                    b.getFkCanaleOtaId(),
+                    grossPerCalcolo,
+                    b.getOtaCommissionAmount(),
+                    b.getNights(),
+                    b.getGuests());
+
+            split = SplitEconomicoDTO.builder()
+                    .grossAmount(b.getGrossAmount())
+                    .otaCommissionAmount(calcolo.getOtaCommissionAmount())
+                    .cleaningAmount(calcolo.getCleaningAmount())
+                    .pmFeeAmount(calcolo.getPmFeeAmount())
+                    .ownerNetAmount(calcolo.getOwnerNetAmount())
+                    .withholdingAmount(b.getWithholdingAmount())   // mantieni il valore del DB
+                    .aliquotaRitenuta(b.getAliquotaRitenuta())     // % storicizzata sul booking
+                    .liquidazioneOwner(calcolo.getLiquidazioneOwner())
+                    .imponibileFatturaPm(calcolo.getImponibileFatturaPm())
+                    .ivaScorporataPm(calcolo.getIvaScorporata())
+                    .fatturaPmTotale(calcolo.getFatturaPmTotale())
+                    .warnings(calcolo.getWarnings())
+                    .calcoloCompleto(calcolo.getCalcoloCompleto())
+                    .touristTaxAmount(b.getTouristTaxAmount())
+                    .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
+                    // Descrizioni solo qui: nel ramo storico sopra lo split non viene dalle
+                    // regole correnti, quindi descriverle mentirebbe sull'importo mostrato.
+                    .pmFeeDescrizione(calcolo.getPmFeeDescrizione())
+                    .otaDescrizione(calcolo.getOtaDescrizione())
+                    .build();
+            log.debug("BookingService.toDetailDTO() - id={} split ricalcolato (nessun documento)", b.getId());
+        }
 
         BookingDetailDTO dto = BookingDetailDTO.builder()
                 .id(b.getId())
@@ -709,7 +846,7 @@ public class BookingService {
                 .tenantLegalAddress(TenantAddressUtils.indirizzoCompleto(tenant))
                 .tenantPec(tenant != null ? tenant.getPec() : null)
                 // documenti fiscali associati alla prenotazione
-                .documenti(mapDocumenti(b.getId(), maps))
+                .documenti(mapDocumenti(documentiBooking, maps))
                 .build();
 
         // settlementStato/settlementId derivati dal settlement reale associato al booking
@@ -724,8 +861,9 @@ public class BookingService {
         return dto;
     }
 
-    private List<FiscalDocumentSummaryDTO> mapDocumenti(Integer bookingId, LookupMaps maps) {
-        return fiscalDocumentDAO.findByBookingId(bookingId).stream()
+    /** I documenti sono già stati letti da toDetailDTO(): qui si mappano soltanto. */
+    private List<FiscalDocumentSummaryDTO> mapDocumenti(List<FiscalDocument> documenti, LookupMaps maps) {
+        return documenti.stream()
                 .map(d -> toDocumentSummaryDTO(d, maps))
                 .toList();
     }

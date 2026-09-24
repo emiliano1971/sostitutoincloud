@@ -26,6 +26,9 @@ public class BookingCreateDTO {
     private LocalDate checkoutDate;      // obbligatorio
     private Integer guests;              // obbligatorio, min 1
     private BigDecimal grossAmount;      // obbligatorio, > 0
+    // true = il lordo digitato comprende già la tassa di soggiorno, che va quindi
+    // scorporata prima dello split economico. Assente = false (tassa a parte).
+    private Boolean touristTaxIncludedInGross;
 
     // ── dati ospite ─────────────────────────────────────────────────────────
     private String guestName;            // obbligatorio — "Cognome Nome"

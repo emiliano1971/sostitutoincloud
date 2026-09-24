@@ -186,7 +186,17 @@ const SettlementDetail = () => {
                       <TableCell className="text-sm">{fmtDate(b.checkinDate)}</TableCell>
                       <TableCell className="text-sm">{fmtDate(b.checkoutDate)}</TableCell>
                       <TableCell className="text-right">{notti(b.checkinDate, b.checkoutDate)}</TableCell>
-                      <TableCell className="text-right">{fmtEuro(b.grossAmount)}</TableCell>
+                      <TableCell className="text-right">
+                        {fmtEuro(b.grossAmount)}
+                        {/* Tassa già compresa nel lordo: scorporata prima dello split, non
+                            incide sul canone. Sotto al lordo e non in colonna a sé perché la
+                            tabella è già larga (stesso criterio della riga "arretrato"). */}
+                        {b.touristTaxIncludedInGross && (b.touristTaxAmount ?? 0) > 0 && (
+                          <span className="block text-xs text-muted-foreground">
+                            (incl. {fmtEuro(b.touristTaxAmount ?? 0)} tassa sogg.)
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.otaCommissionAmount)}</TableCell>
                       <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.cleaningAmount)}</TableCell>
                       <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.pmFeeAmount)}</TableCell>

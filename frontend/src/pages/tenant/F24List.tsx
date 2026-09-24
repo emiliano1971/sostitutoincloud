@@ -345,8 +345,10 @@ const F24List = () => {
       </Card>
 
       {/* Dialog: Genera F24 */}
+      {/* max-w-6xl: la tabella delle ritenute ha 11 colonne e min-w-[1000px]; con i 24px
+          di padding per lato servono ~1048px perché entri senza scroll orizzontale. */}
       <Dialog open={generaOpen} onOpenChange={closeGenera}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-6xl">
           <DialogHeader>
             <DialogTitle>Genera F24</DialogTitle>
             <DialogDescription>Aggrega le ritenute da versare del periodo selezionato.</DialogDescription>
@@ -378,7 +380,14 @@ const F24List = () => {
                 <div className="flex justify-between"><span className="text-muted-foreground">N° ritenute</span><span className="font-medium">{risultato.numeroRitenute}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Scadenza</span><span className="font-medium">{risultato.scadenza}</span></div>
               </div>
-              <RitenuteTable ritenute={risultato.ritenute} />
+              <RitenuteTable
+                ritenute={risultato.ritenute}
+                periodoF24={{ mese: risultato.periodoMese, anno: risultato.periodoAnno }}
+                onApriBooking={(bookingId) => {
+                  closeGenera(false);
+                  navigate(`/bookings/${bookingId}`);
+                }}
+              />
             </div>
           )}
 
@@ -398,9 +407,10 @@ const F24List = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: dettaglio ritenute collegate */}
+      {/* Dialog: dettaglio ritenute collegate.
+          max-w-6xl come il dialog "Genera F24": stessa RitenuteTable, stessa larghezza. */}
       <Dialog open={dettaglioOpen} onOpenChange={setDettaglioOpen}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-6xl">
           <DialogHeader>
             <DialogTitle>
               Dettaglio F24 {dettaglio && fmtPeriodo(dettaglio.periodoMese, dettaglio.periodoAnno)}
