@@ -31,7 +31,7 @@ import org.apache.poi.ss.usermodel.DateUtil;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -39,6 +39,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.Year;
@@ -46,6 +47,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,13 +112,22 @@ public class BookingImportService {
             "rifiutata", "rejected", "expired");
 
     // Mapping suggerito: header atteso (normalizzato) → campo di sistema. File prenotazioni.
-    private static final Map<String, String> EXPECTED_BOOKING_HEADERS = Map.ofEntries(
+    // Ordinato per lunghezza chiave decrescente: nel match parziale le chiavi più specifiche
+    // vengono provate per prime (Map.ofEntries non garantisce alcun ordine di iterazione).
+    private static final Map<String, String> EXPECTED_BOOKING_HEADERS = perLunghezzaDecrescente(Map.ofEntries(
             Map.entry("id", "BOOKING_ID"),
             Map.entry("origine", "ORIGINE"),
             Map.entry("struttura", "STRUTTURA"),
             Map.entry("arrivo", "CHECKIN"),
+            Map.entry("check-in", "CHECKIN"),
+            Map.entry("checkin", "CHECKIN"),
+            Map.entry("check in", "CHECKIN"),
             Map.entry("partenza", "CHECKOUT"),
+            Map.entry("check-out", "CHECKOUT"),
+            Map.entry("checkout", "CHECKOUT"),
+            Map.entry("check out", "CHECKOUT"),
             Map.entry("importo totale", "IMPORTO_TOTALE"),
+            Map.entry("persone", "PERSONE"),
             Map.entry("adulti", "ADULTI"),
             Map.entry("bambini", "BAMBINI"),
             Map.entry("neonati", "NEONATI"),
@@ -127,11 +138,33 @@ public class BookingImportService {
             // Colonna opzionale — se non mappata il flag resta false (tassa a parte).
             Map.entry("tassa inclusa", "TASSA_INCLUSA"),
             Map.entry("tassa soggiorno inclusa", "TASSA_INCLUSA"),
-            Map.entry("tourist tax included", "TASSA_INCLUSA")
-    );
+            Map.entry("tourist tax included", "TASSA_INCLUSA"),
+            // Export Booking.com "Arrivo con recapiti" (N° di prenotazione, Casa, Prezzo...).
+            // Il simbolo "numero" compare sia come ° (grado) sia come º (ordinale).
+            Map.entry("n° di prenotazione", "BOOKING_ID"),
+            Map.entry("nº di prenotazione", "BOOKING_ID"),
+            Map.entry("numero di prenotazione", "BOOKING_ID"),
+            Map.entry("casa", "STRUTTURA"),
+            Map.entry("prezzo", "IMPORTO_TOTALE"),
+            Map.entry("importo commissione", "COMMISSIONE"),
+            Map.entry("nome ospite(i)", "CLIENTE_NOME"),
+            Map.entry("nome ospite", "CLIENTE_NOME")
+    ));
+
+    /** Copia ordinata per lunghezza chiave decrescente (a parità, alfabetica: ordine stabile). */
+    private static Map<String, String> perLunghezzaDecrescente(Map<String, String> m) {
+        return m.entrySet().stream()
+                .sorted(Comparator.comparingInt((Map.Entry<String, String> e) -> e.getKey().length())
+                        .reversed()
+                        .thenComparing(Map.Entry::getKey))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                        (a, b) -> a, LinkedHashMap::new));
+    }
 
     // Mapping suggerito: header atteso (normalizzato) → campo di sistema. File ospiti.
-    private static final Map<String, String> EXPECTED_GUEST_HEADERS = Map.ofEntries(
+    // Stesso ordinamento del file prenotazioni: es. "numero documento" viene provato prima
+    // di "documento", così "Numero documento ospite" non finisce su DOCUMENTO.
+    private static final Map<String, String> EXPECTED_GUEST_HEADERS = perLunghezzaDecrescente(Map.ofEntries(
             Map.entry("id", "BOOKING_ID"),
             Map.entry("nome", "NOME"),
             Map.entry("cognome", "COGNOME"),
@@ -163,7 +196,7 @@ public class BookingImportService {
             Map.entry("indirizzo", "INDIRIZZO"),
             Map.entry("telefono", "TELEFONO"),
             Map.entry("phone", "TELEFONO")
-    );
+    ));
 
     public BookingImportPreviewDTO preview(Integer tenantId, MultipartFile file) throws IOException, CsvException {
         List<String[]> rawRows;
@@ -625,7 +658,10 @@ public class BookingImportService {
             }
             PropertyOtaCodeDAO.PropertyOtaMatch m = match.get();
 
-            int guests = parseIntOr(mapVal(row, bMap, "ADULTI"), 1);
+            // Ospiti: PERSONE (totale, bambini compresi) se mappato e valorizzato, altrimenti
+            // ADULTI. Conta per la tassa di soggiorno, calcolata a persona per notte.
+            int guests = parseIntOr(mapVal(row, bMap, "PERSONE"), 0);
+            if (guests <= 0) guests = parseIntOr(mapVal(row, bMap, "ADULTI"), 1);
             if (guests <= 0) guests = 1;
             int nights = (int) Math.max(0, ChronoUnit.DAYS.between(checkin, checkout));
             BigDecimal commissione = parseAmountOr(mapVal(row, bMap, "COMMISSIONE"), null);
@@ -830,13 +866,14 @@ public class BookingImportService {
         return row.getGuestName();
     }
 
-    // ── lettura tabellare CSV / XLSX ──────────────────────────────────────────
+    // ── lettura tabellare CSV / XLSX / XLS ──────────────────────────────────────────
 
     private record ParsedTable(List<String> headers, List<Map<String, String>> rows) {}
 
     private ParsedTable readTable(byte[] content, String fileName, int headerRow) throws IOException, CsvException {
-        boolean xlsx = fileName != null && fileName.toLowerCase().endsWith(".xlsx");
-        return xlsx ? readXlsx(content, headerRow) : readCsv(content, headerRow);
+        String lower = fileName != null ? fileName.toLowerCase() : "";
+        boolean isExcel = lower.endsWith(".xlsx") || lower.endsWith(".xls");
+        return isExcel ? readXlsx(content, headerRow) : readCsv(content, headerRow);
     }
 
     /**
@@ -867,8 +904,10 @@ public class BookingImportService {
      *                  le righe precedenti vengono ignorate, i dati partono dalla successiva.
      */
     private ParsedTable readXlsx(byte[] content, int headerRow) throws IOException {
-        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(content))) {
+        // WorkbookFactory riconosce il formato dal contenuto: .xlsx (XSSF) e .xls 97-2003 (HSSF)
+        try (Workbook wb = WorkbookFactory.create(new ByteArrayInputStream(content))) {
             Sheet sheet = wb.getSheetAt(0);
+            // Uno per lettura: DataFormatter non è thread-safe e il service è un singleton
             DataFormatter fmt = new DataFormatter();
             int headerIdx = Math.max(0, headerRow);
             Row headerRowObj = sheet.getRow(headerIdx);
@@ -877,7 +916,7 @@ public class BookingImportService {
             int lastCol = headerRowObj.getLastCellNum();
             for (int c = 0; c < lastCol; c++) {
                 Cell cell = headerRowObj.getCell(c);
-                headers.add(cell != null ? fmt.formatCellValue(cell).trim() : "");
+                headers.add(getCellValue(cell, fmt));
             }
             List<Map<String, String>> rows = new ArrayList<>();
             for (int r = headerIdx + 1; r <= sheet.getLastRowNum(); r++) {
@@ -898,10 +937,48 @@ public class BookingImportService {
 
     private String cellToString(Cell cell, DataFormatter fmt) {
         if (cell == null) return "";
+        // Le date Excel sono celle NUMERIC: vanno intercettate prima di getCellValue(),
+        // che altrimenti restituirebbe il numero seriale (es. 46296) invece della data.
         if (cell.getCellType() == CellType.NUMERIC && DateUtil.isCellDateFormatted(cell)) {
             return cell.getLocalDateTimeCellValue().toLocalDate().toString(); // ISO yyyy-MM-dd
         }
-        return fmt.formatCellValue(cell).trim();
+        return getCellValue(cell, fmt);
+    }
+
+    /**
+     * Valore grezzo della cella, senza la formattazione di Excel: DataFormatter produceva
+     * stringhe dipendenti dal locale (es. "1,234.56" o "€ 380,00" con U+00A0).
+     */
+    private String getCellValue(Cell cell, DataFormatter fmt) {
+        if (cell == null) return "";
+        switch (cell.getCellType()) {
+            case NUMERIC:
+                // Stringa formattata di sole cifre: si tiene quella, conserva gli zeri
+                // iniziali (CAP 00184 con formato "00000") ed è indipendente dal locale.
+                String formatted = fmt.formatCellValue(cell);
+                if (formatted.matches("[0-9]+")) {
+                    return formatted;
+                }
+                // Altrimenti valore numerico diretto, evita problemi di formattazione.
+                // BigDecimal.valueOf (non new BigDecimal) per evitare l'espansione binaria
+                // lunga del double; stripTrailingZeros perché gli interi in celle con formato
+                // decimale restino interi ("2", non "2.0", che Integer.parseInt rifiuta);
+                // toPlainString per evitare la notazione scientifica.
+                double d = cell.getNumericCellValue();
+                return BigDecimal.valueOf(d).stripTrailingZeros().toPlainString();
+            case STRING:
+                return cell.getStringCellValue().trim();
+            case BOOLEAN:
+                return String.valueOf(cell.getBooleanCellValue());
+            case FORMULA:
+                try {
+                    return String.valueOf(cell.getNumericCellValue());
+                } catch (Exception e) {
+                    return cell.getStringCellValue();
+                }
+            default:
+                return "";
+        }
     }
 
     // ── mapping suggerito ──────────────────────────────────────────────────────
@@ -912,9 +989,13 @@ public class BookingImportService {
             String norm = normalize(col);
             String field = expectedHeaders.get(norm);
             if (field == null) {
-                // match parziale: l'header atteso è contenuto nel nome colonna (o viceversa)
+                // match parziale: l'header atteso è contenuto nel nome colonna (o viceversa).
+                // Solo stringhe di almeno 4 caratteri: con chiavi/colonne corte il contains
+                // dava falsi positivi ("Paid" → "id" → BOOKING_ID, "In" → "origine").
                 for (Map.Entry<String, String> e : expectedHeaders.entrySet()) {
-                    if (norm.equals(e.getKey()) || norm.contains(e.getKey()) || e.getKey().contains(norm)) {
+                    String key = e.getKey();
+                    if (key.length() >= 4 && norm.length() >= 4
+                            && (norm.contains(key) || key.contains(norm))) {
                         field = e.getValue();
                         break;
                     }
@@ -959,14 +1040,53 @@ public class BookingImportService {
 
     private BigDecimal parseAmount(String s) {
         if (s == null || s.isBlank()) throw new IllegalArgumentException("Importo vuoto");
-        String v = s.trim().replace("€", "").replace(" ", "");
-        if (v.contains(",") && v.contains(".")) {
-            // formato italiano: punto migliaia, virgola decimali → 1.234,56
-            v = v.replace(".", "").replace(",", ".");
-        } else if (v.contains(",")) {
-            v = v.replace(",", ".");
+
+        // Rimuovi simboli valuta, codici ISO e spazi (incluso U+00A0 non-breaking)
+        String v = s.trim()
+                .replaceAll("[€$£¥]", "")
+                .replaceAll("(?i)\\b(EUR|USD|GBP|CHF|JPY)\\b", "")
+                .replaceAll("\\s+", "")
+                .replaceAll(" ", "")
+                // Apostrofo (anche tipografico ’): prefisso "forza testo" di Excel finito
+                // nel valore via CSV/copia-incolla ('1.234,56), o separatore migliaia svizzero (1'234.56)
+                .replaceAll("['’]", "")
+                .trim();
+
+        if (v.isEmpty()) throw new IllegalArgumentException("Importo non valido: " + s);
+
+        // Determina il formato in base ai separatori presenti
+        boolean hasComma = v.contains(",");
+        boolean hasDot = v.contains(".");
+
+        if (hasComma && hasDot) {
+            // Il separatore che viene ULTIMO è quello decimale
+            int lastComma = v.lastIndexOf(',');
+            int lastDot = v.lastIndexOf('.');
+            if (lastComma > lastDot) {
+                // formato europeo: 1.234,56
+                v = v.replace(".", "").replace(",", ".");
+            } else {
+                // formato anglosassone: 1,234.56
+                v = v.replace(",", "");
+            }
+        } else if (hasComma || hasDot) {
+            String sep = hasComma ? "," : ".";
+            if (v.indexOf(sep) != v.lastIndexOf(sep)) {
+                // Stesso separatore ripetuto (1.234.567 / 1,234,567): solo migliaia, senza
+                // decimali → intero 1234567.00. Un decimale non può comparire due volte.
+                v = v.replace(sep, "");
+            } else if (hasComma) {
+                // Solo virgola → separatore decimale, es. 380,00
+                v = v.replace(",", ".");
+            }
+            // Solo un punto → già ok
         }
-        return new BigDecimal(v);
+
+        try {
+            return new BigDecimal(v).setScale(2, RoundingMode.HALF_UP);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Importo non valido: " + s);
+        }
     }
 
     private BigDecimal parseAmountOr(String s, BigDecimal def) {
@@ -1163,7 +1283,7 @@ public class BookingImportService {
     }
 
     private BigDecimal parseDecimalOr(String s, BigDecimal def) {
-        try { return blank(s) ? def : new BigDecimal(s); } catch (Exception e) { return def; }
+        try { return parseAmount(s); } catch (Exception e) { return def; }
     }
 
     private BigDecimal orZero(BigDecimal v) {

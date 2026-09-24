@@ -31,6 +31,11 @@ public class ContrattoCalcolatoreService {
     private static final String CALC_MODE_PERCENTUALE_NETTO = "percentuale_netto";
     /** Unico tipo di voce su cui la modalità 'percentuale_netto' è ammessa. */
     private static final String TIPO_COMMISSIONE_PM = "commissione_pm";
+    /**
+     * Commissione OTA senza regola di contratto, arrivata come override (file di import o PM).
+     * Il frontend riconosce "importo impostato" / "importo forzato" per mostrare il ripristino.
+     */
+    private static final String DESCR_OTA_IMPOSTATA = "Commissione OTA (importo impostato)";
 
     private final PropertyContractRuleDAO contractRuleDAO;
     private final PropertyDAO propertyDAO;
@@ -134,9 +139,9 @@ public class ContrattoCalcolatoreService {
                     .calcoloCompleto(false)
                     .warnings(warnings)
                     // Nessuna regola di contratto: l'unica voce descrivibile è la commissione
-                    // OTA presa dal file, la provvigione PM non esiste.
+                    // OTA arrivata come override (file di import o PM), la provvigione PM non esiste.
                     .pmFeeDescrizione(null)
-                    .otaDescrizione(otaUsata.signum() > 0 ? "Commissione OTA (importo da file)" : null)
+                    .otaDescrizione(otaUsata.signum() > 0 ? DESCR_OTA_IMPOSTATA : null)
                     .build();
         }
 
@@ -364,7 +369,7 @@ public class ContrattoCalcolatoreService {
                                   BigDecimal grossAmount, BigDecimal override) {
         if (otaRule == null) {
             return override != null && override.signum() > 0
-                    ? "Commissione OTA (importo da file)"
+                    ? DESCR_OTA_IMPOSTATA
                     : null;
         }
         BigDecimal v = orZero(otaRule.getValore());

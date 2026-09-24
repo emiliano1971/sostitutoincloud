@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X } from 'lucide-react';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw } from 'lucide-react';
 import GuestEditDialog from '@/components/GuestEditDialog';
 import {
   getBookingById,
@@ -241,6 +241,9 @@ const BookingDetail = () => {
   // valore precompilato nel campo sembravano due percentuali differenti.
   const pctOf = (v: number) => (baseCalcolo > 0 ? ((v / baseCalcolo) * 100).toFixed(2) : '0.00');
   const otaPct = pctOf(split.otaCommissionAmount ?? 0);
+  // Override OTA attivo: il backend lo segnala nella descrizione ("importo forzato" se
+  // diverge dalla regola, "importo impostato" se la regola OTA non esiste).
+  const otaHaOverride = /importo (forzato|impostato)/.test(split.otaDescrizione ?? '');
 
   // Conversioni dell'editor OTA: baseCalcolo è già la base corretta (al netto della tassa
   // se inclusa), quindi le due funzioni sono l'unico punto che la usa.
@@ -429,7 +432,9 @@ const BookingDetail = () => {
               })}
             />
           </div>
-          <div className="space-y-2">
+          {/* pr-6: spazio per le icone OTA posizionate fuori dal flusso, così tutti gli
+              importi restano allineati sullo stesso bordo destro */}
+          <div className="space-y-2 pr-6">
             {splitRows.map((row, i) => (
               <div key={i} className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
                 <div className="flex flex-col">
@@ -524,19 +529,34 @@ const BookingDetail = () => {
                       </button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
+                    <div className="relative flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">({otaPct}%)</span>
                       <span className="text-sm text-destructive">-{fmt(row.value)}</span>
 
+                      {/* Icone fuori dal flusso (nel pr-6 del contenitore): inline spostavano
+                          l'importo OTA rispetto a quelli delle altre righe */}
                       {!hasDocuments && (
-                        <button
-                          onClick={apriEditorOta}
-                          disabled={isUpdatingSplit}
-                          title="Modifica commissione"
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
+                        <div className="absolute left-full ml-1.5 flex items-center gap-1">
+                          <button
+                            onClick={apriEditorOta}
+                            disabled={isUpdatingSplit}
+                            title="Modifica commissione"
+                            className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          {/* null = nessun override: il backend ricalcola l'OTA dalle regole di contratto */}
+                          {otaHaOverride && (
+                            <button
+                              onClick={() => handleUpdateSplit({ otaCommissionOverride: null })}
+                              disabled={isUpdatingSplit}
+                              title="Ripristina commissione da regole contratto"
+                              className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   )

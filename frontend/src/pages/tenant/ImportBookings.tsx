@@ -58,10 +58,11 @@ interface FieldDef { key: string; label: string; required?: boolean; }
 const BOOKING_FIELDS: FieldDef[] = [
   { key: 'BOOKING_ID',     label: 'ID Prenotazione',      required: true },
   { key: 'ORIGINE',        label: 'Origine (canale)',     required: true },
-  { key: 'STRUTTURA',      label: 'Struttura (cod. OTA)', required: true },
+  { key: 'STRUTTURA',      label: 'Immobile (cod. OTA)', required: true },
   { key: 'CHECKIN',        label: 'Check-in',             required: true },
   { key: 'CHECKOUT',       label: 'Check-out',            required: true },
   { key: 'IMPORTO_TOTALE', label: 'Importo totale',       required: true },
+  { key: 'PERSONE',        label: 'Persone (totale ospiti)' },
   { key: 'ADULTI',         label: 'Adulti' },
   { key: 'BAMBINI',        label: 'Bambini' },
   { key: 'NEONATI',        label: 'Neonati' },
@@ -325,7 +326,7 @@ const ImportBookings = () => {
             {kind === 'booking' ? 'File Prenotazioni' : 'File Ospiti'}
             {required ? <span className="text-destructive"> *</span> : <span className="text-muted-foreground"> (opzionale)</span>}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">XLSX o CSV (max 10MB)</p>
+          <p className="text-xs text-muted-foreground mt-1">XLSX, XLS o CSV (max 10MB)</p>
         </div>
         {file ? (
           <div className="flex items-center justify-center gap-2 text-sm">
@@ -337,7 +338,7 @@ const ImportBookings = () => {
           </div>
         ) : (
           <>
-            <input ref={inputRef} type="file" accept=".csv,.xlsx" className="hidden"
+            <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
                    onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
             <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>Seleziona File</Button>
           </>
