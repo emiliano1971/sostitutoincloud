@@ -7,6 +7,7 @@ import { Download, Loader2, AlertCircle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { getOwnerCu } from '@/api/ownerApi';
 import { downloadOwnerCuPdf, type CuListItem } from '@/api/cuApi';
+import { labelStatoCu } from '@/lib/statiLabels';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -100,7 +101,7 @@ const OwnerCU = () => {
                       <TableCell className="text-right text-destructive">{fmtEuro(cu.totalRitenute)}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-xs ${statusColors[cu.stato] ?? ''}`}>
-                          {cu.stato}
+                          {labelStatoCu(cu.stato)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">{fmtDate(cu.generatedAt)}</TableCell>

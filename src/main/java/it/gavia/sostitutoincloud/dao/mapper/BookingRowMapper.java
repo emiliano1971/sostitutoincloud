@@ -46,6 +46,7 @@ public class BookingRowMapper implements RowMapper<Booking> {
                 .withholdingAmount(rs.getObject("withholding_amount", BigDecimal.class))
                 .aliquotaRitenuta(rs.getObject("aliquota_ritenuta", BigDecimal.class))
                 .touristTaxAmount(rs.getObject("tourist_tax_amount", BigDecimal.class))
+                .totalCostiPm(rs.getObject("total_costi_pm", BigDecimal.class))
                 .touristTaxIncludedInGross(rs.getBoolean("tourist_tax_included_in_gross"))
                 .touristTaxCollection(rs.getString("tourist_tax_collection"))
                 .fkStatoPrenotazioneId(rs.getInt("fk_stato_prenotazione_id"))

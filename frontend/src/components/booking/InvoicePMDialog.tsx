@@ -7,7 +7,7 @@ import { FileText, Printer, Send, Download, Loader2, AlertTriangle } from 'lucid
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { aggiornaStatoDocumento, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
-import type { FiscalDocumentSummary } from '@/api/bookingApi';
+import type { BookingSplitRiga, FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface InvoicePMDialogProps {
   open: boolean;
@@ -15,7 +15,16 @@ interface InvoicePMDialogProps {
   booking: Booking;
   owner?: OwnerProfile;
   property?: Property;
-  tenantData: { legal_name: string; vat_number: string; tax_code: string; address: string; pec: string };
+  tenantData: {
+    legal_name: string; vat_number: string; tax_code: string; address: string; pec: string;
+    /** Regime fiscale del PM: 'RF19' forfettario = senza IVA, altrimenti IVA 22% scorporata. */
+    regimeFiscalePm?: string;
+  };
+  /**
+   * Righe booking_split_economico che entrano nella fattura PM (include_in_fattura_pm e
+   * importo > 0), voci extra comprese. Vuote = booking pre-migrazione 018: campi flat.
+   */
+  righeFattura?: BookingSplitRiga[];
   generatedDoc?: DocumentGenerateResponse | null;
   existingDoc?: FiscalDocumentSummary;
   isSaving?: boolean;
@@ -31,9 +40,10 @@ const statoDocLabels: Record<string, string> = {
   sent_sdi: 'Inviato SDI',
   accepted: 'Accettato',
   rejected: 'Rifiutato',
+  error: 'Errore',
 };
 
-const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, generatedDoc, existingDoc, isSaving, onEmetti, onSent }: InvoicePMDialogProps) => {
+const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, righeFattura, generatedDoc, existingDoc, isSaving, onEmetti, onSent }: InvoicePMDialogProps) => {
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleInvia = async (documentId: number) => {
@@ -58,38 +68,71 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
     ? new Date(invoiceDateSource).toLocaleDateString('it-IT')
     : new Date().toLocaleDateString('it-IT');
 
-  // Scenario A: i valori OTA / pulizie / provvigione PM sono LORDI (IVA inclusa).
-  // L'IVA va SCORPORATA dal lordo, non aggiunta sopra.
-  // RF01 ordinario → divisore 1.22; RF19 forfettario → nessuno scorporo (divisore 1, IVA 0).
-  const regimeFiscalePm = (tenantData as { regimeFiscalePm?: string })?.regimeFiscalePm ?? 'RF01';
-  const divisore = regimeFiscalePm === 'RF19' ? 1 : 1.22;
+  // Scenario A: i valori dei servizi sono LORDI (IVA inclusa): l'IVA va SCORPORATA dal lordo,
+  // non aggiunta sopra. Aliquota: quella del documento se la fattura è già emessa (è il dato
+  // reale), altrimenti dal regime del PM — RF19 forfettario 0% (nessuno scorporo), RF01 22%.
+  // Mai quella delle righe split, che vale sempre 22 anche in RF19 (come PDF e XML SDI).
+  const regimeFiscalePm = tenantData.regimeFiscalePm ?? 'RF01';
+  const aliquotaIva = existingDoc?.aliquotaIva != null
+    ? Number(existingDoc.aliquotaIva)
+    : regimeFiscalePm === 'RF19' ? 0 : 22;
+  const forfettario = aliquotaIva === 0;
+  const divisore = 1 + aliquotaIva / 100;
+  const aliquotaLabel = `${aliquotaIva.toLocaleString('it-IT')}%`;
 
-  const otaLordo = booking.ota_commission_amount ?? 0;
-  const otaImponibile = Math.round(otaLordo / divisore * 100) / 100;
-  const otaIva = Math.round((otaLordo - otaImponibile) * 100) / 100;
+  const scorpora = (lordo: number) => {
+    const imponibile = Math.round(lordo / divisore * 100) / 100;
+    return { lordo, imponibile, iva: Math.round((lordo - imponibile) * 100) / 100 };
+  };
 
-  const cleaningLordo = booking.cleaning_amount ?? 0;
-  const cleaningImponibile = Math.round(cleaningLordo / divisore * 100) / 100;
-  const cleaningIva = Math.round((cleaningLordo - cleaningImponibile) * 100) / 100;
+  // Righe: le stesse che il server metterà in fattura (booking_split_economico, voci extra
+  // comprese, righe a zero escluse — come DocumentGenerationService, PDF e XML SDI).
+  // Senza righe split (booking pre-migrazione 018) si ripiega sui campi flat, con le
+  // etichette storiche di PDF / XML per quel caso.
+  const righe: { key: string; descrizione: string; nota?: string; lordo: number; imponibile: number; iva: number }[] =
+    (righeFattura?.length ?? 0) > 0
+      ? righeFattura!.map(r => ({
+          key: String(r.id),
+          descrizione: r.descrizione,
+          nota: r.tipoVoce === 'commissione_ota'
+            ? `Canale: ${booking.channel_name}`
+            : r.tipoVoce === 'commissione_pm'
+              ? `Periodo: ${booking.checkin_date} → ${booking.checkout_date}`
+              : undefined,
+          ...scorpora(r.importo),
+        }))
+      : [
+          { key: 'ota', descrizione: 'Riaddebito commissione OTA', nota: `Canale: ${booking.channel_name}`,
+            ...scorpora(booking.ota_commission_amount ?? 0) },
+          { key: 'pulizie', descrizione: 'Riaddebito pulizia finale', ...scorpora(booking.cleaning_amount ?? 0) },
+          { key: 'pm', descrizione: 'Provvigione gestione immobiliare',
+            nota: `Periodo: ${booking.checkin_date} → ${booking.checkout_date}`, ...scorpora(booking.pm_fee_amount ?? 0) },
+        ].filter(r => r.lordo > 0);
 
-  const pmLordo = booking.pm_fee_amount ?? 0;
-  const pmImponibile = Math.round(pmLordo / divisore * 100) / 100;
-  const pmIva = Math.round((pmLordo - pmImponibile) * 100) / 100;
-
-  // Totali: dal documento generato (DB, già corretti) se disponibile, altrimenti calcolati.
-  const totaleImponibile = generatedDoc
-    ? generatedDoc.imponibile
-    : Math.round((otaImponibile + cleaningImponibile + pmImponibile) * 100) / 100;
-  const totaleIva = generatedDoc
-    ? generatedDoc.iva
-    : Math.round((otaIva + cleaningIva + pmIva) * 100) / 100;
-  const totaleFattura = generatedDoc
-    ? generatedDoc.importoTotale
-    : otaLordo + cleaningLordo + pmLordo;
+  const somma = (f: (r: typeof righe[number]) => number) =>
+    Math.round(righe.reduce((s, r) => s + f(r), 0) * 100) / 100;
 
   // Servizi PM tutti a zero: non c'è nulla da fatturare e il server rifiuta l'emissione
   // (DocumentGenerationService). Si avvisa prima, spiegando dove guardare.
-  const servizioTotale = otaLordo + cleaningLordo + pmLordo;
+  const servizioTotale = somma(r => r.lordo);
+
+  // Totali: dal documento generato (DB, già corretti) se disponibile, altrimenti calcolati.
+  // Il server scorpora l'IVA una volta sola sul totale (lordo / 1.22), non riga per riga:
+  // stesso calcolo qui, così il totale imponibile dell'anteprima coincide al centesimo.
+  const imponibileCalcolato = Math.round(servizioTotale / divisore * 100) / 100;
+  // Residuo dello scorporo riga per riga sull'ultima riga, come FiscalDocumentService
+  // (allineaResiduoScorporo): la somma delle righe coincide con l'imponibile del documento.
+  const residuo = Math.round((imponibileCalcolato - somma(r => r.imponibile)) * 100) / 100;
+  if (residuo !== 0 && righe.length > 0) {
+    const ultima = righe[righe.length - 1];
+    ultima.imponibile = Math.round((ultima.imponibile + residuo) * 100) / 100;
+    ultima.iva = Math.round((ultima.lordo - ultima.imponibile) * 100) / 100;
+  }
+  const totaleFattura = generatedDoc ? generatedDoc.importoTotale : servizioTotale;
+  const totaleImponibile = generatedDoc ? generatedDoc.imponibile : imponibileCalcolato;
+  const totaleIva = generatedDoc
+    ? generatedDoc.iva
+    : Math.round((servizioTotale - totaleImponibile) * 100) / 100;
 
   // Semantica bottoni: se QUESTA fattura esiste già solo stampa/download, altrimenti
   // emissione (azione irreversibile).
@@ -225,33 +268,20 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
               <div className="grid grid-cols-12 gap-2 bg-muted/50 p-2 text-xs font-semibold text-muted-foreground">
                 <div className="col-span-6">Descrizione</div>
                 <div className="col-span-2 text-right">Imponibile</div>
-                <div className="col-span-2 text-right">IVA 22%</div>
+                <div className="col-span-2 text-right">IVA {aliquotaLabel}</div>
                 <div className="col-span-2 text-right">Totale</div>
               </div>
-              <div className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
-                <div className="col-span-6">
-                  Riaddebito commissione OTA<br />
-                  <span className="text-muted-foreground">Canale: {booking.channel_name}</span>
+              {righe.map(r => (
+                <div key={r.key} className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
+                  <div className="col-span-6">
+                    {r.descrizione}
+                    {r.nota && (<><br /><span className="text-muted-foreground">{r.nota}</span></>)}
+                  </div>
+                  <div className="col-span-2 text-right">{fmt(r.imponibile)}</div>
+                  <div className="col-span-2 text-right">{fmt(r.iva)}</div>
+                  <div className="col-span-2 text-right">{fmt(r.lordo)}</div>
                 </div>
-                <div className="col-span-2 text-right">{fmt(otaImponibile)}</div>
-                <div className="col-span-2 text-right">{fmt(otaIva)}</div>
-                <div className="col-span-2 text-right">{fmt(Math.round((otaImponibile + otaIva) * 100) / 100)}</div>
-              </div>
-              <div className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
-                <div className="col-span-6">Riaddebito pulizia finale</div>
-                <div className="col-span-2 text-right">{fmt(cleaningImponibile)}</div>
-                <div className="col-span-2 text-right">{fmt(cleaningIva)}</div>
-                <div className="col-span-2 text-right">{fmt(Math.round((cleaningImponibile + cleaningIva) * 100) / 100)}</div>
-              </div>
-              <div className="grid grid-cols-12 gap-2 p-2 text-xs border-t">
-                <div className="col-span-6">
-                  Provvigione gestione immobiliare<br />
-                  <span className="text-muted-foreground">Periodo: {booking.checkin_date} → {booking.checkout_date}</span>
-                </div>
-                <div className="col-span-2 text-right">{fmt(pmImponibile)}</div>
-                <div className="col-span-2 text-right">{fmt(pmIva)}</div>
-                <div className="col-span-2 text-right">{fmt(Math.round((pmImponibile + pmIva) * 100) / 100)}</div>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -264,7 +294,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
                 <span>{fmt(totaleImponibile)}</span>
               </div>
               <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">IVA (22%)</span>
+                <span className="text-muted-foreground">IVA ({aliquotaLabel})</span>
                 <span>{fmt(totaleIva)}</span>
               </div>
               <Separator />
@@ -278,8 +308,14 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
           <Separator />
 
           <div className="text-xs text-muted-foreground space-y-1">
-            <p><strong>Regime fiscale:</strong> Regime ordinario – IVA 22% ai sensi del DPR 633/72</p>
-            <p className="text-[10px] italic">⚠️ Il PM riaddebita commissione OTA e pulizie con IVA 22% anche se ricevute in reverse charge (Scenario A)</p>
+            {forfettario ? (
+              <p><strong>Regime fiscale:</strong> Regime forfettario (RF19) – operazione senza applicazione dell'IVA</p>
+            ) : (
+              <>
+                <p><strong>Regime fiscale:</strong> Regime ordinario – IVA {aliquotaLabel} ai sensi del DPR 633/72</p>
+                <p className="text-[10px] italic">⚠️ Il PM riaddebita commissione OTA e pulizie con IVA {aliquotaLabel} anche se ricevute in reverse charge (Scenario A)</p>
+              </>
+            )}
             <p><strong>Ritenuta d'acconto 21%:</strong> {fmt(booking.withholding_amount)} (trattenuta dal sostituto d'imposta)</p>
             <p><strong>Proprietario:</strong> {booking.owner_name} {owner ? `(C.F. ${owner.tax_code})` : ''}</p>
             <p><strong>IBAN proprietario:</strong> {owner?.iban || 'N/D'}</p>
@@ -294,7 +330,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
           </div>
         ) : generatedDoc && (
           <div className="rounded-md bg-success/10 text-success text-xs px-3 py-2">
-            Documento emesso — numero <strong>{generatedDoc.documentNumber}</strong> (stato: {generatedDoc.statoDocumento})
+            Documento emesso — numero <strong>{generatedDoc.documentNumber}</strong> (stato: {statoDocLabels[generatedDoc.statoDocumento] ?? generatedDoc.statoDocumento})
           </div>
         )}
 

@@ -29,6 +29,7 @@ const statoDocLabels: Record<string, string> = {
   sent_sdi: 'Inviato SDI',
   accepted: 'Accettato',
   rejected: 'Rifiutato',
+  error: 'Errore',
 };
 
 const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, generatedDoc, existingDoc, isSaving, onEmetti }: ReceiptOwnerDialogProps) => {
@@ -241,7 +242,7 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, gene
           </div>
         ) : generatedDoc && (
           <div className="rounded-md bg-success/10 text-success text-xs px-3 py-2">
-            Documento emesso — numero <strong>{generatedDoc.documentNumber}</strong> (stato: {generatedDoc.statoDocumento})
+            Documento emesso — numero <strong>{generatedDoc.documentNumber}</strong> (stato: {statoDocLabels[generatedDoc.statoDocumento] ?? generatedDoc.statoDocumento})
           </div>
         )}
 

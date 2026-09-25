@@ -17,6 +17,7 @@ import {
 import type { UtenteListItem } from '@/api/userApi';
 import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { useToast } from '@/hooks/use-toast';
+import { labelStatoTenant } from '@/lib/statiLabels';
 
 const statusColor: Record<string, string> = {
   active:    'bg-success/10 text-success border-success/20',
@@ -94,7 +95,7 @@ const TenantDetail = () => {
       setTenant(updated);
       toast({
         title: updated.stato === 'active' ? 'Tenant riattivato' : 'Tenant sospeso',
-        description: `${updated.displayName} è ora ${updated.stato}.`,
+        description: `${updated.displayName} è ora ${labelStatoTenant(updated.stato).toLowerCase()}.`,
       });
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
@@ -202,7 +203,7 @@ const TenantDetail = () => {
           <h1 className="text-2xl font-bold">{tenant.displayName}</h1>
           <p className="text-sm text-muted-foreground">{tenant.legalName}</p>
         </div>
-        <Badge variant="outline" className={statusColor[tenant.stato] ?? ''}>{tenant.stato}</Badge>
+        <Badge variant="outline" className={statusColor[tenant.stato] ?? ''}>{labelStatoTenant(tenant.stato)}</Badge>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -288,7 +289,7 @@ const TenantDetail = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Stato attuale</p>
-                  <Badge variant="outline" className={`mt-1 ${statusColor[tenant.stato] ?? ''}`}>{tenant.stato}</Badge>
+                  <Badge variant="outline" className={`mt-1 ${statusColor[tenant.stato] ?? ''}`}>{labelStatoTenant(tenant.stato)}</Badge>
                 </div>
               </div>
               {canToggle && (

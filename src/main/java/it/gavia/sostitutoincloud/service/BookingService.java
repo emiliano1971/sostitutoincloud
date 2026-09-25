@@ -1,6 +1,7 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
@@ -17,12 +18,15 @@ import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingSplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingVoceExtraDTO;
 import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.model.Booking;
+import it.gavia.sostitutoincloud.model.BookingSplitEconomico;
 import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
@@ -33,12 +37,14 @@ import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
 import it.gavia.sostitutoincloud.util.NazioneUtils;
+import it.gavia.sostitutoincloud.util.SecurityUtils;
 import it.gavia.sostitutoincloud.util.TenantAddressUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -73,6 +79,8 @@ public class BookingService {
     private final CodiceFiscaleService codiceFiscaleService;
     private final TouristTaxService touristTaxService;
     private final AuditService auditService;
+    private final BookingSplitEconomicoDAO splitEconomicoDAO;
+    private final TenantSettingsService tenantSettingsService;
 
     public BookingService(BookingDAO bookingDAO,
                           PropertyDAO propertyDAO,
@@ -90,7 +98,9 @@ public class BookingService {
                           ContrattoCalcolatoreService contrattoCalcolatore,
                           CodiceFiscaleService codiceFiscaleService,
                           TouristTaxService touristTaxService,
-                          AuditService auditService) {
+                          AuditService auditService,
+                          BookingSplitEconomicoDAO splitEconomicoDAO,
+                          TenantSettingsService tenantSettingsService) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -108,6 +118,8 @@ public class BookingService {
         this.codiceFiscaleService = codiceFiscaleService;
         this.touristTaxService = touristTaxService;
         this.auditService = auditService;
+        this.splitEconomicoDAO = splitEconomicoDAO;
+        this.tenantSettingsService = tenantSettingsService;
     }
 
     public List<BookingListDTO> findByTenantId(Integer tenantId, BookingFilterDTO filter) {
@@ -179,7 +191,7 @@ public class BookingService {
             try {
                 contrattoCalcolatore.calcola(booking.getFkTenantId(), booking.getFkPropertyId(),
                         booking.getFkCanaleOtaId(), booking.getGrossAmount(),
-                        booking.getOtaCommissionAmount(), booking.getNights(), booking.getGuests());
+                        booking.getOtaCommissionAmount(), null, null, booking.getNights(), booking.getGuests());
                 return BookingDAO.STATO_READY;
             } catch (Exception e) {
                 log.debug("resolveStatoId - split non calcolabile per booking {}: {}", booking.getId(), e.getMessage());
@@ -317,6 +329,8 @@ public class BookingService {
                 booking.getFkCanaleOtaId(),
                 grossPerCalcolo,
                 otaOverride,
+                dto.getCleaningOverride(),
+                dto.getPmFeeOverride(),
                 booking.getNights(),
                 booking.getGuests());
 
@@ -329,11 +343,59 @@ public class BookingService {
                 calcolo.getOwnerNetAmount(),
                 calcolo.getWithholdingAmount());
 
+        // Righe split riallineate al ricalcolo, con il source di ogni voce che può essere
+        // impostata a mano (OTA, pulizie, PM): vedi sourceVoce().
+        List<BookingSplitEconomico> righeEsistenti = splitEconomicoDAO.findByBookingId(bookingId);
+        String otaSource = sourceVoce(righeEsistenti, "commissione_ota",
+                calcolo.getOtaCommissionAmount(), otaOverride, calcolo.getFkRegolaOtaId());
+        String cleaningSource = sourceVoce(righeEsistenti, "pulizie",
+                calcolo.getCleaningAmount(), dto.getCleaningOverride(), calcolo.getFkRegolaCleaningId());
+        String pmSource = sourceVoce(righeEsistenti, "commissione_pm",
+                calcolo.getPmFeeAmount(), dto.getPmFeeOverride(), calcolo.getFkRegolaPmId());
+        String canaleName = booking.getFkCanaleOtaId() != null
+                ? canaleOtaDAO.findById(booking.getFkCanaleOtaId()).map(CanaleOta::getNome).orElse("OTA")
+                : null;
+        popolaSplitEconomico(bookingId, tenantId, calcolo, nuovaTassa, taxIncluded,
+                canaleName, SecurityUtils.getCurrentUtenteId(), otaSource, cleaningSource, pmSource);
+
         aggiornaStato(bookingId);
-        log.info("BookingService.updateSplit() - id={} taxIncluded={} otaOverride={}",
-                bookingId, taxIncluded, otaOverride);
+        log.info("BookingService.updateSplit() - id={} taxIncluded={} otaOverride={} cleaningOverride={} pmFeeOverride={}",
+                bookingId, taxIncluded, otaOverride, dto.getCleaningOverride(), dto.getPmFeeOverride());
         return findById(tenantId, bookingId)
                 .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+    }
+
+    /**
+     * Source della riga split di una voce ricalcolata. Se l'importo non cambia si tiene quello
+     * della riga esistente: il frontend ripassa gli importi manuali attuali a ogni PATCH (per
+     * l'OTA sempre, anche al solo cambio del flag tassa), e un importo da file ('import') o già
+     * 'manuale' non deve cambiare di stato. Altrimenti 'manuale' se l'importo arriva da un
+     * override senza regola di riferimento, 'calcolato' se viene dalle regole.
+     */
+    private String sourceVoce(List<BookingSplitEconomico> righeEsistenti, String tipoVoce,
+                              BigDecimal nuovoImporto, BigDecimal override, Integer fkRegola) {
+        return righeEsistenti.stream()
+                .filter(r -> tipoVoce.equals(r.getTipoVoce()))
+                .filter(r -> r.getImporto() != null && nuovoImporto != null
+                        && r.getImporto().compareTo(nuovoImporto) == 0)
+                .map(BookingSplitEconomico::getSource)
+                .findFirst()
+                .orElse(override != null && fkRegola == null ? "manuale" : "calcolato");
+    }
+
+    /** Regime fiscale del PM dai settings del tenant (default RF01, come il calcolatore). */
+    private String regimeFiscalePm(Integer tenantId) {
+        String r = tenantSettingsService.getSettings(tenantId).getRegimeFiscalePm();
+        return r != null ? r : "RF01";
+    }
+
+    /** Importo della riga split di quel tipo se è stata impostata a mano ('manuale'), altrimenti null. */
+    private BigDecimal importoSeManuale(List<BookingSplitEconomico> righe, String tipoVoce) {
+        return righe.stream()
+                .filter(r -> tipoVoce.equals(r.getTipoVoce()) && "manuale".equals(r.getSource()))
+                .map(BookingSplitEconomico::getImporto)
+                .findFirst()
+                .orElse(null);
     }
 
     private boolean isNotBlank(String s) {
@@ -439,6 +501,8 @@ public class BookingService {
                 dto.getFkCanaleOtaId(),
                 grossPerCalcolo,
                 null,
+                null,
+                null,
                 nights,
                 dto.getGuests());
 
@@ -507,6 +571,15 @@ public class BookingService {
         // 7. Stato reale dai dati disponibili (imported / enriched / ready), come all'import.
         aggiornaStato(saved.getId());
 
+        // 8. Righe dello split economico (booking_split_economico) + total_costi_pm.
+        String canaleName = dto.getFkCanaleOtaId() != null
+                ? canaleOtaDAO.findById(dto.getFkCanaleOtaId())
+                        .map(CanaleOta::getNome)
+                        .orElse("OTA")
+                : null;
+        popolaSplitEconomico(saved.getId(), tenantId, calcolo, touristTax, tassaInclusa,
+                canaleName, SecurityUtils.getCurrentUtenteId(), "calcolato");
+
         auditService.log("booking.create.manual", "Booking", saved.getId(),
                 "Inserimento manuale: " + extId);
 
@@ -514,6 +587,269 @@ public class BookingService {
                 .orElseThrow(() -> new NoSuchElementException("Booking non trovato dopo l'inserimento: id=" + saved.getId()));
         log.info("BookingService.createManuale() - id={} stato={}", result.getId(), result.getStatoPrenotazione());
         return result;
+    }
+
+    /**
+     * Riscrive da zero le righe booking_split_economico di una prenotazione a partire dal
+     * risultato del calcolatore (che resta stateless: scrivere le righe è compito di chi
+     * chiama calcola()), poi aggiorna booking.total_costi_pm.
+     *
+     * <p>Righe create solo per le voci con importo &gt; 0: commissione OTA, pulizie,
+     * commissione PM (in fattura PM, IVA 22%) e tassa di soggiorno (fuori fattura, IVA 0).
+     * Netto proprietario e ritenuta non sono voci di costo e non hanno una riga.
+     *
+     * @param otaSource source della riga OTA ('calcolato' | 'import' | 'manuale'): può arrivare
+     *                  da fuori (file di import o importo forzato dal PM).
+     *                  Pulizie e PM sono 'calcolato' (per importarle impostate a mano si usa
+     *                  l'overload con cleaningSource / pmSource); la tassa è sempre 'calcolato'.
+     */
+    public void popolaSplitEconomico(Integer bookingId,
+                                     Integer tenantId,
+                                     ContrattoCalcoloResult calcolo,
+                                     BigDecimal touristTaxAmount,
+                                     Boolean touristTaxIncludedInGross,
+                                     String canaleName,
+                                     Integer utenteId,
+                                     String otaSource) {
+        popolaSplitEconomico(bookingId, tenantId, calcolo, touristTaxAmount, touristTaxIncludedInGross,
+                canaleName, utenteId, otaSource, "calcolato", "calcolato");
+    }
+
+    /**
+     * Come sopra, con il source di pulizie e PM: 'manuale' quando l'importo è stato impostato
+     * a mano dal PM (cleaningOverride / pmFeeOverride di updateSplit()).
+     */
+    public void popolaSplitEconomico(Integer bookingId,
+                                     Integer tenantId,
+                                     ContrattoCalcoloResult calcolo,
+                                     BigDecimal touristTaxAmount,
+                                     Boolean touristTaxIncludedInGross,
+                                     String canaleName,
+                                     Integer utenteId,
+                                     String otaSource,
+                                     String cleaningSource,
+                                     String pmSource) {
+        // 1. Reset delle sole righe calcolate: le voci 'extra' inserite a mano dal PM restano
+        //    (con un reset completo sparirebbero a ogni Ricalcola / cambio flag / override OTA).
+        splitEconomicoDAO.deleteCalcolateByBookingId(bookingId);
+
+        BigDecimal iva22 = new BigDecimal("22.00");
+        int righe = 0;
+
+        // 2. Commissione OTA
+        if (positivo(calcolo.getOtaCommissionAmount())) {
+            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaOtaId(),
+                    // "Riaddebito": costo del canale girato al cliente. La descrizione finisce
+                    // così com'è nelle righe di fattura PM (dettaglio, PDF, XML SDI).
+                    "commissione_ota", "Riaddebito commissione " + (canaleName != null ? canaleName : "OTA"),
+                    calcolo.getOtaCommissionAmount(), iva22, true, 10, otaSource, utenteId));
+            righe++;
+        }
+        // 3. Pulizie (comprende il cambio biancheria: il calcolatore li somma in cleaningAmount)
+        if (positivo(calcolo.getCleaningAmount())) {
+            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaCleaningId(),
+                    "pulizie", "Riaddebito pulizie",
+                    calcolo.getCleaningAmount(), iva22, true, 20, cleaningSource, utenteId));
+            righe++;
+        }
+        // 4. Commissione PM
+        if (positivo(calcolo.getPmFeeAmount())) {
+            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaPmId(),
+                    // Nessun "Riaddebito": è il compenso del PM, non un costo girato al cliente.
+                    "commissione_pm", "Provvigione PM",
+                    calcolo.getPmFeeAmount(), iva22, true, 30, pmSource, utenteId));
+            righe++;
+        }
+        // 5. Tassa di soggiorno: incassata per conto del Comune, non entra nella fattura PM
+        if (positivo(touristTaxAmount)) {
+            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, null,
+                    "tassa_soggiorno", "Tassa di soggiorno",
+                    touristTaxAmount, BigDecimal.ZERO, false, 40, "calcolato", utenteId));
+            righe++;
+        }
+
+        // 6. total_costi_pm, netto proprietario e ritenuta dalle righe (comprese le voci extra
+        //    già presenti, che il reset del punto 1 non tocca)
+        BigDecimal totale = ricalcolaNettoDaSplit(bookingId, tenantId);
+
+        // 7. Log
+        log.info("BookingService.popolaSplitEconomico() - bookingId={} righe={} totale={} tassaInclusa={}",
+                bookingId, righe, totale, touristTaxIncludedInGross);
+    }
+
+    /**
+     * Quadratura dello split sulle righe di booking_split_economico:
+     * lordo (al netto della tassa se inclusa) = fattura PM (Σ righe in fattura) + netto proprietario.
+     * Netto e ritenuta vengono riscritti sul booking, così le voci extra in fattura PM
+     * riducono il netto proprietario e la ritenuta.
+     *
+     * @return total_costi_pm scritto sul booking
+     */
+    private BigDecimal ricalcolaNettoDaSplit(Integer bookingId, Integer tenantId) {
+        Booking b = bookingDAO.findById(bookingId)
+                .filter(x -> tenantId.equals(x.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+
+        BigDecimal grossBase = Boolean.TRUE.equals(b.getTouristTaxIncludedInGross())
+                ? safeVal(b.getGrossAmount()).subtract(safeVal(b.getTouristTaxAmount()))
+                : safeVal(b.getGrossAmount());
+
+        BigDecimal totalCostiPm = splitEconomicoDAO.sumImportoByBookingId(bookingId);
+        BigDecimal ownerNet = grossBase.subtract(totalCostiPm).setScale(2, RoundingMode.HALF_UP);
+        if (ownerNet.signum() < 0) {
+            ownerNet = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+            log.warn("BookingService.ricalcolaNettoDaSplit() - bookingId={} costi superano il lordo", bookingId);
+        }
+
+        BigDecimal aliquota = safeVal(b.getAliquotaRitenuta());
+        BigDecimal withholding = ownerNet
+                .multiply(aliquota.divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        bookingDAO.updateNettoEritenuta(bookingId, tenantId, ownerNet, withholding, totalCostiPm);
+        log.info("BookingService.ricalcolaNettoDaSplit() - bookingId={} grossBase={} totalCostiPm={} ownerNet={} withholding={}",
+                bookingId, grossBase, totalCostiPm, ownerNet, withholding);
+        return totalCostiPm;
+    }
+
+    // ── Voci extra dello split (inserite a mano dal PM) ─────────────────────────────
+
+    private static final String TIPO_VOCE_EXTRA = "extra";
+
+    /**
+     * Aggiunge una voce extra in fondo allo split (es. "Parcheggio"). Bloccata se esistono
+     * documenti fiscali emessi, come ogni altra modifica allo split.
+     */
+    @Transactional
+    public BookingDetailDTO aggiungiVoceExtra(Integer tenantId, Integer bookingId, BookingVoceExtraDTO dto) {
+        verificaSplitModificabile(tenantId, bookingId, "Impossibile aggiungere voci: documenti fiscali già emessi");
+        validaVoceExtra(dto);
+
+        // In fondo alle righe esistenti
+        int ordine = splitEconomicoDAO.findByBookingId(bookingId).stream()
+                .mapToInt(BookingSplitEconomico::getOrdinamento)
+                .max()
+                .orElse(0) + 10;
+
+        Integer utenteId = SecurityUtils.getCurrentUtenteId();
+        splitEconomicoDAO.insert(BookingSplitEconomico.builder()
+                .fkBookingId(bookingId)
+                .fkTenantId(tenantId)
+                .fkPropertyContractRuleId(null)
+                .tipoVoce(TIPO_VOCE_EXTRA)
+                .descrizione(dto.getDescrizione().trim())
+                .importo(dto.getImporto())
+                .aliquotaIva(new BigDecimal("22.00"))
+                .includeInFatturaPm(dto.getIncludeInFatturaPm() != null ? dto.getIncludeInFatturaPm() : true)
+                .ordinamento(ordine)
+                .source("manuale")
+                .createdBy(utenteId)
+                .updatedBy(utenteId)
+                .build());
+
+        ricalcolaNettoDaSplit(bookingId, tenantId);
+        log.info("BookingService.aggiungiVoceExtra() - bookingId={} descrizione={}", bookingId, dto.getDescrizione().trim());
+        return findById(tenantId, bookingId)
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+    }
+
+    /** Modifica descrizione, importo e (se passato) include_in_fattura_pm di una voce extra. */
+    @Transactional
+    public BookingDetailDTO aggiornaVoceExtra(Integer tenantId, Integer bookingId, Integer rigaId,
+                                              BookingVoceExtraDTO dto) {
+        verificaSplitModificabile(tenantId, bookingId, "Impossibile modificare voci: documenti fiscali già emessi");
+        validaVoceExtra(dto);
+        BookingSplitEconomico riga = caricaVoceExtra(bookingId, rigaId);
+
+        riga.setDescrizione(dto.getDescrizione().trim());
+        riga.setImporto(dto.getImporto());
+        if (dto.getIncludeInFatturaPm() != null) {
+            riga.setIncludeInFatturaPm(dto.getIncludeInFatturaPm());
+        }
+        riga.setUpdatedBy(SecurityUtils.getCurrentUtenteId());
+        splitEconomicoDAO.update(riga);
+
+        ricalcolaNettoDaSplit(bookingId, tenantId);
+        log.info("BookingService.aggiornaVoceExtra() - bookingId={} rigaId={} descrizione={} importo={}",
+                bookingId, rigaId, riga.getDescrizione(), riga.getImporto());
+        return findById(tenantId, bookingId)
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+    }
+
+    /** Elimina (soft delete) una voce extra. */
+    @Transactional
+    public BookingDetailDTO eliminaVoceExtra(Integer tenantId, Integer bookingId, Integer rigaId) {
+        verificaSplitModificabile(tenantId, bookingId, "Impossibile eliminare voci: documenti fiscali già emessi");
+        caricaVoceExtra(bookingId, rigaId);
+
+        splitEconomicoDAO.softDelete(rigaId, tenantId, SecurityUtils.getCurrentUtenteId());
+
+        ricalcolaNettoDaSplit(bookingId, tenantId);
+        log.info("BookingService.eliminaVoceExtra() - bookingId={} rigaId={}", bookingId, rigaId);
+        return findById(tenantId, bookingId)
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+    }
+
+    /**
+     * Booking del tenant (altrimenti 404) e senza documenti fiscali emessi (altrimenti 400):
+     * gli importi sono già stampati su fattura/ricevuta, stessa regola di updateSplit().
+     */
+    private void verificaSplitModificabile(Integer tenantId, Integer bookingId, String messaggioDocumenti) {
+        bookingDAO.findById(bookingId)
+                .filter(b -> tenantId.equals(b.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+        if (!fiscalDocumentDAO.findByBookingId(bookingId).isEmpty()) {
+            throw new IllegalStateException(messaggioDocumenti);
+        }
+    }
+
+    private void validaVoceExtra(BookingVoceExtraDTO dto) {
+        if (dto == null || !isNotBlank(dto.getDescrizione())) {
+            throw new IllegalArgumentException("Descrizione della voce obbligatoria");
+        }
+        if (dto.getImporto() == null || dto.getImporto().signum() <= 0) {
+            throw new IllegalArgumentException("L'importo della voce deve essere maggiore di zero");
+        }
+    }
+
+    /**
+     * Riga attiva della prenotazione (404 se inesistente, eliminata o di un'altra prenotazione)
+     * e di tipo 'extra' (400 altrimenti): le voci calcolate si aggiornano solo con Ricalcola.
+     */
+    private BookingSplitEconomico caricaVoceExtra(Integer bookingId, Integer rigaId) {
+        BookingSplitEconomico riga = splitEconomicoDAO.findById(rigaId)
+                .filter(r -> bookingId.equals(r.getFkBookingId()))
+                .orElseThrow(() -> new NoSuchElementException(
+                        "Riga split non trovata: id=" + rigaId + " per la prenotazione " + bookingId));
+        if (!TIPO_VOCE_EXTRA.equals(riga.getTipoVoce())) {
+            throw new IllegalArgumentException(
+                    "Solo le voci extra sono modificabili a mano: le voci calcolate si aggiornano con Ricalcola");
+        }
+        return riga;
+    }
+
+    private BookingSplitEconomico rigaSplit(Integer bookingId, Integer tenantId, Integer fkRegolaId,
+                                            String tipoVoce, String descrizione, BigDecimal importo,
+                                            BigDecimal aliquotaIva, boolean inFatturaPm, int ordinamento,
+                                            String source, Integer utenteId) {
+        return BookingSplitEconomico.builder()
+                .fkBookingId(bookingId)
+                .fkTenantId(tenantId)
+                .fkPropertyContractRuleId(fkRegolaId)
+                .tipoVoce(tipoVoce)
+                .descrizione(descrizione)
+                .importo(importo)
+                .aliquotaIva(aliquotaIva)
+                .includeInFatturaPm(inFatturaPm)
+                .ordinamento(ordinamento)
+                .source(source)
+                .createdBy(utenteId)
+                .updatedBy(utenteId)
+                .build();
+    }
+
+    private boolean positivo(BigDecimal v) {
+        return v != null && v.signum() > 0;
     }
 
     /**
@@ -703,6 +1039,9 @@ public class BookingService {
         // Documenti fiscali della prenotazione: letti una volta sola, servono sia a decidere
         // come costruire lo split sia a popolare la lista del DTO.
         List<FiscalDocument> documentiBooking = fiscalDocumentDAO.findByBookingId(b.getId());
+        // Righe split lette una volta: decidono la fonte degli importi (ramo senza documenti)
+        // e popolano righeSplit del DTO.
+        List<BookingSplitEconomico> righeSplit = splitEconomicoDAO.findByBookingId(b.getId());
 
         // Split economico: se esistono documenti fiscali emessi si mostrano i valori
         // STORICI salvati sul booking, che sono quelli con cui i documenti sono stati
@@ -714,9 +1053,13 @@ public class BookingService {
             BigDecimal ownerNet = safeVal(b.getOwnerNetAmount());
             BigDecimal ritenuta = safeVal(b.getWithholdingAmount());
             // Lordo dei servizi PM dai valori storici, usato se la fattura PM non è stata emessa.
-            BigDecimal lordoServizi = safeVal(b.getOtaCommissionAmount())
-                    .add(safeVal(b.getCleaningAmount()))
-                    .add(safeVal(b.getPmFeeAmount()));
+            // Con righe split è total_costi_pm (voci extra in fattura comprese), cioè quello che
+            // DocumentGenerationService fatturerà; senza righe la somma dei campi flat.
+            BigDecimal lordoServizi = !righeSplit.isEmpty()
+                    ? safeVal(b.getTotalCostiPm())
+                    : safeVal(b.getOtaCommissionAmount())
+                            .add(safeVal(b.getCleaningAmount()))
+                            .add(safeVal(b.getPmFeeAmount()));
             // Imponibile e IVA della fattura PM già emessa: è il dato storico reale, non
             // una riproduzione del calcolo. ("fattura" è il codice della lookup tipo_documento.)
             Optional<FiscalDocument> fatturaPm = documentiBooking.stream()
@@ -741,6 +1084,7 @@ public class BookingService {
                     .fatturaPmTotale(fatturaPm.map(FiscalDocument::getTotalAmount).orElse(lordoServizi))
                     .warnings(List.of())
                     .calcoloCompleto(true)
+                    .regimeFiscalePm(regimeFiscalePm(b.getFkTenantId()))
                     .touristTaxAmount(b.getTouristTaxAmount())
                     .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                     .build();
@@ -762,23 +1106,49 @@ public class BookingService {
                     b.getFkCanaleOtaId(),
                     grossPerCalcolo,
                     b.getOtaCommissionAmount(),
+                    // Pulizie / PM impostate a mano: ripassate come override (come l'OTA), così
+                    // descrizioni e anteprima non tornano a quelle della regola.
+                    importoSeManuale(righeSplit, "pulizie"),
+                    importoSeManuale(righeSplit, "commissione_pm"),
                     b.getNights(),
                     b.getGuests());
 
+            // Con righe split (booking post-migrazione 018) gli importi sono quelli salvati da
+            // ricalcolaNettoDaSplit(): comprendono le voci extra in fattura PM, che il calcolatore
+            // non conosce. Sono anche i valori che DocumentGenerationService usa per fattura
+            // (Σ righe) e ricevuta (netto proprietario): mostrarne altri romperebbe la quadratura
+            // lordo = fattura PM + netto. Senza righe resta l'anteprima dalle regole correnti.
+            boolean daRigheSplit = !righeSplit.isEmpty();
+            BigDecimal fatturaPmTotale = daRigheSplit ? safeVal(b.getTotalCostiPm()) : calcolo.getFatturaPmTotale();
+            BigDecimal ownerNet = daRigheSplit ? safeVal(b.getOwnerNetAmount()) : calcolo.getOwnerNetAmount();
+            BigDecimal imponibileFatturaPm = calcolo.getImponibileFatturaPm();
+            BigDecimal ivaScorporata = calcolo.getIvaScorporata();
+            if (daRigheSplit) {
+                // Stesso scorporo di DocumentGenerationService: RF19 senza IVA, RF01 lordo / 1.22
+                boolean forfettario = "RF19".equalsIgnoreCase(calcolo.getRegimeFiscalePm());
+                imponibileFatturaPm = forfettario
+                        ? fatturaPmTotale
+                        : fatturaPmTotale.divide(new BigDecimal("1.22"), 2, RoundingMode.HALF_UP);
+                ivaScorporata = fatturaPmTotale.subtract(imponibileFatturaPm);
+            }
+
             split = SplitEconomicoDTO.builder()
                     .grossAmount(b.getGrossAmount())
-                    .otaCommissionAmount(calcolo.getOtaCommissionAmount())
-                    .cleaningAmount(calcolo.getCleaningAmount())
-                    .pmFeeAmount(calcolo.getPmFeeAmount())
-                    .ownerNetAmount(calcolo.getOwnerNetAmount())
+                    .otaCommissionAmount(daRigheSplit ? safeVal(b.getOtaCommissionAmount()) : calcolo.getOtaCommissionAmount())
+                    .cleaningAmount(daRigheSplit ? safeVal(b.getCleaningAmount()) : calcolo.getCleaningAmount())
+                    .pmFeeAmount(daRigheSplit ? safeVal(b.getPmFeeAmount()) : calcolo.getPmFeeAmount())
+                    .ownerNetAmount(ownerNet)
                     .withholdingAmount(b.getWithholdingAmount())   // mantieni il valore del DB
                     .aliquotaRitenuta(b.getAliquotaRitenuta())     // % storicizzata sul booking
-                    .liquidazioneOwner(calcolo.getLiquidazioneOwner())
-                    .imponibileFatturaPm(calcolo.getImponibileFatturaPm())
-                    .ivaScorporataPm(calcolo.getIvaScorporata())
-                    .fatturaPmTotale(calcolo.getFatturaPmTotale())
+                    .liquidazioneOwner(daRigheSplit
+                            ? ownerNet.subtract(safeVal(b.getWithholdingAmount()))
+                            : calcolo.getLiquidazioneOwner())
+                    .imponibileFatturaPm(imponibileFatturaPm)
+                    .ivaScorporataPm(ivaScorporata)
+                    .fatturaPmTotale(fatturaPmTotale)
                     .warnings(calcolo.getWarnings())
                     .calcoloCompleto(calcolo.getCalcoloCompleto())
+                    .regimeFiscalePm(calcolo.getRegimeFiscalePm())
                     .touristTaxAmount(b.getTouristTaxAmount())
                     .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                     // Descrizioni solo qui: nel ramo storico sopra lo split non viene dalle
@@ -788,6 +1158,25 @@ public class BookingService {
                     .build();
             log.debug("BookingService.toDetailDTO() - id={} split ricalcolato (nessun documento)", b.getId());
         }
+
+        // Righe split sempre lette da DB, in entrambi i rami sopra (con o senza documenti):
+        // sono il dato persistito, non una riproduzione del calcolo.
+        List<BookingSplitEconomicoDTO> righeSplitDTO = righeSplit.stream()
+                .map(r -> BookingSplitEconomicoDTO.builder()
+                        .id(r.getId())
+                        .fkBookingId(r.getFkBookingId())
+                        .fkPropertyContractRuleId(r.getFkPropertyContractRuleId())
+                        .tipoVoce(r.getTipoVoce())
+                        .descrizione(r.getDescrizione())
+                        .importo(r.getImporto())
+                        .aliquotaIva(r.getAliquotaIva())
+                        .includeInFatturaPm(r.getIncludeInFatturaPm())
+                        .ordinamento(r.getOrdinamento())
+                        .source(r.getSource())
+                        .createdAt(r.getCreatedAt())
+                        .updatedAt(r.getUpdatedAt())
+                        .build())
+                .collect(Collectors.toList());
 
         BookingDetailDTO dto = BookingDetailDTO.builder()
                 .id(b.getId())
@@ -821,6 +1210,7 @@ public class BookingService {
                 .ownerNetAmount(b.getOwnerNetAmount())
                 .withholdingAmount(b.getWithholdingAmount())
                 .touristTaxAmount(b.getTouristTaxAmount())
+                .totalCostiPm(b.getTotalCostiPm())
                 .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                 .touristTaxCollection(b.getTouristTaxCollection())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))
@@ -830,6 +1220,7 @@ public class BookingService {
                 .createdAt(b.getCreatedAt())
                 .updatedAt(b.getUpdatedAt())
                 .splitEconomico(split)
+                .righeSplit(righeSplitDTO)
                 // dati immobile (per dialog)
                 .propertyAddress(prop != null ? prop.getAddress() : null)
                 .propertyCity(prop != null ? prop.getCity() : null)

@@ -62,6 +62,8 @@ let token: string;
 let cu: CuListItem;
 let sommaCanone = 0;
 let sommaRitenuta = 0;
+/** Righe del registro ritenute del proprietario della CU nell'anno: 0 = niente da confrontare nel 7.4. */
+let righeLedger = 0;
 /** CU nate in questa run: solo queste vanno rimosse dall'afterAll. */
 let cuCreate: number[] = [];
 
@@ -95,6 +97,7 @@ test.describe('Fase 07 — Certificazione Unica', () => {
       const res = await apiGet<RitenutaRow[]>(token, `/withholding-ledger?anno=${ANNO}&mese=${mese}`);
       for (const r of res.body ?? []) {
         if (r.ownerName === cu.ownerName) {
+          righeLedger++;
           sommaCanone += r.canoneLocazione;
           sommaRitenuta += r.ritenutaAmount;
         }
@@ -172,6 +175,10 @@ test.describe('Fase 07 — Certificazione Unica', () => {
   });
 
   test('7.4 — Importi coerenti con il registro ritenute', async () => {
+    // CU riusata senza righe nel registro ritenute (es. ritenute ripulite dopo la sua
+    // generazione): non c'è niente con cui confrontarla, il test viene saltato.
+    test.skip(righeLedger === 0,
+      `Nessuna riga nel registro ritenute per ${cu.ownerName} nel ${ANNO}: confronto non possibile`);
     const det = (await apiGet<CuListItem>(token, `/cu/${cu.id}`)).body;
 
     // Imponibile = Σ canoni; ritenute = Σ ritenute; compensi = lordo AdE = imponibile + ritenute

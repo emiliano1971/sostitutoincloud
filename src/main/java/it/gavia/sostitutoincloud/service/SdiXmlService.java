@@ -96,6 +96,7 @@ public class SdiXmlService {
     private final StatoDocumentoDAO statoDocumentoDAO;
     private final ComuneItalianoDAO comuneItalianoDAO;
     private final AuditService auditService;
+    private final VociFatturaPmService vociFatturaPmService;
 
     public SdiXmlService(FiscalDocumentDAO fiscalDocumentDAO,
                          BookingDAO bookingDAO,
@@ -106,7 +107,9 @@ public class SdiXmlService {
                          TipoDocumentoDAO tipoDocumentoDAO,
                          StatoDocumentoDAO statoDocumentoDAO,
                          ComuneItalianoDAO comuneItalianoDAO,
-                         AuditService auditService) {
+                         AuditService auditService,
+                         VociFatturaPmService vociFatturaPmService) {
+        this.vociFatturaPmService = vociFatturaPmService;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.tenantDAO = tenantDAO;
@@ -437,9 +440,17 @@ public class SdiXmlService {
      */
     private List<Linea> buildLinee(FiscalDocument doc, Booking booking, BigDecimal aliquota) {
         List<Linea> linee = new ArrayList<>();
-        aggiungiLinea(linee, "Riaddebito commissione OTA", nz(booking.getOtaCommissionAmount()), aliquota);
-        aggiungiLinea(linee, "Riaddebito pulizia finale", nz(booking.getCleaningAmount()), aliquota);
-        aggiungiLinea(linee, "Provvigione gestione immobiliare", nz(booking.getPmFeeAmount()), aliquota);
+        // Voci da booking_split_economico (stesse del dettaglio documento e del PDF); senza
+        // righe split (booking pre-migrazione 018) si usano i campi flat del booking.
+        // L'aliquota resta quella del documento: le righe split hanno sempre 22, anche in RF19.
+        List<VociFatturaPmService.VoceFatturaPm> voci = vociFatturaPmService.vociDaSplit(booking.getId());
+        if (!voci.isEmpty()) {
+            voci.forEach(v -> aggiungiLinea(linee, v.descrizione(), v.lordo(), aliquota));
+        } else {
+            aggiungiLinea(linee, "Riaddebito commissione OTA", nz(booking.getOtaCommissionAmount()), aliquota);
+            aggiungiLinea(linee, "Riaddebito pulizia finale", nz(booking.getCleaningAmount()), aliquota);
+            aggiungiLinea(linee, "Provvigione gestione immobiliare", nz(booking.getPmFeeAmount()), aliquota);
+        }
         if (linee.isEmpty()) {
             // Nessun importo dettagliabile: riga sintetica sull'imponibile del documento.
             BigDecimal imponibile = nz(doc.getImponibile()).setScale(2, RoundingMode.HALF_UP);

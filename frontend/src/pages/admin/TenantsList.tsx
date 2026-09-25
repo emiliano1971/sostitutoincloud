@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Search, Plus, Eye, Pause, Play, Loader2, AlertCircle } from 'lucide-react';
 import { getTenants, updateTenantStatus, type TenantListItem } from '@/api/tenantApi';
+import { labelStatoTenant } from '@/lib/statiLabels';
 
 const statusColor: Record<string, string> = {
   active:    'bg-success/10 text-success border-success/20',
@@ -111,7 +112,7 @@ const TenantsList = () => {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{t.vatNumber ?? '—'}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={statusColor[t.stato] ?? ''}>{t.stato}</Badge>
+                      <Badge variant="outline" className={statusColor[t.stato] ?? ''}>{labelStatoTenant(t.stato)}</Badge>
                     </TableCell>
                     <TableCell className="text-right">{t.propertiesCount}</TableCell>
                     <TableCell className="text-right">{t.ownersCount}</TableCell>

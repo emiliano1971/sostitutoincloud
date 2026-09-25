@@ -271,9 +271,13 @@ test.describe('Fase 06 — Liquidazione', () => {
 
     await dialog.getByRole('button', { name: 'Calcola' }).click();
 
-    await expect(page.getByText('Liquidazioni calcolate')).toBeVisible();
+    // exact: vedi 6.10 — toast duplicato nella live region per screen reader
+    await expect(page.getByText('Liquidazioni calcolate', { exact: true })).toBeVisible();
     // Solo la liquidazione di questo test: nessun altro owner ha ritenute nel periodo
-    await expect(page.getByText(/1 nuovi, \d+ aggiornati, \d+ saltati/)).toBeVisible();
+    // Con una regex exact non si applica: si esclude la live region (role="status")
+    // che ripete il testo del toast, altrimenti il locator risolve due elementi.
+    await expect(page.getByText(/1 nuovi, \d+ aggiornati, \d+ saltati/)
+      .and(page.locator(':not([role="status"])'))).toBeVisible();
     await dialog.getByRole('button', { name: 'Chiudi' }).click();
 
     // La liquidazione è nata: da qui in poi l'afterAll deve smontarla
@@ -380,7 +384,8 @@ test.describe('Fase 06 — Liquidazione', () => {
 
     await rigaSettlement(page).getByRole('button', { name: 'Approva' }).click();
 
-    await expect(page.getByText('Liquidazione approvata')).toBeVisible();
+    // exact: vedi 6.10 — toast duplicato nella live region per screen reader
+    await expect(page.getByText('Liquidazione approvata', { exact: true })).toBeVisible();
     await expect(rigaSettlement(page).getByText('Approvato')).toBeVisible();
     expect((await dettaglioSettlement()).stato).toBe('approved');
   });
@@ -390,7 +395,9 @@ test.describe('Fase 06 — Liquidazione', () => {
 
     await rigaSettlement(page).getByRole('button', { name: 'Segna pagato' }).click();
 
-    await expect(page.getByText('Liquidazione segnata come pagata')).toBeVisible();
+    // exact: il toast è duplicato nella live region per screen reader ("Notification ..."),
+    // senza exact il locator risolve due elementi (strict mode violation).
+    await expect(page.getByText('Liquidazione segnata come pagata', { exact: true })).toBeVisible();
     await expect(rigaSettlement(page).getByText('Pagato')).toBeVisible();
     // Una liquidazione pagata non ha più azioni disponibili
     await expect(rigaSettlement(page).getByRole('button', { name: 'Approva' })).toHaveCount(0);

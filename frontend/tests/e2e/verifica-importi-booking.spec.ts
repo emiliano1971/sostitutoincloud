@@ -58,6 +58,15 @@ interface BookingDetail {
   settlementId?: number;
   splitEconomico: SplitEconomico;
   documenti: DocumentoBooking[];
+  // Righe di booking_split_economico: assenti/vuote sulle prenotazioni pre-migrazione 018.
+  righeSplit?: RigaSplit[];
+  totalCostiPm?: number;
+}
+
+interface RigaSplit {
+  tipoVoce: string;
+  importo: number;
+  includeInFatturaPm: boolean;
 }
 
 interface BookingListItem {
@@ -226,16 +235,40 @@ test.describe.serial(`Verifica importi booking ${bookingIdParam || '(auto)'}`, (
     const tassaInclusa = b.touristTaxIncludedInGross ?? false;
     const baseCalcolo = tassaInclusa ? b.grossAmount - tassa : b.grossAmount;
 
-    const sommaVoci =
-      nz(b.otaCommissionAmount) + nz(b.cleaningAmount) + nz(b.pmFeeAmount) + nz(b.ownerNetAmount);
+    // Con righe split i costi PM sono total_costi_pm: comprende le voci extra in fattura, che
+    // riducono il netto proprietario. Sui booking pre-migrazione 018 restano OTA+pulizie+PM.
+    const conRigheSplit = (b.righeSplit?.length ?? 0) > 0;
+    const costiPm = conRigheSplit
+      ? nz(b.totalCostiPm)
+      : nz(b.otaCommissionAmount) + nz(b.cleaningAmount) + nz(b.pmFeeAmount);
+    const sommaVoci = costiPm + nz(b.ownerNetAmount);
     const atteso = tassaInclusa ? baseCalcolo : b.grossAmount;
     const delta = sommaVoci - atteso;
 
     console.log(
       `V.1 Split: gross=${b.grossAmount} tassa=${tassa} inclusa=${tassaInclusa} ` +
-        `base=${baseCalcolo} OTA+pulizie+PM+netto=${sommaVoci.toFixed(2)} delta=${fmtDelta(delta)}`,
+        `base=${baseCalcolo} ${conRigheSplit ? 'totalCostiPm' : 'OTA+pulizie+PM'}+netto=${sommaVoci.toFixed(2)} ` +
+        `delta=${fmtDelta(delta)}`,
     );
     expect(approxEqual(sommaVoci, atteso)).toBeTruthy();
+
+    // V.1b — righe booking_split_economico, solo se presenti (le prenotazioni create prima
+    // della migration 018 non ne hanno): total_costi_pm deve coincidere con la somma delle
+    // righe in fattura PM.
+    if (b.righeSplit && b.righeSplit.length > 0) {
+      const sommaRigheSplit = b.righeSplit
+        .filter(r => r.includeInFatturaPm)
+        .reduce((s, r) => s + r.importo, 0);
+      const totalCostiPm = nz(b.totalCostiPm);
+      console.log(
+        `V.1b Split righe: ${b.righeSplit.length} righe, ` +
+          `somma=${sommaRigheSplit.toFixed(2)}, totalCostiPm=${totalCostiPm} ` +
+          `delta=${fmtDelta(totalCostiPm - sommaRigheSplit)}`,
+      );
+      expect(approxEqual(totalCostiPm, sommaRigheSplit)).toBeTruthy();
+    } else {
+      console.log('V.1b Split righe: nessuna riga split (booking pre-migrazione 018), verifica saltata');
+    }
   });
 
   test('V.2 — coerenza ritenuta booking', async () => {
@@ -278,12 +311,19 @@ test.describe.serial(`Verifica importi booking ${bookingIdParam || '(auto)'}`, (
     const b = booking!;
     const f = fatturaDetail!;
 
-    const serviziPm = nz(b.otaCommissionAmount) + nz(b.cleaningAmount) + nz(b.pmFeeAmount);
+    // Con righe split la fattura è Σ righe in fattura PM = total_costi_pm (voci extra comprese);
+    // sui booking pre-migrazione 018 restano OTA+pulizie+PM.
+    const conRigheSplit = (b.righeSplit?.length ?? 0) > 0;
+    const serviziPm = conRigheSplit
+      ? nz(b.totalCostiPm)
+      : nz(b.otaCommissionAmount) + nz(b.cleaningAmount) + nz(b.pmFeeAmount);
     const delta = f.totalAmount - serviziPm;
 
     console.log(
       `V.4 Fattura ${f.documentNumber}: totale=${f.totalAmount} vs servizi PM=${serviziPm.toFixed(2)} ` +
-        `(OTA ${nz(b.otaCommissionAmount)} + pulizie ${nz(b.cleaningAmount)} + PM ${nz(b.pmFeeAmount)}) ` +
+        (conRigheSplit
+          ? `(totalCostiPm, ${b.righeSplit!.length} righe split) `
+          : `(OTA ${nz(b.otaCommissionAmount)} + pulizie ${nz(b.cleaningAmount)} + PM ${nz(b.pmFeeAmount)}) `) +
         `delta=${fmtDelta(delta)}`,
     );
     expect(approxEqual(f.totalAmount, serviziPm)).toBeTruthy();

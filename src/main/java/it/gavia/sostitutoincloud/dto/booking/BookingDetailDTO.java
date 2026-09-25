@@ -48,6 +48,8 @@ public class BookingDetailDTO {
     private BigDecimal ownerNetAmount;
     private BigDecimal withholdingAmount;
     private BigDecimal touristTaxAmount;
+    // booking.total_costi_pm: somma delle righe split in fattura PM (migration 018)
+    private BigDecimal totalCostiPm;
     private Boolean touristTaxIncludedInGross;
     private String touristTaxCollection;
     private String statoPrenotazione;
@@ -59,6 +61,10 @@ public class BookingDetailDTO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private SplitEconomicoDTO splitEconomico;
+    // Righe di booking_split_economico ordinate per ordinamento. In aggiunta ai campi flat
+    // di splitEconomico (che restano per retrocompatibilità del frontend): lista vuota per
+    // le prenotazioni create prima della migration 018.
+    private List<BookingSplitEconomicoDTO> righeSplit;
 
     // Dati immobile (per dialog generazione documenti)
     private String propertyAddress;

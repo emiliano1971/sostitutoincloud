@@ -152,7 +152,9 @@ test.describe('Fase 03 — Import Booking', () => {
     const prenotazioni = 'Mapping Prenotazioni';
     await expect(mappingTrigger(page, prenotazioni, 'ID Prenotazione')).toHaveText('Id');
     await expect(mappingTrigger(page, prenotazioni, 'Origine (canale)')).toHaveText('Origine');
-    await expect(mappingTrigger(page, prenotazioni, 'Struttura (cod. OTA)')).toHaveText('Struttura');
+    // Campo di sistema rinominato in UI da "Struttura (cod. OTA)" a "Immobile (cod. OTA)";
+    // la colonna del file resta "Struttura".
+    await expect(mappingTrigger(page, prenotazioni, 'Immobile (cod. OTA)')).toHaveText('Struttura');
     await expect(mappingTrigger(page, prenotazioni, 'Check-in')).toHaveText('Arrivo');
     await expect(mappingTrigger(page, prenotazioni, 'Check-out')).toHaveText('Partenza');
     await expect(mappingTrigger(page, prenotazioni, 'Importo totale')).toHaveText('Importo totale');

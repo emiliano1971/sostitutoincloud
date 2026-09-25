@@ -1,6 +1,7 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
@@ -11,6 +12,7 @@ import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
 import it.gavia.sostitutoincloud.dto.settings.TenantSettingsDTO;
+import it.gavia.sostitutoincloud.model.BookingSplitEconomico;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
@@ -54,6 +56,7 @@ public class DocumentGenerationService {
     private final BookingDAO bookingDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final SdiXmlService sdiXmlService;
+    private final BookingSplitEconomicoDAO splitEconomicoDAO;
 
     public DocumentGenerationService(FiscalDocumentDAO fiscalDocumentDAO,
                                      BookingService bookingService,
@@ -65,7 +68,8 @@ public class DocumentGenerationService {
                                      WithholdingLedgerService withholdingLedgerService,
                                      BookingDAO bookingDAO,
                                      StatoPrenotazioneDAO statoPrenotazioneDAO,
-                                     SdiXmlService sdiXmlService) {
+                                     SdiXmlService sdiXmlService,
+                                     BookingSplitEconomicoDAO splitEconomicoDAO) {
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingService = bookingService;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
@@ -77,6 +81,7 @@ public class DocumentGenerationService {
         this.bookingDAO = bookingDAO;
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
         this.sdiXmlService = sdiXmlService;
+        this.splitEconomicoDAO = splitEconomicoDAO;
     }
 
     public DocumentGenerateResponseDTO generate(Integer tenantId, DocumentGenerateRequestDTO request) {
@@ -183,7 +188,20 @@ public class DocumentGenerationService {
             // I valori dei servizi (OTA, pulizie, commissione PM) sono GIÀ LORDI, IVA inclusa.
             // L'IVA va SCORPORATA dal lordo (lordo / 1.22), non aggiunta sopra.
             // Il totale della fattura coincide con il lordo dei servizi.
-            BigDecimal lordoServizi = otaCommission.add(cleaning).add(pmFee).setScale(2, RoundingMode.HALF_UP);
+            // Voci lette da booking_split_economico: somma solo quelle in fattura PM
+            // (la tassa di soggiorno ha una riga ma include_in_fattura_pm=false).
+            List<BookingSplitEconomico> righe = splitEconomicoDAO.findByBookingId(booking.getId());
+            BigDecimal lordoServizi = righe.stream()
+                    .filter(r -> Boolean.TRUE.equals(r.getIncludeInFatturaPm()))
+                    .map(BookingSplitEconomico::getImporto)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(2, RoundingMode.HALF_UP);
+            // Nessuna riga split (booking pre-migrazione 018) → campi flat dello split.
+            if (lordoServizi.compareTo(BigDecimal.ZERO) == 0 && righe.isEmpty()) {
+                lordoServizi = otaCommission.add(cleaning).add(pmFee).setScale(2, RoundingMode.HALF_UP);
+                log.warn("DocumentGenerationService - bookingId={} nessuna riga split trovata, uso campi flat",
+                        booking.getId());
+            }
             // Senza servizi non c'è nulla da fatturare: una fattura a zero non ha senso
             // fiscale e nasconderebbe il vero problema a monte — regole contratto assenti
             // sull'immobile, oppure commissione OTA non mappata in fase di import.

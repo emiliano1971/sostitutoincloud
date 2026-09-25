@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -6,11 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw } from 'lucide-react';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { getContractRules, type ContractRule } from '@/api/contractApi';
+import { cn } from '@/lib/utils';
 import GuestEditDialog from '@/components/GuestEditDialog';
 import {
   getBookingById,
   updateBookingSplit,
+  ricalcolaSplit,
+  aggiungiVoceExtra,
+  aggiornaVoceExtra,
+  eliminaVoceExtra,
+  type BookingSplitRiga,
   type BookingDetail as BookingDetailType,
   type BookingUpdateSplitRequest,
 } from '@/api/bookingApi';
@@ -20,9 +27,11 @@ import { toast } from '@/hooks/use-toast';
 import { useLookup } from '@/contexts/LookupContext';
 import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
+import { labelStatoPrenotazione } from '@/lib/statiLabels';
 
 const paymentLabels: Record<string, string> = {
   pending: 'In attesa',
+  received: 'Ricevuto',   // valore reale dell'enum payment_status
   paid: 'Pagato',
   failed: 'Fallito',
   refunded: 'Rimborsato',
@@ -87,6 +96,157 @@ function toDialogBooking(b: BookingDetailType): Booking {
   };
 }
 
+/** Etichetta del tipo di regola: quella del backend (tipoLabel), altrimenti una di ripiego. */
+const labelTipoVoce = (r: ContractRule) => {
+  const labels: Record<string, string> = {
+    commissione_ota: 'Commissione OTA',
+    pulizie: 'Pulizie',
+    cambio_biancheria: 'Cambio biancheria',
+    commissione_pm: 'Commissione PM',
+    provvigione_proprietario: 'Provvigione proprietario',
+    extra: 'Extra',
+  };
+  return r.tipoLabel || labels[r.tipo] || r.tipo;
+};
+
+/** Valore della regola in forma leggibile, es. "18% sul lordo", "€50,00 fisso". */
+const formatRegola = (r: ContractRule) => {
+  const euro = (v: number) => `€${v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const pct = (v: number) => `${v.toLocaleString('it-IT', { maximumFractionDigits: 2 })}%`;
+  if (r.isRemainder || r.calcMode === 'rimanenza') return 'rimanenza';
+  switch (r.calcMode) {
+    case 'percentuale':
+    case 'percentuale_lordo': return `${pct(r.valore)} sul lordo`;
+    case 'percentuale_netto': return `${pct(r.valore)} sul netto`;
+    case 'fisso': return `${euro(r.valore)} fisso`;
+    case 'fisso_per_notte': return `${euro(r.valore)} /notte`;
+    case 'fisso_per_persona': return `${euro(r.valore)} /persona`;
+    default: return r.calcModeLabel ? `${r.valore} (${r.calcModeLabel})` : String(r.valore);
+  }
+};
+
+/** Voci dello split con importo impostabile a mano, e campo di override corrispondente. */
+type VoceModificabile = 'ota' | 'pulizie' | 'pm';
+const CAMPO_OVERRIDE = {
+  ota: 'otaCommissionOverride',
+  pulizie: 'cleaningOverride',
+  pm: 'pmFeeOverride',
+} as const satisfies Record<VoceModificabile, keyof BookingUpdateSplitRequest>;
+
+/**
+ * Editor inline di un importo dello split: si digita in percentuale (sulla base di calcolo)
+ * o in euro, i due valori restano sincronizzati e l'altra unità è sempre visibile come
+ * riferimento. Al server si manda sempre e solo l'importo (onApplica).
+ */
+const EditorImporto = ({
+  importoIniziale, base, disabled, onApplica, onAnnulla,
+}: {
+  importoIniziale: number;
+  /** Base su cui leggere la % (lordo, al netto della tassa se inclusa). */
+  base: number;
+  disabled: boolean;
+  onApplica: (importo: number) => void;
+  onAnnulla: () => void;
+}) => {
+  const pctDaImporto = (importo: number) =>
+    base > 0 ? ((importo / base) * 100).toFixed(2) : '0.00';
+  const importoDaPct = (pct: number) => ((pct / 100) * base).toFixed(2);
+
+  const [mode, setMode] = useState<'pct' | 'eur'>('pct');
+  const [valore, setValore] = useState(String(importoIniziale));
+  const [pct, setPct] = useState(pctDaImporto(importoIniziale));
+
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-sm text-destructive">-</span>
+      {/* Toggle % / € — cambiando modalità il valore dell'altra unità viene
+          ricalcolato, così non si perde quanto già digitato. */}
+      <button
+        onClick={() => { setMode('pct'); setPct(pctDaImporto(parseFloat(valore || '0'))); }}
+        title="Modifica in percentuale"
+        className={`text-xs px-1 rounded border ${
+          mode === 'pct' ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground'
+        }`}
+      >
+        %
+      </button>
+      <button
+        onClick={() => { setMode('eur'); setValore(importoDaPct(parseFloat(pct || '0'))); }}
+        title="Modifica in euro"
+        className={`text-xs px-1 rounded border ${
+          mode === 'eur' ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground'
+        }`}
+      >
+        €
+      </button>
+
+      {mode === 'pct' ? (
+        <Input
+          type="number"
+          value={pct}
+          onChange={e => { setPct(e.target.value); setValore(importoDaPct(parseFloat(e.target.value || '0'))); }}
+          className="w-20 h-6 text-xs"
+          min="0"
+          max="100"
+          step="0.01"
+          autoFocus
+          placeholder="0.00"
+        />
+      ) : (
+        <Input
+          type="number"
+          value={valore}
+          onChange={e => { setValore(e.target.value); setPct(pctDaImporto(parseFloat(e.target.value || '0'))); }}
+          className="w-24 h-6 text-xs"
+          min="0"
+          step="0.01"
+          autoFocus
+          placeholder="0.00"
+        />
+      )}
+
+      {/* L'altra unità sempre visibile come riferimento */}
+      <span className="text-xs text-muted-foreground whitespace-nowrap">
+        {mode === 'pct' ? `= €${(parseFloat(valore || '0') || 0).toFixed(2)}` : `= ${pct || '0.00'}%`}
+      </span>
+
+      <button
+        onClick={() => onApplica(parseFloat(valore))}
+        disabled={disabled || valore.trim() === '' || Number.isNaN(parseFloat(valore))}
+        title="Applica"
+        className="disabled:opacity-40"
+      >
+        <Check className="h-3 w-3 text-green-600" />
+      </button>
+      <button onClick={onAnnulla} title="Annulla">
+        <X className="h-3 w-3 text-destructive" />
+      </button>
+    </div>
+  );
+};
+
+/** Riga visualizzata nello split economico (voci di costo, totali, note). */
+interface RigaSplitView {
+  key?: number;
+  label: string;
+  value: number;
+  bold?: boolean;
+  note?: boolean;
+  highlight?: boolean;
+  /** Voce modificabile a mano con l'editor %/€ (override via PATCH /split). */
+  editable?: VoceModificabile;
+  /** Regola di contratto applicata, sotto la voce. */
+  descrizione?: string;
+  /** Percentuale sulla base di calcolo, solo per le righe da booking_split_economico. */
+  pct?: string;
+  /** source della riga split: 'manuale' e 'import' hanno un'indicazione sotto la voce. */
+  source?: string;
+  /** Voce extra inserita dal PM: modificabile ed eliminabile (matita + cestino). */
+  extra?: BookingSplitRiga;
+  /** Ultima voce di costo: dopo di lei si mostrano "Aggiungi voce" e il form. */
+  ultimaVoceCosto?: boolean;
+}
+
 const BookingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -102,12 +262,18 @@ const BookingDetail = () => {
   const [savingReceipt, setSavingReceipt] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [isUpdatingSplit, setIsUpdatingSplit] = useState(false);
-  const [editingOta, setEditingOta] = useState(false);
-  const [otaValue, setOtaValue] = useState('');
-  // Editor della commissione OTA: si digita in percentuale o in euro. I due valori
-  // restano sincronizzati, ma al server si manda sempre e solo l'importo.
-  const [otaEditMode, setOtaEditMode] = useState<'pct' | 'eur'>('pct');
-  const [otaPctValue, setOtaPctValue] = useState('');
+  // Voce dello split aperta nell'editor %/€ (una alla volta): OTA, pulizie o PM.
+  const [editingVoce, setEditingVoce] = useState<VoceModificabile | null>(null);
+  // Card "Regole Contratto": caricata alla prima apertura (regoleCaricate evita di
+  // ricaricare a ogni click anche quando l'immobile non ha regole).
+  const [showRegole, setShowRegole] = useState(false);
+  const [regole, setRegole] = useState<ContractRule[]>([]);
+  const [loadingRegole, setLoadingRegole] = useState(false);
+  const [regoleCaricate, setRegoleCaricate] = useState(false);
+  // Voci extra dello split: form inline di aggiunta / modifica (una alla volta)
+  const [showAggiungiVoce, setShowAggiungiVoce] = useState(false);
+  const [editingRigaId, setEditingRigaId] = useState<number | null>(null);
+  const [voceForm, setVoceForm] = useState({ descrizione: '', importo: '', includeInFatturaPm: true });
 
   const reloadBooking = async () => {
     if (!id) return;
@@ -132,7 +298,98 @@ const BookingDetail = () => {
       });
     } finally {
       setIsUpdatingSplit(false);
-      setEditingOta(false);
+      setEditingVoce(null);
+    }
+  };
+
+  // Ricalcolo completo dalle regole di contratto correnti (body vuoto): riporta alla regola
+  // anche una commissione OTA forzata dal PM o arrivata dal file.
+  // Regole contratto dell'immobile: stesso endpoint della pagina Contratti
+  // (GET /properties/{id}/contracts), caricate solo alla prima apertura della card.
+  const handleToggleRegole = async () => {
+    if (!showRegole && !regoleCaricate && booking) {
+      setLoadingRegole(true);
+      try {
+        setRegole(await getContractRules(booking.fkPropertyId));
+        setRegoleCaricate(true);
+      } catch {
+        // la card mostra il messaggio "nessuna regola"
+      } finally {
+        setLoadingRegole(false);
+      }
+    }
+    setShowRegole(!showRegole);
+  };
+
+  const handleRicalcola = async () => {
+    if (!id) return;
+    setIsUpdatingSplit(true);
+    try {
+      const updated = await ricalcolaSplit(Number(id));
+      setBooking(updated);
+      toast({
+        title: 'Split ricalcolato',
+        description: 'Importi aggiornati dalle regole contratto correnti',
+      });
+    } catch (err) {
+      toast({
+        title: 'Errore',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdatingSplit(false);
+      setEditingVoce(null);
+    }
+  };
+
+  const chiudiFormVoce = () => {
+    setShowAggiungiVoce(false);
+    setEditingRigaId(null);
+  };
+
+  const handleSalvaVoce = async () => {
+    if (!id) return;
+    setIsUpdatingSplit(true);
+    try {
+      const data = {
+        descrizione: voceForm.descrizione.trim(),
+        importo: parseFloat(voceForm.importo),
+        includeInFatturaPm: voceForm.includeInFatturaPm,
+      };
+      const updated = editingRigaId
+        ? await aggiornaVoceExtra(Number(id), editingRigaId, data)
+        : await aggiungiVoceExtra(Number(id), data);
+      setBooking(updated);
+      toast({ title: editingRigaId ? 'Voce aggiornata' : 'Voce aggiunta' });
+      chiudiFormVoce();
+    } catch (err) {
+      toast({
+        title: 'Errore',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdatingSplit(false);
+    }
+  };
+
+  const handleEliminaVoce = async (rigaId: number) => {
+    if (!id || !confirm('Eliminare questa voce?')) return;
+    setIsUpdatingSplit(true);
+    try {
+      const updated = await eliminaVoceExtra(Number(id), rigaId);
+      setBooking(updated);
+      toast({ title: 'Voce eliminata' });
+      if (editingRigaId === rigaId) chiudiFormVoce();
+    } catch (err) {
+      toast({
+        title: 'Errore',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdatingSplit(false);
     }
   };
 
@@ -182,6 +439,11 @@ const BookingDetail = () => {
 
   useEffect(() => {
     if (!id) return;
+    // Navigando da una prenotazione all'altra il componente resta montato: le regole
+    // caricate appartengono all'immobile precedente, si ripartisce da card chiusa e vuota.
+    setShowRegole(false);
+    setRegole([]);
+    setRegoleCaricate(false);
     setIsLoading(true);
     getBookingById(Number(id))
       .then(setBooking)
@@ -237,34 +499,81 @@ const BookingDetail = () => {
   // corrisponderebbe a quella del contratto.
   const baseCalcolo = split.grossAmount
     - (split.touristTaxIncludedInGross ? (split.touristTaxAmount ?? 0) : 0);
-  // Due decimali come nell'editor (otaPctDaImporto): con precisioni diverse il badge e il
+  // Due decimali come nell'editor (EditorImporto): con precisioni diverse il badge e il
   // valore precompilato nel campo sembravano due percentuali differenti.
   const pctOf = (v: number) => (baseCalcolo > 0 ? ((v / baseCalcolo) * 100).toFixed(2) : '0.00');
-  const otaPct = pctOf(split.otaCommissionAmount ?? 0);
-  // Override OTA attivo: il backend lo segnala nella descrizione ("importo forzato" se
-  // diverge dalla regola, "importo impostato" se la regola OTA non esiste).
-  const otaHaOverride = /importo (forzato|impostato)/.test(split.otaDescrizione ?? '');
 
-  // Conversioni dell'editor OTA: baseCalcolo è già la base corretta (al netto della tassa
-  // se inclusa), quindi le due funzioni sono l'unico punto che la usa.
-  const otaPctDaImporto = (importo: number) =>
-    baseCalcolo > 0 ? ((importo / baseCalcolo) * 100).toFixed(2) : '0.00';
-  const otaImportoDaPct = (pct: number) => ((pct / 100) * baseCalcolo).toFixed(2);
-
-  const apriEditorOta = () => {
-    const importo = split.otaCommissionAmount ?? 0;
-    setEditingOta(true);
-    setOtaEditMode('pct');
-    setOtaPctValue(otaPctDaImporto(importo));
-    setOtaValue(String(importo));
+  // Override attivo, per mostrare il ripristino. OTA: lo segnala la descrizione ("importo
+  // forzato" se diverge dalla regola, "importo impostato" senza regola OTA). Pulizie e PM:
+  // la riga split è 'manuale'.
+  const rigaDi = (tipo: string) => booking.righeSplit?.find(r => r.tipoVoce === tipo);
+  const importoManuale = (tipo: string) => {
+    const r = rigaDi(tipo);
+    return r?.source === 'manuale' ? r.importo : null;
+  };
+  const haOverride: Record<VoceModificabile, boolean> = {
+    ota: /importo (forzato|impostato)/.test(split.otaDescrizione ?? ''),
+    pulizie: importoManuale('pulizie') != null,
+    pm: importoManuale('commissione_pm') != null,
   };
 
-  const chiudiEditorOta = () => {
-    setEditingOta(false);
-    setOtaEditMode('pct');
-  };
+  // Per il backend un override assente (null) vuol dire "torna alla regola". A ogni PATCH
+  // si ripassano quindi gli importi manuali attuali: l'OTA sempre (come già al cambio del
+  // flag tassa), pulizie e PM solo se impostate a mano — altrimenti una percentuale verrebbe
+  // congelata e non seguirebbe più la base. Ricalcola invece manda {} (tutto dalle regole).
+  const overrideCorrenti = (): BookingUpdateSplitRequest => ({
+    otaCommissionOverride: split.otaCommissionAmount ?? 0,
+    cleaningOverride: importoManuale('pulizie'),
+    pmFeeOverride: importoManuale('commissione_pm'),
+  });
+  const impostaVoce = (voce: VoceModificabile, importo: number | null) =>
+    handleUpdateSplit({ ...overrideCorrenti(), [CAMPO_OVERRIDE[voce]]: importo });
 
-  const splitRows = [
+  // Voci di costo: dalle righe di booking_split_economico se presenti, altrimenti dai campi
+  // flat dello split (prenotazioni pre-migrazione 018). La tassa di soggiorno ha una riga
+  // split ma resta mostrata a parte, in fondo, come prima.
+  // La riga OTA mantiene editable: 'ota', quindi usa lo stesso editor e le stesse icone.
+  // Le voci extra si accodano sempre: il fallback sui campi flat vale solo per le voci
+  // calcolate, altrimenti su un booking pre-migrazione una voce extra nasconderebbe
+  // OTA/pulizie/PM (la lista righeSplit conterrebbe solo lei).
+  const righeCosto = (booking.righeSplit ?? [])
+    .filter(r => r.tipoVoce !== 'tassa_soggiorno' && r.tipoVoce !== 'extra');
+  const righeExtra = (booking.righeSplit ?? []).filter(r => r.tipoVoce === 'extra');
+  const vociCalcolate: RigaSplitView[] = righeCosto.length > 0
+    ? righeCosto.map(r => ({
+        key: r.id,
+        label: r.descrizione,
+        value: -r.importo,
+        pct: pctOf(r.importo),
+        source: r.source,
+        ...(r.tipoVoce === 'commissione_ota'
+          ? { editable: 'ota' as const, descrizione: split.otaDescrizione }
+          : r.tipoVoce === 'pulizie'
+            ? { editable: 'pulizie' as const }
+            : r.tipoVoce === 'commissione_pm'
+              ? { editable: 'pm' as const, descrizione: split.pmFeeDescrizione }
+              : {}),
+      }))
+    : [
+        // descrizione = regola di contratto applicata, assente sugli split storici
+        { label: 'Commissione OTA', value: -split.otaCommissionAmount, editable: 'ota', descrizione: split.otaDescrizione },
+        { label: 'Pulizie', value: -split.cleaningAmount, editable: 'pulizie' },
+        { label: 'Provvigione PM', value: -split.pmFeeAmount, editable: 'pm', descrizione: split.pmFeeDescrizione },
+      ];
+  const vociCosto: RigaSplitView[] = [
+    ...vociCalcolate,
+    ...righeExtra.map(r => ({
+      key: r.id,
+      label: r.descrizione,
+      value: -r.importo,
+      pct: pctOf(r.importo),
+      // niente source: su una voce aggiunta dal PM "importo modificato" sarebbe fuorviante
+      descrizione: r.includeInFatturaPm ? undefined : 'fuori fattura PM',
+      extra: r,
+    })),
+  ].map((v, i, all) => (i === all.length - 1 ? { ...v, ultimaVoceCosto: true } : v));
+
+  const splitRows: RigaSplitView[] = [
     { label: 'Lordo ospite', value: split.grossAmount },
     // Tassa già compresa nel lordo: si rende esplicito lo scorporo e la base effettiva su cui
     // il backend calcola provvigioni, netto proprietario e ritenuta (la tassa è incassata per
@@ -275,10 +584,7 @@ const BookingDetail = () => {
           { label: 'Base di calcolo', value: split.grossAmount - split.touristTaxAmount, bold: true },
         ]
       : []),
-    // descrizione = regola di contratto applicata, assente sugli split storici
-    { label: 'Commissione OTA', value: -split.otaCommissionAmount, editable: 'ota', descrizione: split.otaDescrizione },
-    { label: 'Pulizie', value: -split.cleaningAmount },
-    { label: 'Provvigione PM', value: -split.pmFeeAmount, descrizione: split.pmFeeDescrizione },
+    ...vociCosto,
     ...(split.ivaScorporataPm && split.ivaScorporataPm > 0
       ? [{ label: 'di cui IVA 22% (scorporata sui servizi PM)', value: split.ivaScorporataPm, note: true }]
       : []),
@@ -314,7 +620,12 @@ const BookingDetail = () => {
     tax_code: booking.tenantTaxCode ?? '',
     address: booking.tenantLegalAddress ?? '',
     pec: booking.tenantPec ?? '',
+    // Regime del PM: decide lo scorporo IVA nell'anteprima della fattura (RF19 = senza IVA)
+    regimeFiscalePm: split.regimeFiscalePm,
   };
+  // Righe che entreranno nella fattura PM: stesse di DocumentGenerationService / PDF / XML
+  // (booking_split_economico con include_in_fattura_pm e importo > 0, voci extra comprese).
+  const righeFatturaPm = (booking.righeSplit ?? []).filter(r => r.includeInFatturaPm && r.importo > 0);
 
   const datiFatturazioneMancanti =
     !booking.guestTaxCode ||
@@ -330,7 +641,7 @@ const BookingDetail = () => {
           <h1 className="text-xl font-bold">Prenotazione {booking.externalBookingId}</h1>
           <p className="text-sm text-muted-foreground">{[booking.channelName, booking.propertyName].filter(Boolean).join(' · ')}</p>
         </div>
-        <Badge className="ml-auto">{booking.statoPrenotazione}</Badge>
+        <Badge className="ml-auto">{labelStatoPrenotazione(booking.statoPrenotazione)}</Badge>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -398,9 +709,78 @@ const BookingDetail = () => {
         </div>
       </div>
 
+      {/* Regole Contratto dell'immobile: card collassata, caricata alla prima apertura */}
+      <Card>
+        <CardHeader className="cursor-pointer py-3 px-4" onClick={handleToggleRegole}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Regole Contratto</CardTitle>
+              {regole.length > 0 && (
+                <Badge variant="outline" className="text-xs">{regole.length}</Badge>
+              )}
+            </div>
+            {showRegole
+              ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </div>
+        </CardHeader>
+        {showRegole && (
+          <CardContent className="pt-0 px-4 pb-4">
+            {loadingRegole ? (
+              <div className="text-xs text-muted-foreground text-center py-2">Caricamento...</div>
+            ) : regole.length === 0 ? (
+              <div className="text-xs text-muted-foreground text-center py-2">
+                Nessuna regola contratto configurata per questo immobile
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {regole.map(r => {
+                  // Regola legata a un canale diverso da quello della prenotazione: non
+                  // concorre a questo split (il calcolatore usa solo canale corrente o generiche).
+                  const altroCanale = !!r.canaleName && !!booking.channelName && r.canaleName !== booking.channelName;
+                  return (
+                    <div
+                      key={r.id}
+                      className={cn('flex items-start justify-between text-xs py-1 border-b last:border-0',
+                        altroCanale && 'opacity-50')}
+                    >
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium">{labelTipoVoce(r)}</span>
+                        {r.canaleName && (
+                          <span className="text-muted-foreground">
+                            {r.canaleName}{altroCanale ? ' — non applicata (altro canale)' : ''}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-right font-mono">{formatRegola(r)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
       {/* Split Economico */}
       <Card>
-        <CardHeader><CardTitle className="text-sm flex items-center gap-2"><CreditCard className="h-4 w-4" /> Split Economico</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2"><CreditCard className="h-4 w-4" /> Split Economico</CardTitle>
+            {!hasDocuments && (
+              <button
+                onClick={handleRicalcola}
+                disabled={isUpdatingSplit}
+                className="flex items-center gap-1 text-xs font-medium text-primary hover:text-primary/80 disabled:opacity-50"
+                title="Ricalcola dalle regole contratto correnti"
+              >
+                <RefreshCw className={cn('h-4 w-4', isUpdatingSplit && 'animate-spin')} />
+                Ricalcola
+              </button>
+            )}
+          </div>
+        </CardHeader>
         <CardContent>
           {split.warnings && split.warnings.length > 0 && (
             <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-300">
@@ -424,11 +804,12 @@ const BookingDetail = () => {
             <Switch
               checked={split.touristTaxIncludedInGross ?? false}
               disabled={hasDocuments || isUpdatingSplit}
-              // Si ripassa l'OTA attuale: senza, il backend riceverebbe null ("torna alle
-              // regole") e il cambio del flag azzererebbe la commissione impostata dal PM.
+              // Si ripassano gli importi manuali attuali (overrideCorrenti): senza, il backend
+              // riceverebbe null ("torna alle regole") e il cambio del flag azzererebbe OTA,
+              // pulizie e PM impostate dal PM.
               onCheckedChange={(val) => handleUpdateSplit({
+                ...overrideCorrenti(),
                 touristTaxIncludedInGross: val,
-                otaCommissionOverride: split.otaCommissionAmount ?? 0,
               })}
             />
           </div>
@@ -436,121 +817,53 @@ const BookingDetail = () => {
               importi restano allineati sullo stesso bordo destro */}
           <div className="space-y-2 pr-6">
             {splitRows.map((row, i) => (
-              <div key={i} className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
+              <Fragment key={row.key ?? `r${i}`}>
+              <div className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
                 <div className="flex flex-col">
                   <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
                   {'descrizione' in row && row.descrizione && (
                     <span className="text-xs text-muted-foreground">{row.descrizione}</span>
                   )}
+                  {/* Origine dell'importo (source della riga split); 'calcolato' = nessuna indicazione */}
+                  {row.source === 'manuale' && (
+                    <span className="text-xs text-amber-600">importo modificato</span>
+                  )}
+                  {row.source === 'import' && (
+                    <span className="text-xs text-muted-foreground">da file</span>
+                  )}
                 </div>
-                {'editable' in row && row.editable === 'ota' ? (
-                  editingOta ? (
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm text-destructive">-</span>
-                      {/* Toggle % / € — cambiando modalità il valore dell'altra unità viene
-                          ricalcolato, così non si perde quanto già digitato. */}
-                      <button
-                        onClick={() => {
-                          setOtaEditMode('pct');
-                          setOtaPctValue(otaPctDaImporto(parseFloat(otaValue || '0')));
-                        }}
-                        title="Modifica in percentuale"
-                        className={`text-xs px-1 rounded border ${
-                          otaEditMode === 'pct'
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'text-muted-foreground'
-                        }`}
-                      >
-                        %
-                      </button>
-                      <button
-                        onClick={() => {
-                          setOtaEditMode('eur');
-                          setOtaValue(otaImportoDaPct(parseFloat(otaPctValue || '0')));
-                        }}
-                        title="Modifica in euro"
-                        className={`text-xs px-1 rounded border ${
-                          otaEditMode === 'eur'
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'text-muted-foreground'
-                        }`}
-                      >
-                        €
-                      </button>
-
-                      {otaEditMode === 'pct' ? (
-                        <Input
-                          type="number"
-                          value={otaPctValue}
-                          onChange={e => {
-                            setOtaPctValue(e.target.value);
-                            setOtaValue(otaImportoDaPct(parseFloat(e.target.value || '0')));
-                          }}
-                          className="w-20 h-6 text-xs"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          autoFocus
-                          placeholder="0.00"
-                        />
-                      ) : (
-                        <Input
-                          type="number"
-                          value={otaValue}
-                          onChange={e => {
-                            setOtaValue(e.target.value);
-                            setOtaPctValue(otaPctDaImporto(parseFloat(e.target.value || '0')));
-                          }}
-                          className="w-24 h-6 text-xs"
-                          min="0"
-                          step="0.01"
-                          autoFocus
-                          placeholder="0.00"
-                        />
-                      )}
-
-                      {/* L'altra unità sempre visibile come riferimento */}
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {otaEditMode === 'pct'
-                          ? `= €${(parseFloat(otaValue || '0') || 0).toFixed(2)}`
-                          : `= ${otaPctValue || '0.00'}%`}
-                      </span>
-
-                      <button
-                        onClick={() => handleUpdateSplit({ otaCommissionOverride: parseFloat(otaValue) })}
-                        disabled={isUpdatingSplit || otaValue.trim() === '' || Number.isNaN(parseFloat(otaValue))}
-                        title="Applica"
-                        className="disabled:opacity-40"
-                      >
-                        <Check className="h-3 w-3 text-green-600" />
-                      </button>
-                      <button onClick={chiudiEditorOta} title="Annulla">
-                        <X className="h-3 w-3 text-destructive" />
-                      </button>
-                    </div>
+                {row.editable ? (
+                  editingVoce === row.editable ? (
+                    <EditorImporto
+                      importoIniziale={Math.abs(row.value)}
+                      base={baseCalcolo}
+                      disabled={isUpdatingSplit}
+                      onApplica={(importo) => impostaVoce(row.editable!, importo)}
+                      onAnnulla={() => setEditingVoce(null)}
+                    />
                   ) : (
                     <div className="relative flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">({otaPct}%)</span>
+                      <span className="text-xs text-muted-foreground">({row.pct ?? pctOf(Math.abs(row.value))}%)</span>
                       <span className="text-sm text-destructive">-{fmt(row.value)}</span>
 
                       {/* Icone fuori dal flusso (nel pr-6 del contenitore): inline spostavano
-                          l'importo OTA rispetto a quelli delle altre righe */}
+                          l'importo rispetto a quelli delle altre righe */}
                       {!hasDocuments && (
                         <div className="absolute left-full ml-1.5 flex items-center gap-1">
                           <button
-                            onClick={apriEditorOta}
+                            onClick={() => setEditingVoce(row.editable!)}
                             disabled={isUpdatingSplit}
-                            title="Modifica commissione"
+                            title="Modifica importo"
                             className="text-muted-foreground hover:text-foreground disabled:opacity-40"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
-                          {/* null = nessun override: il backend ricalcola l'OTA dalle regole di contratto */}
-                          {otaHaOverride && (
+                          {/* null = nessun override: il backend ricalcola la voce dalle regole di contratto */}
+                          {haOverride[row.editable] && (
                             <button
-                              onClick={() => handleUpdateSplit({ otaCommissionOverride: null })}
+                              onClick={() => impostaVoce(row.editable!, null)}
                               disabled={isUpdatingSplit}
-                              title="Ripristina commissione da regole contratto"
+                              title="Ripristina da regole contratto"
                               className="text-muted-foreground hover:text-foreground disabled:opacity-40"
                             >
                               <RotateCcw className="h-3 w-3" />
@@ -561,11 +874,111 @@ const BookingDetail = () => {
                     </div>
                   )
                 ) : (
-                  <span className={`text-sm ${'note' in row && row.note ? 'text-muted-foreground' : row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
-                    {'note' in row && row.note ? '' : row.value < 0 ? '-' : ''}{fmt(row.value)}
-                  </span>
+                  <div className="relative flex items-center gap-2">
+                    {/* % sulla base di calcolo: solo per le voci da booking_split_economico */}
+                    {row.pct && <span className="text-xs text-muted-foreground">({row.pct}%)</span>}
+                    <span className={`text-sm ${'note' in row && row.note ? 'text-muted-foreground' : row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
+                      {'note' in row && row.note ? '' : row.value < 0 ? '-' : ''}{fmt(row.value)}
+                    </span>
+                    {/* Voce extra: matita + cestino fuori dal flusso (nel pr-6), come le icone OTA */}
+                    {row.extra && !hasDocuments && (
+                      <div className="absolute left-full ml-1.5 flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            const r = row.extra!;
+                            setEditingRigaId(r.id);
+                            setShowAggiungiVoce(false);
+                            setVoceForm({
+                              descrizione: r.descrizione,
+                              importo: String(r.importo),
+                              includeInFatturaPm: r.includeInFatturaPm,
+                            });
+                          }}
+                          disabled={isUpdatingSplit}
+                          title="Modifica voce"
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => handleEliminaVoce(row.extra!.id)}
+                          disabled={isUpdatingSplit}
+                          title="Elimina voce"
+                          className="text-destructive hover:text-destructive/80 disabled:opacity-40"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
+              {/* Dopo l'ultima voce di costo: pulsante "Aggiungi voce" e form inline
+                  (aggiunta o modifica di una voce extra), solo senza documenti emessi. */}
+              {row.ultimaVoceCosto && !hasDocuments && (
+                showAggiungiVoce || editingRigaId != null ? (
+                  <div className="border rounded-md p-3 space-y-2 bg-muted/30">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Descrizione voce (es. Parcheggio)"
+                        value={voceForm.descrizione}
+                        onChange={e => setVoceForm({ ...voceForm, descrizione: e.target.value })}
+                        className="flex-1 h-7 text-xs"
+                        autoFocus
+                      />
+                      <Input
+                        type="number"
+                        placeholder="€"
+                        value={voceForm.importo}
+                        onChange={e => setVoceForm({ ...voceForm, importo: e.target.value })}
+                        className="w-24 h-7 text-xs"
+                        min="0.01"
+                        step="0.01"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                        <Switch
+                          checked={voceForm.includeInFatturaPm}
+                          onCheckedChange={v => setVoceForm({ ...voceForm, includeInFatturaPm: v })}
+                          className="scale-75"
+                        />
+                        Includi in fattura PM
+                      </label>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={handleSalvaVoce}
+                          disabled={
+                            isUpdatingSplit
+                            || !voceForm.descrizione.trim()
+                            || !(parseFloat(voceForm.importo) > 0)
+                          }
+                          className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded disabled:opacity-50"
+                        >
+                          Salva
+                        </button>
+                        <button onClick={chiudiFormVoce} className="text-xs px-2 py-1 border rounded">
+                          Annulla
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setShowAggiungiVoce(true);
+                      setEditingRigaId(null);
+                      setVoceForm({ descrizione: '', importo: '', includeInFatturaPm: true });
+                    }}
+                    disabled={isUpdatingSplit}
+                    className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Aggiungi voce
+                  </button>
+                )
+              )}
+              </Fragment>
             ))}
           </div>
         </CardContent>
@@ -631,6 +1044,7 @@ const BookingDetail = () => {
           owner={dialogOwner}
           property={dialogProperty}
           tenantData={tenantData}
+          righeFattura={righeFatturaPm}
           generatedDoc={generatedInvoice}
           existingDoc={existingInvoice}
           isSaving={savingInvoice}

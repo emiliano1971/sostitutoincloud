@@ -537,6 +537,15 @@ CREATE TABLE booking (
     checkout_date                   DATE                    NOT NULL,
     nights                          SMALLINT                NOT NULL,
     guests                          SMALLINT                NOT NULL,
+    fk_stato_prenotazione_id        INTEGER                 NOT NULL REFERENCES stato_prenotazione(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'imported'
+    payment_status                  payment_status          NOT NULL DEFAULT 'pending',
+    -- lo stato documento NON è persistito sulla prenotazione: è calcolato dinamicamente dai fiscal_document associati
+    settlement_status               settlement_status       NOT NULL DEFAULT 'pending',
+    -- Importi dello split economico, dopo i campi operativi (migration 019): sono i valori
+    -- storici, il dettaglio delle voci vive in booking_split_economico (migration 018).
+    tourist_tax_amount              DECIMAL(10,2)           NOT NULL DEFAULT 0,
+    tourist_tax_included_in_gross   BOOLEAN                 NOT NULL DEFAULT FALSE,
+    tourist_tax_collection          tourist_tax_collection  NOT NULL DEFAULT 'contanti',
     gross_amount                    DECIMAL(10,2)           NOT NULL,
     ota_commission_amount           DECIMAL(10,2)           NOT NULL DEFAULT 0,
     cleaning_amount                 DECIMAL(10,2)           NOT NULL DEFAULT 0,
@@ -544,13 +553,9 @@ CREATE TABLE booking (
     owner_net_amount                DECIMAL(10,2)           NOT NULL,
     withholding_amount              DECIMAL(10,2)           NOT NULL DEFAULT 0,   -- ritenuta calcolata
     aliquota_ritenuta               DECIMAL(5,2)            NOT NULL DEFAULT 21.00, -- % ritenuta storicizzata (21.00 / 26.00)
-    tourist_tax_amount              DECIMAL(10,2)           NOT NULL DEFAULT 0,
-    tourist_tax_included_in_gross   BOOLEAN                 NOT NULL DEFAULT FALSE,
-    tourist_tax_collection          tourist_tax_collection  NOT NULL DEFAULT 'contanti',
-    fk_stato_prenotazione_id        INTEGER                 NOT NULL REFERENCES stato_prenotazione(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'imported'
-    payment_status                  payment_status          NOT NULL DEFAULT 'pending',
-    -- lo stato documento NON è persistito sulla prenotazione: è calcolato dinamicamente dai fiscal_document associati
-    settlement_status               settlement_status       NOT NULL DEFAULT 'pending',
+    -- migration 018: somma delle voci booking_split_economico con include_in_fattura_pm=true,
+    -- aggiornata dal service (non da trigger)
+    total_costi_pm                  DECIMAL(10,2)           DEFAULT 0,
     created_at                      TIMESTAMP               NOT NULL DEFAULT NOW(),
     updated_at                      TIMESTAMP               NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_checkout_after_checkin   CHECK (checkout_date > checkin_date),
@@ -568,6 +573,56 @@ COMMENT ON TABLE booking IS
 
 CREATE TRIGGER trg_booking_updated_at
     BEFORE UPDATE ON booking
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON COLUMN booking.total_costi_pm IS
+    'Somma delle voci booking_split_economico '
+    'con include_in_fattura_pm=true. '
+    'Aggiornato dal service dopo ogni '
+    'modifica alle righe split.';
+
+
+-- Righe di costo dello split economico per prenotazione (migration 018)
+CREATE TABLE booking_split_economico (
+    id                           SERIAL        PRIMARY KEY,
+    fk_booking_id                INTEGER       NOT NULL REFERENCES booking(id) ON DELETE CASCADE,
+    fk_tenant_id                 INTEGER       NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
+    fk_property_contract_rule_id INTEGER       REFERENCES property_contract_rule(id) ON DELETE SET NULL,
+    tipo_voce                    VARCHAR(50)   NOT NULL,
+    -- 'commissione_ota' | 'pulizie' | 'cambio_biancheria' |
+    -- 'commissione_pm' | 'extra' | 'tassa_soggiorno'
+    descrizione                  VARCHAR(255)  NOT NULL,
+    importo                      DECIMAL(10,2) NOT NULL,
+    aliquota_iva                 DECIMAL(5,2)  NOT NULL DEFAULT 0,
+    include_in_fattura_pm        BOOLEAN       NOT NULL DEFAULT TRUE,
+    ordinamento                  SMALLINT      NOT NULL DEFAULT 0,
+    source                       VARCHAR(20)   NOT NULL DEFAULT 'calcolato',
+    -- 'calcolato' | 'manuale' | 'import'
+    deleted_at                   TIMESTAMP     DEFAULT NULL,
+    created_at                   TIMESTAMP     NOT NULL DEFAULT NOW(),
+    updated_at                   TIMESTAMP     NOT NULL DEFAULT NOW(),
+    created_by                   INTEGER,
+    updated_by                   INTEGER
+);
+COMMENT ON TABLE booking_split_economico IS
+    'Righe di costo dello split economico '
+    'per ogni prenotazione. Le voci con '
+    'include_in_fattura_pm=true entrano '
+    'nella fattura PM. Le voci con '
+    'deleted_at valorizzato sono eliminate '
+    'logicamente. source indica come è '
+    'nata la riga: calcolato=da regole '
+    'contratto, manuale=inserita dal PM, '
+    'import=dal file di importazione.';
+COMMENT ON COLUMN booking_split_economico.tipo_voce IS
+    'commissione_ota | pulizie | '
+    'cambio_biancheria | commissione_pm | '
+    'extra | tassa_soggiorno';
+COMMENT ON COLUMN booking_split_economico.source IS
+    'calcolato | manuale | import';
+
+CREATE TRIGGER trg_bse_updated_at
+    BEFORE UPDATE ON booking_split_economico
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
@@ -995,6 +1050,14 @@ CREATE INDEX idx_booking_checkin_checkout
 CREATE INDEX idx_booking_fk_regime_fiscale_id
     ON booking(fk_regime_fiscale_id);
     -- filtro prenotazioni per regime fiscale applicato
+
+-- booking_split_economico (migration 018)
+CREATE INDEX idx_bse_booking_id
+    ON booking_split_economico(fk_booking_id)
+    WHERE deleted_at IS NULL;
+    -- recupero righe split per booking, escluse le eliminate logicamente
+CREATE INDEX idx_bse_tenant_id
+    ON booking_split_economico(fk_tenant_id);
 
 -- fiscal_document
 CREATE INDEX idx_fiscal_doc_fk_tenant_id

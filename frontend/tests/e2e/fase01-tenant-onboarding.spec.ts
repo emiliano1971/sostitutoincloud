@@ -134,10 +134,14 @@ test.describe('Fase 01 — Onboarding Tenant', () => {
   test('1.7 — Login come nuovo admin', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Email').fill(TENANT_EMAIL);
-    await page.getByLabel('Password').fill(TENANT_PASSWORD);
+    // exact: come in helpers/auth.ts, il toggle "Mostra password" renderebbe il locator ambiguo.
+    await page.getByLabel('Password', { exact: true }).fill(TENANT_PASSWORD);
     await page.getByRole('button', { name: 'Accedi' }).click();
 
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 10000 });
+    // Utente appena creato: al primo accesso il cambio password è obbligatorio,
+    // quindi il login porta a /change-password e non alla dashboard.
+    await expect(page).toHaveURL(/\/change-password/, { timeout: 10000 });
+    await expect(page.getByText('Cambio password obbligatorio')).toBeVisible();
   });
 
 });

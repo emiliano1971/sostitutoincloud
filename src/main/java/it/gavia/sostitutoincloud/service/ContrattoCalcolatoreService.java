@@ -36,6 +36,8 @@ public class ContrattoCalcolatoreService {
      * Il frontend riconosce "importo impostato" / "importo forzato" per mostrare il ripristino.
      */
     private static final String DESCR_OTA_IMPOSTATA = "Commissione OTA (importo impostato)";
+    /** Provvigione PM impostata a mano (pmFeeOverride): nessuna regola la descrive. */
+    private static final String DESCR_PM_IMPOSTATA = "Commissione PM (importo impostato)";
 
     private final PropertyContractRuleDAO contractRuleDAO;
     private final PropertyDAO propertyDAO;
@@ -54,8 +56,13 @@ public class ContrattoCalcolatoreService {
                                           Integer fkCanaleOtaId,
                                           BigDecimal gross,
                                           BigDecimal otaCommissionOverride,
+                                          BigDecimal cleaningOverride,
+                                          BigDecimal pmFeeOverride,
                                           Integer nights,
                                           Integer guests) {
+        // cleaningOverride / pmFeeOverride: importo impostato a mano dal PM (null = dalle regole).
+        // Sostituiscono il totale della voce (pulizie = pulizie + cambio biancheria) e non
+        // hanno una regola di riferimento: fkRegolaCleaningId / fkRegolaPmId restano null.
 
         List<String> warnings = new ArrayList<>();
         BigDecimal grossAmount = round(orZero(gross));
@@ -100,9 +107,14 @@ public class ContrattoCalcolatoreService {
                 warnings.add("Nessuna regola di contratto trovata per l'immobile: usati valori di fallback");
             }
 
-            // Nel fallback l'unico servizio riaddebitato è la commissione OTA: il totale
-            // della fattura PM coincide con essa, con IVA scorporata come nel calcolo completo.
-            BigDecimal lordoServizi = otaUsata;
+            // Nel fallback i servizi riaddebitati sono la commissione OTA e, se impostate a mano,
+            // pulizie e provvigione PM (senza regole non sono deducibili altrimenti). Il totale
+            // della fattura PM coincide con la loro somma, con IVA scorporata come nel calcolo completo.
+            BigDecimal cleaningFallback = cleaningOverride != null
+                    ? round(cleaningOverride) : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal pmFallback = pmFeeOverride != null
+                    ? round(pmFeeOverride) : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal lordoServizi = round(otaUsata.add(cleaningFallback).add(pmFallback));
             BigDecimal imponibileFatturaPm;
             BigDecimal ivaScorporata;
             if (aliquotaIvaPm.signum() == 0) {
@@ -125,8 +137,8 @@ public class ContrattoCalcolatoreService {
             return ContrattoCalcoloResult.builder()
                     .grossAmount(grossAmount)
                     .otaCommissionAmount(otaUsata)
-                    .cleaningAmount(BigDecimal.ZERO)
-                    .pmFeeAmount(BigDecimal.ZERO)
+                    .cleaningAmount(cleaningFallback)
+                    .pmFeeAmount(pmFallback)
                     .imponibilePm(lordoServizi)
                     .imponibileFatturaPm(imponibileFatturaPm)
                     .ivaScorporata(ivaScorporata)
@@ -138,9 +150,9 @@ public class ContrattoCalcolatoreService {
                     .regimeFiscalePm(regimePm)
                     .calcoloCompleto(false)
                     .warnings(warnings)
-                    // Nessuna regola di contratto: l'unica voce descrivibile è la commissione
-                    // OTA arrivata come override (file di import o PM), la provvigione PM non esiste.
-                    .pmFeeDescrizione(null)
+                    // Nessuna regola di contratto: sono descrivibili solo le voci arrivate come
+                    // override (OTA da file o PM; provvigione PM impostata a mano).
+                    .pmFeeDescrizione(pmFallback.signum() > 0 ? DESCR_PM_IMPOSTATA : null)
                     .otaDescrizione(otaUsata.signum() > 0 ? DESCR_OTA_IMPOSTATA : null)
                     .build();
         }
@@ -168,6 +180,9 @@ public class ContrattoCalcolatoreService {
         BigDecimal pmFeeAmount = BigDecimal.ZERO;
         BigDecimal totalNonRemainder = BigDecimal.ZERO;
         PropertyContractRule remainderRule = null;
+        // Prima regola applicata per voce: diventa la FK delle righe booking_split_economico
+        Integer fkRegolaCleaningId = null;
+        Integer fkRegolaPmId = null;
         // Voci 'percentuale_netto': si calcolano in un secondo passaggio, quando è noto
         // il totale delle altre voci (la loro base è il lordo meno tutto il resto).
         List<PropertyContractRule> regolePercentualeNetto = new ArrayList<>();
@@ -175,6 +190,16 @@ public class ContrattoCalcolatoreService {
         for (PropertyContractRule rule : applicabili) {
             if (Boolean.TRUE.equals(rule.getIsRemainder())) {
                 remainderRule = rule;
+                continue;
+            }
+            // Voce impostata a mano: le sue regole non si applicano (l'importo si somma al
+            // punto 5a). Per la PM vale anche per 'percentuale_netto': l'override salta il
+            // secondo passaggio e usa l'importo così com'è, senza ricalcolare la base.
+            if (pmFeeOverride != null && TIPO_COMMISSIONE_PM.equals(rule.getTipo())) {
+                continue;
+            }
+            if (cleaningOverride != null
+                    && ("pulizie".equals(rule.getTipo()) || "cambio_biancheria".equals(rule.getTipo()))) {
                 continue;
             }
             if (CALC_MODE_PERCENTUALE_NETTO.equals(rule.getCalcMode())) {
@@ -196,11 +221,13 @@ public class ContrattoCalcolatoreService {
                     BigDecimal v = round(calcStandard(rule.getCalcMode(), valore, grossAmount, n, g));
                     cleaningAmount = cleaningAmount.add(v);
                     totalNonRemainder = totalNonRemainder.add(v);
+                    if (fkRegolaCleaningId == null) fkRegolaCleaningId = rule.getId();
                 }
                 case "cambio_biancheria" -> {
                     BigDecimal v = round(calcStandard(rule.getCalcMode(), valore, grossAmount, n, g));
                     cleaningAmount = cleaningAmount.add(v);
                     totalNonRemainder = totalNonRemainder.add(v);
+                    if (fkRegolaCleaningId == null) fkRegolaCleaningId = rule.getId();
                 }
                 case "commissione_ota" -> {
                     // applica solo la regola OTA scelta
@@ -227,6 +254,7 @@ public class ContrattoCalcolatoreService {
                     }
                     pmFeeAmount = pmFeeAmount.add(v);
                     totalNonRemainder = totalNonRemainder.add(v);
+                    if (fkRegolaPmId == null) fkRegolaPmId = rule.getId();
                 }
                 case "provvigione_proprietario" -> {
                     // se non è rimanenza concorre comunque al totale non-rimanenza
@@ -246,6 +274,20 @@ public class ContrattoCalcolatoreService {
             otaAmount = otaAmount.add(v);
             totalNonRemainder = totalNonRemainder.add(v);
         }
+        //     Pulizie e provvigione PM impostate a mano: importo totale della voce, senza
+        //     regola (le regole corrispondenti sono state saltate nel passaggio 1).
+        if (cleaningOverride != null) {
+            BigDecimal v = round(cleaningOverride);
+            cleaningAmount = v;
+            totalNonRemainder = totalNonRemainder.add(v);
+            fkRegolaCleaningId = null;
+        }
+        if (pmFeeOverride != null) {
+            BigDecimal v = round(pmFeeOverride);
+            pmFeeAmount = v;
+            totalNonRemainder = totalNonRemainder.add(v);
+            fkRegolaPmId = null;
+        }
 
         // 5b. PASSAGGIO 2 — voci 'percentuale_netto' (solo commissione PM).
         //     Base = lordo meno tutte le voci del passaggio 1. Il lordo in ingresso è già
@@ -262,6 +304,7 @@ public class ContrattoCalcolatoreService {
                 BigDecimal v = round(baseNetto.multiply(orZero(rule.getValore())).divide(CENTO));
                 pmFeeAmount = pmFeeAmount.add(v);
                 totalNonRemainder = totalNonRemainder.add(v);
+                if (fkRegolaPmId == null) fkRegolaPmId = rule.getId();
                 log.debug("ContrattoCalcolatore - percentuale_netto: base={} valore={}% importo={}",
                         baseNetto, rule.getValore(), v);
             }
@@ -305,8 +348,15 @@ public class ContrattoCalcolatoreService {
         // 9b. Descrizioni leggibili delle regole applicate (dettaglio prenotazione).
         //     Si costruiscono qui e non nel chiamante perché solo a questo punto si sa
         //     quale regola OTA è stata scelta per il canale e se l'importo è stato forzato.
-        String pmFeeDescrizione = descrizionePmFee(applicabili, remainderRule);
+        String pmFeeDescrizione = pmFeeOverride != null
+                ? DESCR_PM_IMPOSTATA
+                : descrizionePmFee(applicabili, remainderRule);
         String otaDescrizione = descrizioneOta(otaRule, otaAmount, grossAmount, otaCommissionOverride);
+        // FK regola OTA solo se l'importo è davvero quello della regola: con un importo
+        // forzato (PM o file) che diverge, la riga split non viene dalla regola.
+        Integer fkRegolaOtaId = otaRule != null
+                && round(otaAmount).compareTo(importoOtaDaRegola(otaRule, grossAmount)) == 0
+                ? otaRule.getId() : null;
 
         // 10. Log
         log.info("ContrattoCalcolatore - tenant={} property={} canale={} gross={} ownerNet={} withholding={}",
@@ -330,6 +380,9 @@ public class ContrattoCalcolatoreService {
                 .warnings(warnings)
                 .pmFeeDescrizione(pmFeeDescrizione)
                 .otaDescrizione(otaDescrizione)
+                .fkRegolaOtaId(fkRegolaOtaId)
+                .fkRegolaCleaningId(fkRegolaCleaningId)
+                .fkRegolaPmId(fkRegolaPmId)
                 .build();
     }
 
@@ -374,12 +427,20 @@ public class ContrattoCalcolatoreService {
         }
         BigDecimal v = orZero(otaRule.getValore());
         boolean fisso = "fisso".equals(otaRule.getCalcMode());
-        BigDecimal daRegola = fisso ? round(v) : round(grossAmount.multiply(v).divide(CENTO));
+        BigDecimal daRegola = importoOtaDaRegola(otaRule, grossAmount);
         String dettaglio = fisso ? "€" + euro(v) + " fisso" : pct(v) + "%";
         if (round(otaApplicata).compareTo(daRegola) != 0) {
             dettaglio += " — importo forzato €" + euro(otaApplicata);
         }
         return "Commissione OTA (" + dettaglio + ")";
+    }
+
+    /** Commissione OTA come la calcolerebbe la regola, senza override (stessa logica del passaggio 1). */
+    private BigDecimal importoOtaDaRegola(PropertyContractRule otaRule, BigDecimal grossAmount) {
+        BigDecimal v = orZero(otaRule.getValore());
+        return "fisso".equals(otaRule.getCalcMode())
+                ? round(v)
+                : round(grossAmount.multiply(v).divide(CENTO));
     }
 
     /** Percentuale senza zeri inutili: 10.00 → "10", 12.50 → "12.5". */

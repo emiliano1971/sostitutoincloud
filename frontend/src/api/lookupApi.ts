@@ -17,7 +17,6 @@ export interface LookupCollection {
   tipiDocumento: LookupItem[];
   statiPrenotazione: LookupItem[];
   statiDocumento: LookupItem[];
-  scenariFiscali: LookupItem[];
 }
 
 export async function getLookups(): Promise<LookupCollection> {

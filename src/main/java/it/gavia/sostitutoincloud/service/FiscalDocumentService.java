@@ -65,6 +65,7 @@ public class FiscalDocumentService {
     private final CuRecordDAO cuRecordDAO;
     private final SettlementBookingDAO settlementBookingDAO;
     private final SettlementDAO settlementDAO;
+    private final VociFatturaPmService vociFatturaPmService;
 
     public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
                                   BookingDAO bookingDAO,
@@ -79,7 +80,9 @@ public class FiscalDocumentService {
                                   F24RecordDAO f24RecordDAO,
                                   CuRecordDAO cuRecordDAO,
                                   SettlementBookingDAO settlementBookingDAO,
-                                  SettlementDAO settlementDAO) {
+                                  SettlementDAO settlementDAO,
+                                  VociFatturaPmService vociFatturaPmService) {
+        this.vociFatturaPmService = vociFatturaPmService;
         this.withholdingLedgerDAO = withholdingLedgerDAO;
         this.f24RecordDAO = f24RecordDAO;
         this.cuRecordDAO = cuRecordDAO;
@@ -142,9 +145,16 @@ public class FiscalDocumentService {
             // L'aliquota è quella memorizzata sul documento (0 in regime forfettario),
             // mai una costante: il regime del PM può cambiare fra un documento e l'altro.
             BigDecimal aliquota = doc.getAliquotaIva() != null ? doc.getAliquotaIva() : BigDecimal.ZERO;
-            righe.add(buildRigaScorporata("Riaddebito commissione OTA", booking.getOtaCommissionAmount(), aliquota));
-            righe.add(buildRigaScorporata("Riaddebito pulizie", booking.getCleaningAmount(), aliquota));
-            righe.add(buildRigaScorporata("Provvigione PM", booking.getPmFeeAmount(), aliquota));
+            // Voci da booking_split_economico (stesse di PDF e XML SDI); senza righe split
+            // (booking pre-migrazione 018) si usano i campi flat del booking.
+            List<VociFatturaPmService.VoceFatturaPm> voci = vociFatturaPmService.vociDaSplit(booking.getId());
+            if (!voci.isEmpty()) {
+                voci.forEach(v -> righe.add(buildRigaScorporata(v.descrizione(), v.lordo(), aliquota)));
+            } else {
+                righe.add(buildRigaScorporata("Riaddebito commissione OTA", booking.getOtaCommissionAmount(), aliquota));
+                righe.add(buildRigaScorporata("Riaddebito pulizie", booking.getCleaningAmount(), aliquota));
+                righe.add(buildRigaScorporata("Provvigione PM", booking.getPmFeeAmount(), aliquota));
+            }
             allineaResiduoScorporo(righe, doc);
         } else {
             // Ricevuta owner: la riga è il canone del proprietario (= imponibile del documento),

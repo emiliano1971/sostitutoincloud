@@ -34,4 +34,7 @@ public class SplitEconomicoDTO {
     // non essere quella con cui i documenti sono stati emessi.
     private String pmFeeDescrizione;   // es. "Commissione PM (10% sul netto)"
     private String otaDescrizione;     // es. "Commissione OTA (18%)"
+    // Regime fiscale del PM (tenant_settings): RF01 ordinario = IVA 22% scorporata,
+    // RF19 forfettario = senza IVA. Serve all'anteprima della fattura PM.
+    private String regimeFiscalePm;
 }

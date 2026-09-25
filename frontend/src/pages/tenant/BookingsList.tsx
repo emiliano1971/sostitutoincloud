@@ -13,6 +13,7 @@ import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLookup } from '@/contexts/LookupContext';
 import { useToast } from '@/hooks/use-toast';
+import { STATI_PRENOTAZIONE } from '@/lib/statiLabels';
 
 // Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
 // nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
@@ -33,15 +34,6 @@ const statusColors: Record<string, string> = {
 };
 
 // Label brevi per il badge stato (fallback alla descrizione lookup se codice ignoto)
-const statusLabels: Record<string, string> = {
-  imported: 'Importata',
-  enriched: 'Arricchita',
-  ready: 'Pronta',
-  doc_issued: 'Doc. emesso',
-  settled: 'Liquidata',
-  cancelled: 'Annullata',
-};
-
 // Stati singoli selezionabili nel dropdown multi-check (ordine di visualizzazione)
 const STATO_OPTIONS: { codice: string; label: string }[] = [
   { codice: 'imported', label: 'Importata' },
@@ -67,7 +59,7 @@ const BookingsList = () => {
   const { lookups, getLabelByCodice } = useLookup();
 
   const getStatusLabel = (codice: string) =>
-    statusLabels[codice] ?? getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
+    STATI_PRENOTAZIONE[codice] ?? getLabelByCodice(lookups?.statiPrenotazione ?? [], codice);
   const [searchParams, setSearchParams] = useSearchParams();
   // Tutti i filtri sono derivati dall'URL (persistono a refresh e back/forward).
   const search = searchParams.get('q') ?? '';

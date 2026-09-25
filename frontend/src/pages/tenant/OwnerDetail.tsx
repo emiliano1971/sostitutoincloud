@@ -18,6 +18,7 @@ import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useToast } from '@/hooks/use-toast';
 import { getConfig } from '@/config/AppConfig';
 import { validateIban } from '@/lib/iban';
+import { labelStatoPrenotazione } from '@/lib/statiLabels';
 
 const ownerTypeLabels: Record<string, string> = {
   persona_fisica: 'Persona Fisica',
@@ -330,7 +331,7 @@ const OwnerDetail = () => {
                   <TableCell className="text-sm">{b.checkoutDate}</TableCell>
                   <TableCell className="text-right font-mono">€{b.grossAmount.toFixed(2)}</TableCell>
                   <TableCell className="text-right font-mono text-primary">€{b.ownerNetAmount.toFixed(2)}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{b.statoPrenotazione}</Badge></TableCell>
+                  <TableCell><Badge variant="secondary" className="text-xs">{labelStatoPrenotazione(b.statoPrenotazione)}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>

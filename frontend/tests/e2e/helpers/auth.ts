@@ -27,7 +27,9 @@ export async function login(page: Page, user: keyof typeof USERS): Promise<void>
   const u = USERS[user];
   await page.goto('/login');
   await page.getByLabel('Email').fill(u.email);
-  await page.getByLabel('Password').fill(u.password);
+  // exact: il pulsante "Mostra password" di PasswordInput ha un aria-label che contiene
+  // "password" e renderebbe il locator ambiguo (strict mode violation).
+  await page.getByLabel('Password', { exact: true }).fill(u.password);
   await page.getByRole('button', { name: 'Accedi' }).click();
   // Attendi il redirect post-login (la destinazione dipende dal ruolo)
   await page.waitForURL(url => !url.pathname.includes('/login'), { timeout: 10000 });

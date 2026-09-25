@@ -20,6 +20,25 @@ export interface SplitEconomico {
   // (prenotazioni con documenti fiscali già emessi).
   pmFeeDescrizione?: string;
   otaDescrizione?: string;
+  /** Regime fiscale del PM: 'RF01' ordinario (IVA 22% scorporata) | 'RF19' forfettario (senza IVA). */
+  regimeFiscalePm?: string;
+}
+
+/** Riga di booking_split_economico (voce di costo dello split). */
+export interface BookingSplitRiga {
+  id: number;
+  fkBookingId: number;
+  fkPropertyContractRuleId?: number;
+  tipoVoce: string;
+  descrizione: string;
+  importo: number;
+  aliquotaIva: number;
+  includeInFatturaPm: boolean;
+  ordinamento: number;
+  /** 'calcolato' | 'manuale' | 'import' */
+  source: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface FiscalDocumentSummary {
@@ -91,6 +110,10 @@ export interface BookingDetail extends BookingListItem {
   settlementStato?: string;
   settlementId?: number;
   splitEconomico: SplitEconomico;
+  // Righe di booking_split_economico ordinate; vuote per le prenotazioni pre-migrazione 018.
+  righeSplit?: BookingSplitRiga[];
+  /** Somma delle righe split in fattura PM (booking.total_costi_pm). */
+  totalCostiPm?: number;
   // Dati immobile per dialog
   propertyAddress?: string;
   propertyCity?: string;
@@ -187,6 +210,10 @@ export interface BookingUpdateSplitRequest {
   touristTaxIncludedInGross?: boolean;
   /** null = nessun override, torna alla commissione delle regole di contratto. */
   otaCommissionOverride?: number | null;
+  /** Totale pulizie (pulizie + cambio biancheria) impostato a mano; null = dalle regole. */
+  cleaningOverride?: number | null;
+  /** Provvigione PM impostata a mano; null = dalle regole. */
+  pmFeeOverride?: number | null;
 }
 
 /** Modifica gli input dello split e lo fa ricalcolare al backend. 400 se ci sono documenti emessi. */
@@ -195,6 +222,42 @@ export async function updateBookingSplit(
   data: BookingUpdateSplitRequest,
 ): Promise<BookingDetail> {
   return patch<BookingDetail>(`/bookings/${id}/split`, data);
+}
+
+/**
+ * Ricalcola lo split dalle regole di contratto correnti: body vuoto = flag tassa invariato
+ * e nessun override OTA, quindi anche una commissione forzata o da file torna alla regola.
+ */
+export async function ricalcolaSplit(id: number): Promise<BookingDetail> {
+  return patch<BookingDetail>(`/bookings/${id}/split`, {});
+}
+
+/** Voce extra dello split (tipo_voce 'extra'), es. "Parcheggio". */
+export interface VoceExtraRequest {
+  descrizione: string;
+  /** Importo lordo, > 0. */
+  importo: number;
+  /** Omesso = true in creazione, invariato in modifica. */
+  includeInFatturaPm?: boolean;
+}
+
+/** Aggiunge una voce extra in fondo allo split. 400 se ci sono documenti emessi. */
+export async function aggiungiVoceExtra(bookingId: number, data: VoceExtraRequest): Promise<BookingDetail> {
+  return post<BookingDetail>(`/bookings/${bookingId}/split/extra`, data);
+}
+
+/** Modifica una voce extra. 400 se la riga non è di tipo 'extra', 404 se non esiste. */
+export async function aggiornaVoceExtra(
+  bookingId: number,
+  rigaId: number,
+  data: VoceExtraRequest,
+): Promise<BookingDetail> {
+  return patch<BookingDetail>(`/bookings/${bookingId}/split/${rigaId}`, data);
+}
+
+/** Elimina (soft delete) una voce extra. */
+export async function eliminaVoceExtra(bookingId: number, rigaId: number): Promise<BookingDetail> {
+  return del<BookingDetail>(`/bookings/${bookingId}/split/${rigaId}`);
 }
 
 /** Calcola il codice fiscale via backend; ritorna solo la stringa CF. */

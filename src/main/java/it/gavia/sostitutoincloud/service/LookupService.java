@@ -2,7 +2,6 @@ package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
-import it.gavia.sostitutoincloud.dao.ScenarioFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
@@ -11,7 +10,6 @@ import it.gavia.sostitutoincloud.dto.lookup.LookupCollectionDTO;
 import it.gavia.sostitutoincloud.dto.lookup.LookupItemDTO;
 import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.RegimeFiscale;
-import it.gavia.sostitutoincloud.model.ScenarioFiscale;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
@@ -31,22 +29,19 @@ public class LookupService {
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
-    private final ScenarioFiscaleDAO scenarioFiscaleDAO;
 
     public LookupService(RegimeFiscaleDAO regimeFiscaleDAO,
                          TipoImmobileDAO tipoImmobileDAO,
                          CanaleOtaDAO canaleOtaDAO,
                          TipoDocumentoDAO tipoDocumentoDAO,
                          StatoPrenotazioneDAO statoPrenotazioneDAO,
-                         StatoDocumentoDAO statoDocumentoDAO,
-                         ScenarioFiscaleDAO scenarioFiscaleDAO) {
+                         StatoDocumentoDAO statoDocumentoDAO) {
         this.regimeFiscaleDAO = regimeFiscaleDAO;
         this.tipoImmobileDAO = tipoImmobileDAO;
         this.canaleOtaDAO = canaleOtaDAO;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
         this.statoDocumentoDAO = statoDocumentoDAO;
-        this.scenarioFiscaleDAO = scenarioFiscaleDAO;
     }
 
     public LookupCollectionDTO getAll() {
@@ -61,7 +56,6 @@ public class LookupService {
                 .tipiDocumento(mapTipiDocumento(tipoDocumentoDAO.findAll()))
                 .statiPrenotazione(mapStatiPrenotazione(statoPrenotazioneDAO.findAll()))
                 .statiDocumento(mapStatiDocumento(statoDocumentoDAO.findAll()))
-                .scenariFiscali(mapScenari(scenarioFiscaleDAO.findAll()))
                 .build();
     }
 
@@ -112,15 +106,6 @@ public class LookupService {
     }
 
     private List<LookupItemDTO> mapStatiDocumento(List<StatoDocumento> list) {
-        return list.stream()
-                .map(r -> LookupItemDTO.builder()
-                        .id(r.getId()).codice(r.getCodice())
-                        .descrizione(r.getDescrizione()).attivo(r.getAttivo())
-                        .build())
-                .toList();
-    }
-
-    private List<LookupItemDTO> mapScenari(List<ScenarioFiscale> list) {
         return list.stream()
                 .map(r -> LookupItemDTO.builder()
                         .id(r.getId()).codice(r.getCodice())

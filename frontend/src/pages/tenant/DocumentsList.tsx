@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { getDocuments, elaboraRisposteSdi, type DocumentListItem } from '@/api/documentApi';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { labelStatoDocumento, labelTipoDocumento } from '@/lib/statiLabels';
 
 // Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
 // nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
@@ -445,7 +446,7 @@ const DocumentsList = () => {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell><Badge variant="outline" className="text-xs">{d.documentType}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className="text-xs">{labelTipoDocumento(d.documentType)}</Badge></TableCell>
                     <TableCell className="text-sm font-medium">{d.recipientName}</TableCell>
                     <TableCell className="text-sm">
                       {d.ownerName && d.fkOwnerId ? (
@@ -464,7 +465,7 @@ const DocumentsList = () => {
                     <TableCell className="text-sm">{d.propertyName}</TableCell>
                     <TableCell className="text-sm">{d.issueDate}</TableCell>
                     <TableCell className="text-right font-medium">€{d.totalAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</TableCell>
-                    <TableCell><Badge variant="outline" className={statusColors[d.statoDocumento]}>{d.statoDocumento}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className={statusColors[d.statoDocumento]}>{labelStatoDocumento(d.statoDocumento)}</Badge></TableCell>
                     <TableCell>
                       {d.settlementId ? (
                         <button

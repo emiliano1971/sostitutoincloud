@@ -22,5 +22,4 @@ public class LookupCollectionDTO {
     private List<LookupItemDTO> tipiDocumento;
     private List<LookupItemDTO> statiPrenotazione;
     private List<LookupItemDTO> statiDocumento;
-    private List<LookupItemDTO> scenariFiscali;
 }

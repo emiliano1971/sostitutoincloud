@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, AlertCircle } from 'lucide-react';
 import { getOwnerBookings } from '@/api/ownerApi';
 import type { BookingListItem } from '@/api/bookingApi';
+import { labelStatoPrenotazione } from '@/lib/statiLabels';
 
 const fmtEuro = (v?: number) =>
   `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -81,7 +82,7 @@ const OwnerBookings = () => {
                       <TableCell className="text-right">{fmtEuro(b.grossAmount)}</TableCell>
                       <TableCell className="text-right font-medium">{fmtEuro(b.ownerNetAmount)}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-xs">{b.statoPrenotazione}</Badge>
+                        <Badge variant="outline" className="text-xs">{labelStatoPrenotazione(b.statoPrenotazione)}</Badge>
                       </TableCell>
                     </TableRow>
                   ))}

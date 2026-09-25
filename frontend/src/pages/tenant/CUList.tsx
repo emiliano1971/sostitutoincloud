@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FileText, Loader2, AlertCircle, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getCuList, generaCuBatch, updateCuStatus, downloadCuPdf, type CuListItem } from '@/api/cuApi';
+import { labelStatoCu } from '@/lib/statiLabels';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -72,7 +73,7 @@ const CUList = () => {
     try {
       const updated = await updateCuStatus(id, stato);
       setCuList(prev => prev.map(cu => (cu.id === id ? { ...cu, stato: updated.stato } : cu)));
-      toast({ title: 'Stato aggiornato', description: `CU #${id} → ${stato}` });
+      toast({ title: 'Stato aggiornato', description: `CU #${id} → ${labelStatoCu(stato)}` });
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
     }
@@ -137,13 +138,13 @@ const CUList = () => {
                     <TableCell className="text-sm">{cu.taxYear}</TableCell>
                     <TableCell className="text-right">{fmtEuro(cu.totalCompensi)}</TableCell>
                     <TableCell className="text-right">{fmtEuro(cu.totalRitenute)}</TableCell>
-                    <TableCell><Badge variant="outline" className={statusColors[cu.stato]}>{cu.stato}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className={statusColors[cu.stato]}>{labelStatoCu(cu.stato)}</Badge></TableCell>
                     <TableCell className="text-sm">{cu.generatedAt ?? '—'}</TableCell>
                     <TableCell>
                       <Select value={cu.stato} onValueChange={v => handleStatusChange(cu.id, v)}>
                         <SelectTrigger className="h-8 w-[140px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {STATI.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          {STATI.map(s => <SelectItem key={s} value={s}>{labelStatoCu(s)}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </TableCell>

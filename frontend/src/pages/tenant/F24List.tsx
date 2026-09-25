@@ -373,7 +373,12 @@ const F24List = () => {
               </div>
             </div>
           ) : (
-            <div className="space-y-3">
+            // min-w-0: DialogContent è un grid e i suoi figli hanno min-width:auto. Senza, questo
+            // wrapper prenderebbe la larghezza minima della tabella (min-w-[1000px]) e sforerebbe
+            // il dialog (riepilogo fuori dal riquadro, tabella tagliata). Con min-w-0 si restringe
+            // e lo scroll orizzontale lo fa RitenuteTable, come nel dialog Dettaglio, dove la
+            // tabella è figlia diretta del grid e il problema non c'è.
+            <div className="min-w-0 space-y-3">
               <div className="rounded-md bg-muted/50 p-3 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Periodo</span><span className="font-medium">{fmtPeriodo(risultato.periodoMese, risultato.periodoAnno)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Totale ritenute</span><span className="font-medium">{fmtEuro(risultato.totaleRitenute)}</span></div>
@@ -572,7 +577,7 @@ const stampaDettaglioF24 = (d: F24GenerazioneResult) => {
     @media print { body { margin: 0; } }
   </style></head><body>
     <h1>Dettaglio F24 — periodo ${periodo}</h1>
-    <div class="sub">${d.numeroRitenute} ritenute — totale ${fmtEuro(d.totaleRitenute)} — stato ${esc(d.stato)}</div>
+    <div class="sub">${d.numeroRitenute} ritenute — totale ${fmtEuro(d.totaleRitenute)} — stato ${esc(statusLabels[d.stato] ?? d.stato)}</div>
     <table>
       <thead><tr>
         <th>Prenotazione</th><th>Ospite</th><th>Immobile</th><th>Proprietario</th>

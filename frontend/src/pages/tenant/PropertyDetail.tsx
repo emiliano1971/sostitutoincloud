@@ -14,6 +14,7 @@ import { getOwnerById, getOwners, type OwnerListItem } from '@/api/ownerApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useToast } from '@/hooks/use-toast';
+import { labelStatoPrenotazione } from '@/lib/statiLabels';
 
 const PropertyDetail = () => {
   const { id } = useParams();
@@ -302,7 +303,7 @@ const PropertyDetail = () => {
                   <TableCell className="text-sm">{b.checkinDate}</TableCell>
                   <TableCell className="text-sm">{b.checkoutDate}</TableCell>
                   <TableCell className="text-right font-mono">€{b.grossAmount.toFixed(2)}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-xs">{b.statoPrenotazione}</Badge></TableCell>
+                  <TableCell><Badge variant="secondary" className="text-xs">{labelStatoPrenotazione(b.statoPrenotazione)}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>

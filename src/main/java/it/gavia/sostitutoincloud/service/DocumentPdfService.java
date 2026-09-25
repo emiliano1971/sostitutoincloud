@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -77,6 +78,7 @@ public class DocumentPdfService {
     // emittente ({TENANT_*}), il tipo documento per scegliere il template.
     private final TenantDAO tenantDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
+    private final VociFatturaPmService vociFatturaPmService;
 
     public DocumentPdfService(FiscalDocumentDAO fiscalDocumentDAO,
                               BookingDAO bookingDAO,
@@ -84,7 +86,9 @@ public class DocumentPdfService {
                               OwnerProfileDAO ownerProfileDAO,
                               PropertyDAO propertyDAO,
                               TenantDAO tenantDAO,
-                              TipoDocumentoDAO tipoDocumentoDAO) {
+                              TipoDocumentoDAO tipoDocumentoDAO,
+                              VociFatturaPmService vociFatturaPmService) {
+        this.vociFatturaPmService = vociFatturaPmService;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.tenantSettingsDAO = tenantSettingsDAO;
@@ -166,9 +170,16 @@ public class DocumentPdfService {
         BigDecimal aliquotaIva = nz(doc.getAliquotaIva());
 
         StringBuilder righe = new StringBuilder();
-        righe.append(rigaFattura("Riaddebito commissione OTA", nz(booking.getOtaCommissionAmount()), aliquotaIva));
-        righe.append(rigaFattura("Riaddebito pulizia finale", nz(booking.getCleaningAmount()), aliquotaIva));
-        righe.append(rigaFattura("Provvigione gestione immobiliare", nz(booking.getPmFeeAmount()), aliquotaIva));
+        // Voci da booking_split_economico (stesse del dettaglio documento e dell'XML SDI);
+        // senza righe split (booking pre-migrazione 018) si usano i campi flat del booking.
+        List<VociFatturaPmService.VoceFatturaPm> voci = vociFatturaPmService.vociDaSplit(booking.getId());
+        if (!voci.isEmpty()) {
+            voci.forEach(v -> righe.append(rigaFattura(v.descrizione(), v.lordo(), aliquotaIva)));
+        } else {
+            righe.append(rigaFattura("Riaddebito commissione OTA", nz(booking.getOtaCommissionAmount()), aliquotaIva));
+            righe.append(rigaFattura("Riaddebito pulizia finale", nz(booking.getCleaningAmount()), aliquotaIva));
+            righe.append(rigaFattura("Provvigione gestione immobiliare", nz(booking.getPmFeeAmount()), aliquotaIva));
+        }
 
         Map<String, String> c = new LinkedHashMap<>();
         c.put("TENANT_LEGAL_NAME", esc(tenant.getLegalName()));

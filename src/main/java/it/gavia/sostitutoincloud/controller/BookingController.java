@@ -5,6 +5,7 @@ import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingVoceExtraDTO;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportConfirmDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
@@ -147,6 +148,62 @@ public class BookingController {
      * OTA) e restituisce la prenotazione con lo split ricalcolato.
      * 400 se la prenotazione ha già documenti fiscali emessi.
      */
+    // ── Voci extra dello split (booking_split_economico, tipo_voce='extra') ──
+
+    @PostMapping("/{id}/split/extra")
+    public ResponseEntity<?> aggiungiVoceExtra(@PathVariable Integer id, @RequestBody BookingVoceExtraDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            BookingDetailDTO updated = bookingService.aggiungiVoceExtra(tenantId, id, dto);
+            log.info("BookingController.aggiungiVoceExtra() - tenantId={} bookingId={}", tenantId, id);
+            return ResponseEntity.status(HttpStatus.CREATED).body(updated);
+        } catch (NoSuchElementException e) {
+            log.warn("BookingController.aggiungiVoceExtra() - tenantId={} bookingId={} non trovato", tenantId, id);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("BookingController.aggiungiVoceExtra() - tenantId={} bookingId={} rifiutato: {}",
+                    tenantId, id, e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PatchMapping("/{id}/split/{rigaId}")
+    public ResponseEntity<?> aggiornaVoceExtra(@PathVariable Integer id, @PathVariable Integer rigaId,
+                                               @RequestBody BookingVoceExtraDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            BookingDetailDTO updated = bookingService.aggiornaVoceExtra(tenantId, id, rigaId, dto);
+            log.info("BookingController.aggiornaVoceExtra() - tenantId={} bookingId={} rigaId={}", tenantId, id, rigaId);
+            return ResponseEntity.ok(updated);
+        } catch (NoSuchElementException e) {
+            log.warn("BookingController.aggiornaVoceExtra() - tenantId={} bookingId={} rigaId={} non trovato",
+                    tenantId, id, rigaId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("BookingController.aggiornaVoceExtra() - tenantId={} bookingId={} rigaId={} rifiutato: {}",
+                    tenantId, id, rigaId, e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{id}/split/{rigaId}")
+    public ResponseEntity<?> eliminaVoceExtra(@PathVariable Integer id, @PathVariable Integer rigaId) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        try {
+            BookingDetailDTO updated = bookingService.eliminaVoceExtra(tenantId, id, rigaId);
+            log.info("BookingController.eliminaVoceExtra() - tenantId={} bookingId={} rigaId={}", tenantId, id, rigaId);
+            return ResponseEntity.ok(updated);
+        } catch (NoSuchElementException e) {
+            log.warn("BookingController.eliminaVoceExtra() - tenantId={} bookingId={} rigaId={} non trovato",
+                    tenantId, id, rigaId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("BookingController.eliminaVoceExtra() - tenantId={} bookingId={} rigaId={} rifiutato: {}",
+                    tenantId, id, rigaId, e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
     @PatchMapping("/{id}/split")
     public ResponseEntity<?> updateSplit(@PathVariable Integer id, @RequestBody BookingUpdateSplitDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();

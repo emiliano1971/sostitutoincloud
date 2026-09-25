@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowLeft, Building2, User, Home, Calendar, Receipt, Download, Loader2, AlertCircle, ExternalLink, Send, CheckCircle2, XCircle, AlertTriangle, Landmark, FileCheck } from 'lucide-react';
 import { getDocumentById, downloadDocumentPdf, inviaSdi, downloadSdiXml, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
 import { useToast } from '@/hooks/use-toast';
+import { labelTipoDocumento } from '@/lib/statiLabels';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -23,6 +24,7 @@ const statoDocLabels: Record<string, string> = {
   sent_sdi: 'Inviato SDI',
   accepted: 'Accettato',
   rejected: 'Rifiutato',
+  error: 'Errore',
 };
 
 const fmt = (v?: number) => `€${Math.abs(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
@@ -248,7 +250,7 @@ const DocumentDetail = () => {
           <div className="space-y-2">
             <p className="font-mono text-2xl font-bold tracking-tight">{doc.documentNumber}</p>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="text-xs uppercase">{doc.documentType}</Badge>
+              <Badge variant="outline" className="text-xs uppercase">{labelTipoDocumento(doc.documentType)}</Badge>
               <Badge variant="outline" className={`text-xs ${statusColors[doc.statoDocumento] ?? ''}`}>
                 {statoDocLabels[doc.statoDocumento] ?? doc.statoDocumento}
               </Badge>

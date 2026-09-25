@@ -17,7 +17,8 @@ import { getToken, apiGet, apiPost, apiPatch, apiDelete } from './helpers/api';
  *
  * NB: nella UI il pulsante di ricalcolo è etichettato "Aggiungi ritenute non incluse",
  * e l'icona occhio apre il dialog "Dettaglio F24", non un'anteprima del modello:
- * F24PreviewDialog.tsx esiste ma non è agganciato a nessuna pagina.
+ * l'anteprima del modello (F24PreviewDialog.tsx) non era agganciata a nessuna pagina ed è
+ * stata rimossa.
  */
 
 interface F24Row {
@@ -73,6 +74,8 @@ let mese: number;
 let periodo: string;
 /** true se l'F24 l'ha generato questa run: solo allora è lecito pagarlo ed eliminarlo. */
 let creatoDalTest = false;
+/** true se nel DB non c'è né una ritenuta da versare né un F24 non pagato: fase saltata. */
+let datiAssenti = false;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -116,8 +119,14 @@ test.describe('Fase 05 — F24', () => {
       // Nessuna ritenuta da versare: si ripiega su un F24 non pagato già in archivio,
       // rinunciando ai test che ne alterano lo stato.
       const riusabile = lista.body.find(f => f.stato !== 'paid');
-      expect(riusabile, 'serve una ritenuta da versare o un F24 non pagato').toBeTruthy();
-      f24Id = riusabile!.id;
+      if (!riusabile) {
+        // Nessun dato su cui lavorare (DB senza ritenute: la fase 04 ripulisce i propri
+        // documenti). La fase viene saltata, come i V.x di verifica-importi-booking.
+        datiAssenti = true;
+        console.log('⏭  Nessuna ritenuta da versare né F24 non pagato: fase 05 saltata');
+        return;
+      }
+      f24Id = riusabile.id;
       anno = riusabile!.periodoAnno;
       mese = riusabile!.periodoMese;
       console.log(`nessuna ritenuta da versare: riuso l'F24 ${f24Id} di ${periodoLabel(mese, anno)}`);
@@ -146,6 +155,10 @@ test.describe('Fase 05 — F24', () => {
 
   const dettaglioF24 = async () =>
     (await apiGet<F24Dettaglio>(token, `/f24/${f24Id}`)).body;
+
+  test.beforeEach(() => {
+    test.skip(datiAssenti, 'Nessuna ritenuta da versare né F24 non pagato nel DB');
+  });
 
   test('5.1 — Login come tenant_admin', async ({ page }) => {
     await login(page, 'tenantAdmin');

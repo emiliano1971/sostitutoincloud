@@ -41,7 +41,7 @@ public class BookingDAO {
             "b.checkin_date, b.checkout_date, " +
             "b.nights, b.guests, b.gross_amount, b.ota_commission_amount, b.cleaning_amount, " +
             "b.pm_fee_amount, b.owner_net_amount, b.withholding_amount, b.aliquota_ritenuta, b.tourist_tax_amount, " +
-            "b.tourist_tax_included_in_gross, b.tourist_tax_collection, b.fk_stato_prenotazione_id, " +
+            "b.tourist_tax_included_in_gross, b.tourist_tax_collection, b.total_costi_pm, b.fk_stato_prenotazione_id, " +
             "b.payment_status, b.settlement_status, b.created_at, b.updated_at " +
             "FROM booking b";
 
@@ -231,6 +231,29 @@ public class BookingDAO {
                 id, tenantId);
         log.info("BookingDAO.updateSplit() - id={} tenantId={}", id, tenantId);
         return updated;
+    }
+
+    /** total_costi_pm = somma delle righe booking_split_economico in fattura PM (lo calcola il service). */
+    public void updateTotalCostiPm(Integer bookingId, Integer tenantId, BigDecimal totalCostiPm) {
+        int updated = jdbcTemplate.update(
+                "UPDATE booking SET total_costi_pm = ?, updated_at = NOW() WHERE id = ? AND fk_tenant_id = ?",
+                totalCostiPm, bookingId, tenantId);
+        log.info("BookingDAO.updateTotalCostiPm() - id={} tenantId={} totale={} righe={}",
+                bookingId, tenantId, totalCostiPm, updated);
+    }
+
+    /**
+     * Netto proprietario, ritenuta e total_costi_pm ricalcolati dalle righe split
+     * (BookingService.ricalcolaNettoDaSplit): lordo = fattura PM + netto proprietario.
+     */
+    public void updateNettoEritenuta(Integer bookingId, Integer tenantId, BigDecimal ownerNetAmount,
+                                     BigDecimal withholdingAmount, BigDecimal totalCostiPm) {
+        int updated = jdbcTemplate.update(
+                "UPDATE booking SET owner_net_amount = ?, withholding_amount = ?, total_costi_pm = ?, " +
+                "updated_at = NOW() WHERE id = ? AND fk_tenant_id = ?",
+                ownerNetAmount, withholdingAmount, totalCostiPm, bookingId, tenantId);
+        log.info("BookingDAO.updateNettoEritenuta() - id={} tenantId={} ownerNet={} withholding={} totalCostiPm={} righe={}",
+                bookingId, tenantId, ownerNetAmount, withholdingAmount, totalCostiPm, updated);
     }
 
     public void updateStato(Integer bookingId, Integer fkStatoPrenotazioneId) {

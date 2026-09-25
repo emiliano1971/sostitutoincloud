@@ -23,6 +23,7 @@ import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.util.NazioneUtils;
+import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
@@ -336,6 +337,8 @@ public class BookingImportService {
                         fkCanaleOtaId,
                         grossPerCalcolo,
                         row.getOtaCommissionAmount(),  // override dal CSV
+                        null,                          // pulizie dalle regole
+                        null,                          // provvigione PM dalle regole
                         row.getNights(),
                         row.getGuests());
 
@@ -411,6 +414,18 @@ public class BookingImportService {
                 // serve più l'UPDATE dopo l'insert.
                 // Avanzamento automatico dello stato in base ai dati disponibili (imported/enriched/ready)
                 bookingService.aggiornaStato(saved.getId());
+                // Righe split economico + total_costi_pm. Riga OTA 'import' se la commissione
+                // arriva dal file (passata come override al calcolatore), altrimenti 'calcolato'.
+                // L'import parte da una richiesta autenticata: l'utente è quello che conferma.
+                bookingService.popolaSplitEconomico(
+                        saved.getId(),
+                        tenantId,
+                        calcolo,
+                        tassa,
+                        tassaInclusa,
+                        canale != null ? canale.getNome() : null,
+                        SecurityUtils.getCurrentUtenteId(),
+                        row.getOtaCommissionAmount() != null ? "import" : "calcolato");
                 imported++;
             } catch (Exception e) {
                 errors++;
@@ -699,7 +714,7 @@ public class BookingImportService {
 
             // calcolo split economico
             ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
-                    tenantId, m.propertyId(), m.canaleId(), grossPerCalcolo, commissione, nights, guests);
+                    tenantId, m.propertyId(), m.canaleId(), grossPerCalcolo, commissione, null, null, nights, guests);
 
             String comuneNascita = guest != null ? guest.getBirthPlace() : null;
             String dataNascita   = guest != null ? guest.getBirthDate()  : null;

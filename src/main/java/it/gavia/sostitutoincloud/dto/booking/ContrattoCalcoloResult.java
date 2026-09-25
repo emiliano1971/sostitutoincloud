@@ -33,4 +33,11 @@ public class ContrattoCalcoloResult {
     // null quando non esiste una regola per quella voce.
     private String pmFeeDescrizione;        // es. "Commissione PM (10% sul netto)"
     private String otaDescrizione;          // es. "Commissione OTA (18%)"
+    // Regola di contratto da cui viene l'importo di ciascuna voce, per popolare
+    // booking_split_economico.fk_property_contract_rule_id. null se la voce non viene
+    // da una regola (nessuna regola, fallback, commissione OTA forzata o dal file).
+    // Con più regole sulla stessa voce (es. pulizie + cambio biancheria) è la prima applicata.
+    private Integer fkRegolaOtaId;
+    private Integer fkRegolaCleaningId;
+    private Integer fkRegolaPmId;
 }

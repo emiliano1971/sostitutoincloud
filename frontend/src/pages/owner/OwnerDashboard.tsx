@@ -5,6 +5,7 @@ import { TrendingUp, CalendarDays, FileText, Receipt, Wallet, Coins, Loader2, Al
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { getOwnerDashboardSelf, getOwnerBookings, type OwnerDashboardDTO } from '@/api/ownerApi';
 import type { BookingListItem } from '@/api/bookingApi';
+import { labelStatoPrenotazione } from '@/lib/statiLabels';
 
 const fmtEuro = (v?: number) =>
   `€${(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -112,7 +113,7 @@ const OwnerDashboard = () => {
               </div>
               <div className="text-right">
                 <p className="text-sm font-medium">{fmtEuro(b.ownerNetAmount)}</p>
-                <Badge variant="outline" className="text-[10px]">{b.statoPrenotazione}</Badge>
+                <Badge variant="outline" className="text-[10px]">{labelStatoPrenotazione(b.statoPrenotazione)}</Badge>
               </div>
             </div>
           ))}

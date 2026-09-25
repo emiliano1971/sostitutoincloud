@@ -5,6 +5,7 @@ import { Building2, Users, Home, CalendarDays, Loader2, AlertCircle } from 'luci
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getSuperAdminDashboard, type SuperAdminDashboard } from '@/api/tenantApi';
 import { getAuditLog, type AuditLogItem } from '@/api/auditApi';
+import { labelStatoTenant } from '@/lib/statiLabels';
 
 const statusColor: Record<string, string> = {
   active: 'bg-success/10 text-success border-success/20',
@@ -96,7 +97,7 @@ const SuperAdminDashboard = () => {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={statusColor[t.stato] ?? ''}>
-                          {t.stato}
+                          {labelStatoTenant(t.stato)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">{t.propertiesCount}</TableCell>

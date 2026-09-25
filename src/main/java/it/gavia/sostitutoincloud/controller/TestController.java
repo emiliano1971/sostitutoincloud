@@ -13,7 +13,6 @@ import it.gavia.sostitutoincloud.dao.UtenteDAO;
 import it.gavia.sostitutoincloud.dao.CodiceTributoDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.RegolaTassaSoggiornoDAO;
-import it.gavia.sostitutoincloud.dao.ScenarioFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.SdiEsitoDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
@@ -33,7 +32,6 @@ import it.gavia.sostitutoincloud.model.Utente;
 import it.gavia.sostitutoincloud.model.CodiceTributo;
 import it.gavia.sostitutoincloud.model.RegimeFiscale;
 import it.gavia.sostitutoincloud.model.RegolaTassaSoggiorno;
-import it.gavia.sostitutoincloud.model.ScenarioFiscale;
 import it.gavia.sostitutoincloud.model.SdiEsito;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
@@ -65,7 +63,6 @@ public class TestController {
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final CodiceTributoDAO codiceTributoDAO;
     private final SdiEsitoDAO sdiEsitoDAO;
-    private final ScenarioFiscaleDAO scenarioFiscaleDAO;
     private final RegolaTassaSoggiornoDAO regolaTassaSoggiornoDAO;
     private final UtenteDAO utenteDAO;
     private final OwnerProfileDAO ownerProfileDAO;
@@ -86,7 +83,6 @@ public class TestController {
                           TipoDocumentoDAO tipoDocumentoDAO,
                           CodiceTributoDAO codiceTributoDAO,
                           SdiEsitoDAO sdiEsitoDAO,
-                          ScenarioFiscaleDAO scenarioFiscaleDAO,
                           RegolaTassaSoggiornoDAO regolaTassaSoggiornoDAO,
                           UtenteDAO utenteDAO,
                           OwnerProfileDAO ownerProfileDAO,
@@ -106,7 +102,6 @@ public class TestController {
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.codiceTributoDAO = codiceTributoDAO;
         this.sdiEsitoDAO = sdiEsitoDAO;
-        this.scenarioFiscaleDAO = scenarioFiscaleDAO;
         this.regolaTassaSoggiornoDAO = regolaTassaSoggiornoDAO;
         this.utenteDAO = utenteDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -171,12 +166,6 @@ public class TestController {
     public ResponseEntity<List<SdiEsito>> getSdiEsito() {
         log.debug("TestController.getSdiEsito() - richiesta ricevuta");
         return ResponseEntity.ok(sdiEsitoDAO.findAll());
-    }
-
-    @GetMapping("/scenario-fiscale")
-    public ResponseEntity<List<ScenarioFiscale>> getScenarioFiscale() {
-        log.debug("TestController.getScenarioFiscale() - richiesta ricevuta");
-        return ResponseEntity.ok(scenarioFiscaleDAO.findAll());
     }
 
     @GetMapping("/regole-tassa-soggiorno")
