@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Plus, Pencil, Globe, Loader2, AlertCircle } from 'lucide-react';
 import { get, post, put, patch } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
+import { getSettings } from '@/api/settingsApi';
 
 interface CanaleOtaDTO {
   id: number;
@@ -18,6 +19,8 @@ interface CanaleOtaDTO {
   nome: string;
   commissioneDefaultPct: number;
   touristTaxIncluded: boolean;
+  /** true = commissione nel file di import lorda (IVA inclusa); false = netta, il sistema aggiunge l'IVA. */
+  commissioneIvata?: boolean;
   touristTaxCollection: string;
   attivo: boolean;
 }
@@ -36,6 +39,18 @@ const OTARegistry = () => {
   const [formCodice, setFormCodice] = useState('');
   const [formCommission, setFormCommission] = useState('');
   const [formTaxIncluded, setFormTaxIncluded] = useState(false);
+  // Default true (lorda): come i canali creati prima della migration 021
+  const [formCommissioneIvata, setFormCommissioneIvata] = useState(true);
+  // IVA delle voci PM dal regime del tenant, come il calcolatore: RF19 forfettario → 0, altrimenti 22%
+  const [ivaPmPct, setIvaPmPct] = useState(22);
+
+  // Regime PM caricato a parte e non bloccante: se le impostazioni non sono leggibili
+  // (es. permessi) il testo resta al 22%, il caso RF01.
+  useEffect(() => {
+    getSettings()
+      .then(st => setIvaPmPct(st.regimeFiscalePm?.toUpperCase() === 'RF19' ? 0 : 22))
+      .catch(() => { /* default 22% */ });
+  }, []);
   const [formTaxCollection, setFormTaxCollection] = useState('contanti');
   const [formAttivo, setFormAttivo] = useState(true);
 
@@ -52,6 +67,7 @@ const OTARegistry = () => {
     setFormCodice(ch.codice);
     setFormCommission(ch.commissioneDefaultPct.toString());
     setFormTaxIncluded(ch.touristTaxIncluded);
+    setFormCommissioneIvata(ch.commissioneIvata ?? true);
     setFormTaxCollection(ch.touristTaxCollection ?? 'contanti');
     setFormAttivo(ch.attivo);
     setSaveError(null);
@@ -64,6 +80,7 @@ const OTARegistry = () => {
     setFormCodice('');
     setFormCommission('');
     setFormTaxIncluded(false);
+    setFormCommissioneIvata(true);
     setFormTaxCollection('contanti');
     setFormAttivo(true);
     setSaveError(null);
@@ -82,6 +99,7 @@ const OTARegistry = () => {
           nome: formNome.trim(),
           commissioneDefaultPct: isNaN(pct) ? 0 : pct,
           touristTaxIncluded: formTaxIncluded,
+          commissioneIvata: formCommissioneIvata,
           touristTaxCollection: formTaxCollection,
           attivo: formAttivo,
         });
@@ -93,6 +111,7 @@ const OTARegistry = () => {
           nome: formNome.trim(),
           commissioneDefaultPct: isNaN(pct) ? 0 : pct,
           touristTaxIncluded: formTaxIncluded,
+          commissioneIvata: formCommissioneIvata,
           touristTaxCollection: formTaxCollection,
         });
         setChannels(prev => [...prev, created]);
@@ -143,6 +162,7 @@ const OTARegistry = () => {
                 <TableRow>
                   <TableHead>Canale</TableHead>
                   <TableHead className="text-center">Commissione Default</TableHead>
+                  <TableHead className="text-center">Commissione nel File</TableHead>
                   <TableHead className="text-center">Tassa Soggiorno nel Totale</TableHead>
                   <TableHead className="text-center">Riscossione Tassa</TableHead>
                   <TableHead className="text-center">Stato</TableHead>
@@ -165,6 +185,11 @@ const OTARegistry = () => {
                     </TableCell>
                     <TableCell className="text-center">
                       <Badge variant="secondary" className="font-mono">{ch.commissioneDefaultPct}%</Badge>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {(ch.commissioneIvata ?? true)
+                        ? <Badge variant="outline">Lorda (IVA incl.)</Badge>
+                        : <Badge className="bg-sky-100 text-sky-800 hover:bg-sky-100">Netta (+ IVA)</Badge>}
                     </TableCell>
                     <TableCell className="text-center">
                       {ch.touristTaxIncluded
@@ -251,6 +276,21 @@ const OTARegistry = () => {
                 <p className="text-xs text-muted-foreground">L'OTA include la tassa nel prezzo lordo</p>
               </div>
               <Switch checked={formTaxIncluded} onCheckedChange={setFormTaxIncluded} />
+            </div>
+            {/* Come leggere la commissione del file di import: lorda (se ne scorpora l'IVA)
+                o netta (il sistema aggiunge l'IVA del regime PM) */}
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <Label>Commissione nel file include IVA</Label>
+                <p className="text-xs text-muted-foreground">
+                  Attivo: la commissione è lorda (es. Booking.com).
+                  {/* Stessa aliquota del calcolatore (regime PM: 22% RF01, 0% RF19) */}
+                  {ivaPmPct > 0
+                    ? <>Spento: la commissione è netta, il sistema aggiunge IVA {ivaPmPct}% (es. Airbnb).</>
+                    : <>Spento: la commissione è netta, es. Airbnb; senza IVA (regime forfettario).</>}
+                </p>
+              </div>
+              <Switch checked={formCommissioneIvata} onCheckedChange={setFormCommissioneIvata} />
             </div>
             <div className="space-y-2">
               <Label>Modalità Riscossione Tassa</Label>

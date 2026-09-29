@@ -5,6 +5,7 @@ import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
+import it.gavia.sostitutoincloud.dao.PropertyContractRuleDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.SettlementBookingDAO;
@@ -50,6 +51,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -81,6 +83,7 @@ public class BookingService {
     private final AuditService auditService;
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
     private final TenantSettingsService tenantSettingsService;
+    private final PropertyContractRuleDAO contractRuleDAO;
 
     public BookingService(BookingDAO bookingDAO,
                           PropertyDAO propertyDAO,
@@ -100,7 +103,8 @@ public class BookingService {
                           TouristTaxService touristTaxService,
                           AuditService auditService,
                           BookingSplitEconomicoDAO splitEconomicoDAO,
-                          TenantSettingsService tenantSettingsService) {
+                          TenantSettingsService tenantSettingsService,
+                          PropertyContractRuleDAO contractRuleDAO) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -120,6 +124,7 @@ public class BookingService {
         this.auditService = auditService;
         this.splitEconomicoDAO = splitEconomicoDAO;
         this.tenantSettingsService = tenantSettingsService;
+        this.contractRuleDAO = contractRuleDAO;
     }
 
     public List<BookingListDTO> findByTenantId(Integer tenantId, BookingFilterDTO filter) {
@@ -191,7 +196,8 @@ public class BookingService {
             try {
                 contrattoCalcolatore.calcola(booking.getFkTenantId(), booking.getFkPropertyId(),
                         booking.getFkCanaleOtaId(), booking.getGrossAmount(),
-                        booking.getOtaCommissionAmount(), null, null, booking.getNights(), booking.getGuests());
+                        booking.getOtaCommissionAmount(), null, null, null, null,
+                        booking.getNights(), booking.getGuests(), List.of(), false);
                 return BookingDAO.STATO_READY;
             } catch (Exception e) {
                 log.debug("resolveStatoId - split non calcolabile per booking {}: {}", booking.getId(), e.getMessage());
@@ -310,12 +316,18 @@ public class BookingService {
                 : Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross());
         BigDecimal otaOverride = dto.getOtaCommissionOverride();
 
-        // La tassa si ricalcola sempre dalla regola del comune: il flag dice dove si trova
-        // l'importo (dentro o fuori dal lordo), non se esiste.
-        String comune = propertyDAO.findById(booking.getFkPropertyId())
-                .map(Property::getCity).orElse(null);
-        BigDecimal nuovaTassa = safeVal(touristTaxService.calcolaPerBooking(
-                tenantId, comune, booking.getCheckinDate(), booking.getNights(), booking.getGuests()));
+        // Tassa: quella impostata (dal PM o dal file, ripassata dal frontend a ogni PATCH) se
+        // presente, altrimenti la regola del comune. Il flag dice dove si trova l'importo
+        // (dentro o fuori dal lordo), non se esiste.
+        BigDecimal nuovaTassa;
+        if (dto.getTouristTaxOverride() != null) {
+            nuovaTassa = dto.getTouristTaxOverride().setScale(2, RoundingMode.HALF_UP);
+        } else {
+            String comune = propertyDAO.findById(booking.getFkPropertyId())
+                    .map(Property::getCity).orElse(null);
+            nuovaTassa = safeVal(touristTaxService.calcolaPerBooking(
+                    tenantId, comune, booking.getCheckinDate(), booking.getNights(), booking.getGuests()));
+        }
 
         // Tassa inclusa → va scorporata dalla base: è incassata per conto del Comune, non è
         // reddito del proprietario e non deve entrare nella base della ritenuta.
@@ -323,6 +335,11 @@ public class BookingService {
                 ? safeVal(booking.getGrossAmount()).subtract(nuovaTassa)
                 : booking.getGrossAmount();
 
+        // Righe attuali: le voci extra in fattura PM entrano nella base 'percentuale_netto' e
+        // nel totale fattura; servono anche per il source delle voci ricalcolate (sotto).
+        List<BookingSplitEconomico> righeEsistenti = splitEconomicoDAO.findByBookingId(bookingId);
+
+        // Override NETTI: il frontend ripassa l'imponibile delle righe (overridesDaImport=false)
         ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
                 tenantId,
                 booking.getFkPropertyId(),
@@ -330,9 +347,13 @@ public class BookingService {
                 grossPerCalcolo,
                 otaOverride,
                 dto.getCleaningOverride(),
+                dto.getPulizieOverride(),
+                dto.getCambioBiancheriaOverride(),
                 dto.getPmFeeOverride(),
                 booking.getNights(),
-                booking.getGuests());
+                booking.getGuests(),
+                extraImponibiliInFattura(righeEsistenti),
+                false);
 
         bookingDAO.updateSplit(bookingId, tenantId,
                 taxIncluded,
@@ -345,22 +366,37 @@ public class BookingService {
 
         // Righe split riallineate al ricalcolo, con il source di ogni voce che può essere
         // impostata a mano (OTA, pulizie, PM): vedi sourceVoce().
-        List<BookingSplitEconomico> righeEsistenti = splitEconomicoDAO.findByBookingId(bookingId);
         String otaSource = sourceVoce(righeEsistenti, "commissione_ota",
                 calcolo.getOtaCommissionAmount(), otaOverride, calcolo.getFkRegolaOtaId());
-        String cleaningSource = sourceVoce(righeEsistenti, "pulizie",
-                calcolo.getCleaningAmount(), dto.getCleaningOverride(), calcolo.getFkRegolaCleaningId());
+        String pulizieSource = sourceVoceConRegola(righeEsistenti, "pulizie",
+                calcolo.getPulizieAmount(), calcolo.getFkRegolaPulizieId());
+        String cambioBiancheriaSource = sourceVoceConRegola(righeEsistenti, "cambio_biancheria",
+                calcolo.getCambioBiancheriaAmount(), calcolo.getFkRegolaCambioBiancheriaId());
         String pmSource = sourceVoce(righeEsistenti, "commissione_pm",
                 calcolo.getPmFeeAmount(), dto.getPmFeeOverride(), calcolo.getFkRegolaPmId());
+        // Tassa: nessuna FK di contratto, decide solo l'override (dalla regola del comune = 'calcolato')
+        String tassaSource = dto.getTouristTaxOverride() == null
+                ? "calcolato"
+                : sourceVoceConRegola(righeEsistenti, "tassa_soggiorno", nuovaTassa, null);
         String canaleName = booking.getFkCanaleOtaId() != null
                 ? canaleOtaDAO.findById(booking.getFkCanaleOtaId()).map(CanaleOta::getNome).orElse("OTA")
                 : null;
+        // Commissione originale dal file: valore storico dell'import. Le righe calcolate vengono
+        // riscritte qui sotto, quindi si riporta quello già salvato sulla riga OTA.
+        BigDecimal otaOriginaleFile = righeEsistenti.stream()
+                .filter(r -> "commissione_ota".equals(r.getTipoVoce()))
+                .map(BookingSplitEconomico::getImportoOriginaleFile)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
         popolaSplitEconomico(bookingId, tenantId, calcolo, nuovaTassa, taxIncluded,
-                canaleName, SecurityUtils.getCurrentUtenteId(), otaSource, cleaningSource, pmSource);
+                canaleName, SecurityUtils.getCurrentUtenteId(), otaSource, pulizieSource, cambioBiancheriaSource, pmSource,
+                tassaSource, otaOriginaleFile);
 
         aggiornaStato(bookingId);
-        log.info("BookingService.updateSplit() - id={} taxIncluded={} otaOverride={} cleaningOverride={} pmFeeOverride={}",
-                bookingId, taxIncluded, otaOverride, dto.getCleaningOverride(), dto.getPmFeeOverride());
+        log.info("BookingService.updateSplit() - id={} taxIncluded={} otaOverride={} cleaningOverride={} pulizieOverride={} cambioBiancheriaOverride={} pmFeeOverride={}",
+                bookingId, taxIncluded, otaOverride, dto.getCleaningOverride(), dto.getPulizieOverride(),
+                dto.getCambioBiancheriaOverride(), dto.getPmFeeOverride());
         return findById(tenantId, bookingId)
                 .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
     }
@@ -383,19 +419,78 @@ public class BookingService {
                 .orElse(override != null && fkRegola == null ? "manuale" : "calcolato");
     }
 
+    /**
+     * Source della riga pulizie / cambio biancheria: 'calcolato' se l'importo viene dalla regola
+     * (FK valorizzata). Senza regola è un override: si tiene il source della riga esistente se
+     * l'importo non cambia ('import' da file o 'manuale' ripassato dal frontend a ogni PATCH),
+     * altrimenti 'manuale'. Diversamente da sourceVoce(), la FK decide per prima: ripristinando
+     * la regola la riga torna 'calcolato' anche se l'importo coincide con quello manuale.
+     */
+    private String sourceVoceConRegola(List<BookingSplitEconomico> righeEsistenti, String tipoVoce,
+                                       BigDecimal nuovoImporto, Integer fkRegola) {
+        if (fkRegola != null) return "calcolato";
+        return righeEsistenti.stream()
+                .filter(r -> tipoVoce.equals(r.getTipoVoce()))
+                .filter(r -> r.getImporto() != null && nuovoImporto != null
+                        && r.getImporto().compareTo(nuovoImporto) == 0)
+                .map(BookingSplitEconomico::getSource)
+                .filter(s -> !"calcolato".equals(s))
+                .findFirst()
+                .orElse("manuale");
+    }
+
     /** Regime fiscale del PM dai settings del tenant (default RF01, come il calcolatore). */
     private String regimeFiscalePm(Integer tenantId) {
         String r = tenantSettingsService.getSettings(tenantId).getRegimeFiscalePm();
         return r != null ? r : "RF01";
     }
 
-    /** Importo della riga split di quel tipo se è stata impostata a mano ('manuale'), altrimenti null. */
+    /**
+     * Imponibile (netto) della riga split di quel tipo se è stata impostata a mano ('manuale'),
+     * altrimenti null. Netto perché il calcolatore tratta gli override (non da import) come netti.
+     */
     private BigDecimal importoSeManuale(List<BookingSplitEconomico> righe, String tipoVoce) {
         return righe.stream()
                 .filter(r -> tipoVoce.equals(r.getTipoVoce()) && "manuale".equals(r.getSource()))
-                .map(BookingSplitEconomico::getImporto)
+                .map(this::nettoRiga)
                 .findFirst()
                 .orElse(null);
+    }
+
+    /** Come importoSeManuale(), ma vale anche per l'importo arrivato dal file ('import'). */
+    private BigDecimal importoSeImpostato(List<BookingSplitEconomico> righe, String tipoVoce) {
+        return righe.stream()
+                .filter(r -> tipoVoce.equals(r.getTipoVoce())
+                        && ("manuale".equals(r.getSource()) || "import".equals(r.getSource())))
+                .map(this::nettoRiga)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Imponibile della riga. Le righe create prima della migration 020 hanno imponibile NULL:
+     * lo si ricava scorporando l'IVA dal lordo, importo / (1 + aliquota_iva/100).
+     */
+    private BigDecimal nettoRiga(BookingSplitEconomico r) {
+        if (r.getImponibile() != null) return r.getImponibile();
+        BigDecimal importo = safeVal(r.getImporto());
+        BigDecimal aliquota = safeVal(r.getAliquotaIva());
+        if (aliquota.signum() == 0) return importo;
+        return importo.divide(BigDecimal.ONE.add(aliquota.divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP)),
+                2, RoundingMode.HALF_UP);
+    }
+
+    /** Imponibili delle voci extra in fattura PM, da passare al calcolatore. */
+    private List<BigDecimal> extraImponibiliInFattura(List<BookingSplitEconomico> righe) {
+        return righe.stream()
+                .filter(r -> TIPO_VOCE_EXTRA.equals(r.getTipoVoce()) && Boolean.TRUE.equals(r.getIncludeInFatturaPm()))
+                .map(this::nettoRiga)
+                .collect(Collectors.toList());
+    }
+
+    /** % IVA delle voci PM dal regime del tenant: 0 in RF19 (forfettario), 22 altrimenti. */
+    private BigDecimal aliquotaIvaPm(Integer tenantId) {
+        return "RF19".equalsIgnoreCase(regimeFiscalePm(tenantId)) ? BigDecimal.ZERO : new BigDecimal("22.00");
     }
 
     private boolean isNotBlank(String s) {
@@ -503,8 +598,12 @@ public class BookingService {
                 null,
                 null,
                 null,
+                null,
+                null,
                 nights,
-                dto.getGuests());
+                dto.getGuests(),
+                List.of(),   // nessuna voce extra alla creazione
+                false);
 
         if (calcolo.getWarnings() != null && !calcolo.getWarnings().isEmpty()) {
             calcolo.getWarnings().forEach(w ->
@@ -594,14 +693,16 @@ public class BookingService {
      * risultato del calcolatore (che resta stateless: scrivere le righe è compito di chi
      * chiama calcola()), poi aggiorna booking.total_costi_pm.
      *
-     * <p>Righe create solo per le voci con importo &gt; 0: commissione OTA, pulizie,
-     * commissione PM (in fattura PM, IVA 22%) e tassa di soggiorno (fuori fattura, IVA 0).
-     * Netto proprietario e ritenuta non sono voci di costo e non hanno una riga.
+     * <p>Righe create solo per le voci con importo &gt; 0: commissione OTA, pulizie, cambio
+     * biancheria, commissione PM (in fattura PM, IVA 22%) e tassa di soggiorno (fuori fattura,
+     * IVA 0). Pulizie e cambio biancheria hanno una riga anche a importo 0 se vengono da una
+     * regola (FK valorizzata). Netto proprietario e ritenuta non sono voci di costo.
      *
      * @param otaSource source della riga OTA ('calcolato' | 'import' | 'manuale'): può arrivare
      *                  da fuori (file di import o importo forzato dal PM).
-     *                  Pulizie e PM sono 'calcolato' (per importarle impostate a mano si usa
-     *                  l'overload con cleaningSource / pmSource); la tassa è sempre 'calcolato'.
+     *                  Pulizie e cambio biancheria: 'calcolato' se vengono da una regola,
+     *                  altrimenti 'manuale'. PM 'calcolato' (per le voci impostate a mano o da
+     *                  file si usa l'overload completo); la tassa è sempre 'calcolato'.
      */
     public void popolaSplitEconomico(Integer bookingId,
                                      Integer tenantId,
@@ -612,12 +713,23 @@ public class BookingService {
                                      Integer utenteId,
                                      String otaSource) {
         popolaSplitEconomico(bookingId, tenantId, calcolo, touristTaxAmount, touristTaxIncludedInGross,
-                canaleName, utenteId, otaSource, "calcolato", "calcolato");
+                canaleName, utenteId, otaSource,
+                calcolo.getFkRegolaPulizieId() != null ? "calcolato" : "manuale",
+                calcolo.getFkRegolaCambioBiancheriaId() != null ? "calcolato" : "manuale",
+                "calcolato",
+                "calcolato",
+                null);   // nessun valore dal file: non è un import
     }
 
     /**
-     * Come sopra, con il source di pulizie e PM: 'manuale' quando l'importo è stato impostato
-     * a mano dal PM (cleaningOverride / pmFeeOverride di updateSplit()).
+     * Come sopra, con il source di ogni voce impostabile a mano: 'manuale' quando l'importo è
+     * stato impostato dal PM (override di updateSplit()), 'import' quando arriva dal file.
+     * Vale anche per la tassa di soggiorno (tassaSource).
+     *
+     * @param importoOriginaleFile commissione OTA grezza dal file di import (prima della
+     *                             trasformazione IVA), salvata sulla riga OTA; null se non da import.
+     *                             Le righe calcolate si riscrivono a ogni ricalcolo: chi ricalcola
+     *                             un booking importato deve ripassare il valore già salvato.
      */
     public void popolaSplitEconomico(Integer bookingId,
                                      Integer tenantId,
@@ -627,29 +739,46 @@ public class BookingService {
                                      String canaleName,
                                      Integer utenteId,
                                      String otaSource,
-                                     String cleaningSource,
-                                     String pmSource) {
+                                     String pulizieSource,
+                                     String cambioBiancheriaSource,
+                                     String pmSource,
+                                     String tassaSource,
+                                     BigDecimal importoOriginaleFile) {
         // 1. Reset delle sole righe calcolate: le voci 'extra' inserite a mano dal PM restano
         //    (con un reset completo sparirebbero a ogni Ricalcola / cambio flag / override OTA).
         splitEconomicoDAO.deleteCalcolateByBookingId(bookingId);
 
-        BigDecimal iva22 = new BigDecimal("22.00");
+        // IVA delle voci PM dal calcolatore: 22 in RF01, 0 in RF19 (forfettario).
+        // Ogni riga salva netto (imponibile) e lordo (importo = imponibile × (1 + IVA)).
+        BigDecimal ivaPm = calcolo.getAliquotaIvaPm() != null ? calcolo.getAliquotaIvaPm() : new BigDecimal("22.00");
         int righe = 0;
 
         // 2. Commissione OTA
         if (positivo(calcolo.getOtaCommissionAmount())) {
-            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaOtaId(),
+            BookingSplitEconomico rigaOta = rigaSplit(bookingId, tenantId, calcolo.getFkRegolaOtaId(),
                     // "Riaddebito": costo del canale girato al cliente. La descrizione finisce
                     // così com'è nelle righe di fattura PM (dettaglio, PDF, XML SDI).
                     "commissione_ota", "Riaddebito commissione " + (canaleName != null ? canaleName : "OTA"),
-                    calcolo.getOtaCommissionAmount(), iva22, true, 10, otaSource, utenteId));
+                    calcolo.getOtaCommissionAmount(), calcolo.getOtaImponibile(), ivaPm, true, 10, otaSource, utenteId);
+            // Valore grezzo della commissione dal file (riconciliazione): solo sulla riga OTA
+            rigaOta.setImportoOriginaleFile(importoOriginaleFile);
+            splitEconomicoDAO.insert(rigaOta);
             righe++;
         }
-        // 3. Pulizie (comprende il cambio biancheria: il calcolatore li somma in cleaningAmount)
-        if (positivo(calcolo.getCleaningAmount())) {
-            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaCleaningId(),
+        // 3. Pulizie e cambio biancheria: due righe separate, ognuna con la sua regola.
+        //    Con una regola la riga c'è anche a importo 0 (es. regola a valore 0).
+        if (positivo(calcolo.getPulizieAmount()) || calcolo.getFkRegolaPulizieId() != null) {
+            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaPulizieId(),
                     "pulizie", "Riaddebito pulizie",
-                    calcolo.getCleaningAmount(), iva22, true, 20, cleaningSource, utenteId));
+                    safeVal(calcolo.getPulizieAmount()), safeVal(calcolo.getPulizieImponibile()), ivaPm, true, 20,
+                    pulizieSource, utenteId));
+            righe++;
+        }
+        if (positivo(calcolo.getCambioBiancheriaAmount()) || calcolo.getFkRegolaCambioBiancheriaId() != null) {
+            splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaCambioBiancheriaId(),
+                    "cambio_biancheria", "Cambio biancheria",
+                    safeVal(calcolo.getCambioBiancheriaAmount()), safeVal(calcolo.getCambioBiancheriaImponibile()),
+                    ivaPm, true, 25, cambioBiancheriaSource, utenteId));
             righe++;
         }
         // 4. Commissione PM
@@ -657,14 +786,18 @@ public class BookingService {
             splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, calcolo.getFkRegolaPmId(),
                     // Nessun "Riaddebito": è il compenso del PM, non un costo girato al cliente.
                     "commissione_pm", "Provvigione PM",
-                    calcolo.getPmFeeAmount(), iva22, true, 30, pmSource, utenteId));
+                    calcolo.getPmFeeAmount(), calcolo.getPmImponibile(), ivaPm, true, ORDINE_PM, pmSource, utenteId));
             righe++;
         }
-        // 5. Tassa di soggiorno: incassata per conto del Comune, non entra nella fattura PM
-        if (positivo(touristTaxAmount)) {
+        // 5. Tassa di soggiorno: incassata per conto del Comune, non entra nella fattura PM.
+        //    Impostata a mano o da file la riga c'è anche a 0 (es. ospiti esenti): è il segno
+        //    che toDetailDTO() non deve ricalcolarla dalla regola del comune.
+        if (positivo(touristTaxAmount) || !"calcolato".equals(tassaSource)) {
             splitEconomicoDAO.insert(rigaSplit(bookingId, tenantId, null,
                     "tassa_soggiorno", "Tassa di soggiorno",
-                    touristTaxAmount, BigDecimal.ZERO, false, 40, "calcolato", utenteId));
+                    // IVA 0: netto = lordo
+                    safeVal(touristTaxAmount), safeVal(touristTaxAmount), BigDecimal.ZERO, false, 40,
+                    tassaSource, utenteId));
             righe++;
         }
 
@@ -717,6 +850,14 @@ public class BookingService {
     private static final String TIPO_VOCE_EXTRA = "extra";
 
     /**
+     * Ordinamento della provvigione PM: fisso e alto, così resta dopo tutte le altre voci
+     * (OTA 10, pulizie 20, cambio biancheria 25, tassa 40, extra da 50 in su) ed è l'ultima
+     * voce dello split prima di "Aggiungi voce". Le extra si numerano escludendo la PM
+     * (aggiungiVoceExtra), quindi non la superano.
+     */
+    private static final int ORDINE_PM = 1000;
+
+    /**
      * Aggiunge una voce extra in fondo allo split (es. "Parcheggio"). Bloccata se esistono
      * documenti fiscali emessi, come ogni altra modifica allo split.
      */
@@ -725,21 +866,25 @@ public class BookingService {
         verificaSplitModificabile(tenantId, bookingId, "Impossibile aggiungere voci: documenti fiscali già emessi");
         validaVoceExtra(dto);
 
-        // In fondo alle righe esistenti
+        // In fondo alle righe esistenti, ma prima della provvigione PM (ORDINE_PM): la PM è
+        // esclusa dal massimo, altrimenti la nuova extra finirebbe dopo di lei
         int ordine = splitEconomicoDAO.findByBookingId(bookingId).stream()
+                .filter(r -> !"commissione_pm".equals(r.getTipoVoce()))
                 .mapToInt(BookingSplitEconomico::getOrdinamento)
                 .max()
                 .orElse(0) + 10;
 
         Integer utenteId = SecurityUtils.getCurrentUtenteId();
+        ImportiVoceExtra importi = importiVoceExtra(tenantId, dto);
         splitEconomicoDAO.insert(BookingSplitEconomico.builder()
                 .fkBookingId(bookingId)
                 .fkTenantId(tenantId)
                 .fkPropertyContractRuleId(null)
                 .tipoVoce(TIPO_VOCE_EXTRA)
                 .descrizione(dto.getDescrizione().trim())
-                .importo(dto.getImporto())
-                .aliquotaIva(new BigDecimal("22.00"))
+                .importo(importi.importo())
+                .imponibile(importi.imponibile())
+                .aliquotaIva(importi.aliquotaIva())
                 .includeInFatturaPm(dto.getIncludeInFatturaPm() != null ? dto.getIncludeInFatturaPm() : true)
                 .ordinamento(ordine)
                 .source("manuale")
@@ -749,8 +894,7 @@ public class BookingService {
 
         ricalcolaNettoDaSplit(bookingId, tenantId);
         log.info("BookingService.aggiungiVoceExtra() - bookingId={} descrizione={}", bookingId, dto.getDescrizione().trim());
-        return findById(tenantId, bookingId)
-                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+        return ricalcoloDopoVoceExtra(tenantId, bookingId);
     }
 
     /** Modifica descrizione, importo e (se passato) include_in_fattura_pm di una voce extra. */
@@ -762,7 +906,10 @@ public class BookingService {
         BookingSplitEconomico riga = caricaVoceExtra(bookingId, rigaId);
 
         riga.setDescrizione(dto.getDescrizione().trim());
-        riga.setImporto(dto.getImporto());
+        ImportiVoceExtra importi = importiVoceExtra(tenantId, dto);
+        riga.setImporto(importi.importo());
+        riga.setImponibile(importi.imponibile());
+        riga.setAliquotaIva(importi.aliquotaIva());
         if (dto.getIncludeInFatturaPm() != null) {
             riga.setIncludeInFatturaPm(dto.getIncludeInFatturaPm());
         }
@@ -770,10 +917,9 @@ public class BookingService {
         splitEconomicoDAO.update(riga);
 
         ricalcolaNettoDaSplit(bookingId, tenantId);
-        log.info("BookingService.aggiornaVoceExtra() - bookingId={} rigaId={} descrizione={} importo={}",
-                bookingId, rigaId, riga.getDescrizione(), riga.getImporto());
-        return findById(tenantId, bookingId)
-                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+        log.info("BookingService.aggiornaVoceExtra() - bookingId={} rigaId={} descrizione={} imponibile={} importo={}",
+                bookingId, rigaId, riga.getDescrizione(), riga.getImponibile(), riga.getImporto());
+        return ricalcoloDopoVoceExtra(tenantId, bookingId);
     }
 
     /** Elimina (soft delete) una voce extra. */
@@ -786,8 +932,62 @@ public class BookingService {
 
         ricalcolaNettoDaSplit(bookingId, tenantId);
         log.info("BookingService.eliminaVoceExtra() - bookingId={} rigaId={}", bookingId, rigaId);
-        return findById(tenantId, bookingId)
-                .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+        return ricalcoloDopoVoceExtra(tenantId, bookingId);
+    }
+
+    /**
+     * Dopo una modifica alle voci extra: se la provvigione PM viene da una regola
+     * 'percentuale_netto', la sua base (lordo − spese nette, extra in fattura comprese) è
+     * cambiata e lo split va ricalcolato. ricalcolaNettoDaSplit() aggiorna solo netto e
+     * ritenuta, non la provvigione. Altrimenti si restituisce il dettaglio così com'è.
+     *
+     * <p>Il ricalcolo passa da updateSplit() con gli stessi override che ripassa il frontend
+     * (overrideCorrenti in BookingDetail.tsx), tutti NETTI: OTA sempre, pulizie e cambio
+     * biancheria se impostati a mano o da file, PM se manuale, tassa se manuale o da file. Con
+     * i soli override 'manuale' l'OTA importata, le pulizie da file e la tassa impostata
+     * tornerebbero alle regole.
+     */
+    private BookingDetailDTO ricalcoloDopoVoceExtra(Integer tenantId, Integer bookingId) {
+        List<BookingSplitEconomico> righe = splitEconomicoDAO.findByBookingId(bookingId);
+        if (!pmDaPercentualeNetto(righe)) {
+            return findById(tenantId, bookingId)
+                    .orElseThrow(() -> new NoSuchElementException("Booking non trovato: id=" + bookingId));
+        }
+
+        BookingUpdateSplitDTO dto = new BookingUpdateSplitDTO();
+        // touristTaxIncludedInGross null = flag invariato
+        for (BookingSplitEconomico r : righe) {
+            boolean impostata = "manuale".equals(r.getSource()) || "import".equals(r.getSource());
+            switch (r.getTipoVoce()) {
+                // OTA sempre: con la sola regola il netto non cambia, ma l'importo dal file sì
+                case "commissione_ota" -> dto.setOtaCommissionOverride(nettoRiga(r));
+                case "pulizie" -> { if (impostata) dto.setPulizieOverride(nettoRiga(r)); }
+                case "cambio_biancheria" -> { if (impostata) dto.setCambioBiancheriaOverride(nettoRiga(r)); }
+                case "commissione_pm" -> { if ("manuale".equals(r.getSource())) dto.setPmFeeOverride(nettoRiga(r)); }
+                case "tassa_soggiorno" -> { if (impostata) dto.setTouristTaxOverride(r.getImporto()); }
+                default -> { /* extra: le legge updateSplit() dalle righe */ }
+            }
+        }
+        log.info("BookingService - voce extra modificata, ricalcolo automatico split per bookingId={}", bookingId);
+        return updateSplit(tenantId, bookingId, dto);
+    }
+
+    /**
+     * true se la riga della provvigione PM viene da una regola 'percentuale_netto'. La sola FK
+     * non basta: anche 'percentuale_lordo' e 'fisso' hanno una regola collegata, ma la loro
+     * base non dipende dalle voci extra.
+     */
+    private boolean pmDaPercentualeNetto(List<BookingSplitEconomico> righe) {
+        return righe.stream()
+                .filter(r -> "commissione_pm".equals(r.getTipoVoce()) && r.getFkPropertyContractRuleId() != null)
+                .anyMatch(r -> {
+                    try {
+                        return "percentuale_netto".equals(contractRuleDAO.findById(r.getFkPropertyContractRuleId()).getCalcMode());
+                    } catch (RuntimeException e) {
+                        // regola cancellata nel frattempo (FK ON DELETE SET NULL non ancora applicata)
+                        return false;
+                    }
+                });
     }
 
     /**
@@ -807,9 +1007,31 @@ public class BookingService {
         if (dto == null || !isNotBlank(dto.getDescrizione())) {
             throw new IllegalArgumentException("Descrizione della voce obbligatoria");
         }
-        if (dto.getImporto() == null || dto.getImporto().signum() <= 0) {
-            throw new IllegalArgumentException("L'importo della voce deve essere maggiore di zero");
+        // imponibile (nuovo) o, per compatibilità, importo lordo (deprecato)
+        BigDecimal valore = dto.getImponibile() != null ? dto.getImponibile() : dto.getImporto();
+        if (valore == null || valore.signum() <= 0) {
+            throw new IllegalArgumentException("L'imponibile della voce deve essere maggiore di zero");
         }
+    }
+
+    /** Netto, lordo e % IVA di una voce extra. */
+    private record ImportiVoceExtra(BigDecimal imponibile, BigDecimal importo, BigDecimal aliquotaIva) {}
+
+    /**
+     * Il PM inserisce l'imponibile (netto): il lordo in fattura è imponibile × (1 + IVA), con
+     * l'IVA del regime PM (22% RF01, 0 RF19). Client non ancora aggiornati mandano solo il
+     * lordo (importo, deprecato): se ne scorpora l'IVA per ricavare l'imponibile.
+     */
+    private ImportiVoceExtra importiVoceExtra(Integer tenantId, BookingVoceExtraDTO dto) {
+        BigDecimal aliquota = aliquotaIvaPm(tenantId);
+        BigDecimal unoPiuIva = BigDecimal.ONE.add(aliquota.divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP));
+        if (dto.getImponibile() != null) {
+            BigDecimal imponibile = dto.getImponibile().setScale(2, RoundingMode.HALF_UP);
+            return new ImportiVoceExtra(imponibile,
+                    imponibile.multiply(unoPiuIva).setScale(2, RoundingMode.HALF_UP), aliquota);
+        }
+        BigDecimal importo = dto.getImporto().setScale(2, RoundingMode.HALF_UP);
+        return new ImportiVoceExtra(importo.divide(unoPiuIva, 2, RoundingMode.HALF_UP), importo, aliquota);
     }
 
     /**
@@ -830,7 +1052,7 @@ public class BookingService {
 
     private BookingSplitEconomico rigaSplit(Integer bookingId, Integer tenantId, Integer fkRegolaId,
                                             String tipoVoce, String descrizione, BigDecimal importo,
-                                            BigDecimal aliquotaIva, boolean inFatturaPm, int ordinamento,
+                                            BigDecimal imponibile, BigDecimal aliquotaIva, boolean inFatturaPm, int ordinamento,
                                             String source, Integer utenteId) {
         return BookingSplitEconomico.builder()
                 .fkBookingId(bookingId)
@@ -839,6 +1061,7 @@ public class BookingService {
                 .tipoVoce(tipoVoce)
                 .descrizione(descrizione)
                 .importo(importo)
+                .imponibile(imponibile)
                 .aliquotaIva(aliquotaIva)
                 .includeInFatturaPm(inFatturaPm)
                 .ordinamento(ordinamento)
@@ -1019,11 +1242,17 @@ public class BookingService {
                 ? maps.ownersById.get(b.getFkOwnerId()) : null;
         Tenant tenant = maps.tenant;
 
+        // Righe split lette una volta: decidono la fonte degli importi (ramo senza documenti),
+        // popolano righeSplit del DTO e dicono se la tassa è stata impostata a mano.
+        List<BookingSplitEconomico> righeSplit = splitEconomicoDAO.findByBookingId(b.getId());
+        boolean tassaImpostata = importoSeImpostato(righeSplit, "tassa_soggiorno") != null;
+
         // Ricalcolo tassa di soggiorno per i booking importati senza tassa (comune con regola
         // attiva). Va PRIMA dello split: se la tassa è inclusa nel lordo, lo scorporo qui sotto
         // ha bisogno del valore aggiornato. Vale anche per i booking con tassa inclusa, che
         // fino alla migration del calcolo restavano a zero.
-        if (safeVal(b.getTouristTaxAmount()).signum() == 0) {
+        // Non per la tassa impostata a mano o da file: lo 0 è voluto (es. ospiti esenti).
+        if (safeVal(b.getTouristTaxAmount()).signum() == 0 && !tassaImpostata) {
             BigDecimal tassa = touristTaxService.calcolaPerBooking(
                     b.getFkTenantId(),
                     prop != null ? prop.getCity() : null,
@@ -1039,9 +1268,6 @@ public class BookingService {
         // Documenti fiscali della prenotazione: letti una volta sola, servono sia a decidere
         // come costruire lo split sia a popolare la lista del DTO.
         List<FiscalDocument> documentiBooking = fiscalDocumentDAO.findByBookingId(b.getId());
-        // Righe split lette una volta: decidono la fonte degli importi (ramo senza documenti)
-        // e popolano righeSplit del DTO.
-        List<BookingSplitEconomico> righeSplit = splitEconomicoDAO.findByBookingId(b.getId());
 
         // Split economico: se esistono documenti fiscali emessi si mostrano i valori
         // STORICI salvati sul booking, che sono quelli con cui i documenti sono stati
@@ -1100,22 +1326,40 @@ public class BookingService {
                     ? safeVal(b.getGrossAmount()).subtract(safeVal(b.getTouristTaxAmount()))
                     : b.getGrossAmount();
 
+            // OTA salvata ripassata come override NETTO (overridesDaImport=false): l'imponibile
+            // della riga split, oppure — senza riga (booking pre-migrazione 018) — il lordo del
+            // booking con l'IVA scorporata. Passare il lordo la gonfierebbe di un'altra IVA.
+            BigDecimal otaNetta = righeSplit.stream()
+                    .filter(r -> "commissione_ota".equals(r.getTipoVoce()))
+                    .map(this::nettoRiga)
+                    .findFirst()
+                    .orElseGet(() -> {
+                        if (b.getOtaCommissionAmount() == null) return null;
+                        BigDecimal unoPiuIva = BigDecimal.ONE.add(
+                                aliquotaIvaPm(b.getFkTenantId()).divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP));
+                        return b.getOtaCommissionAmount().divide(unoPiuIva, 2, RoundingMode.HALF_UP);
+                    });
             ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
                     b.getFkTenantId(),
                     b.getFkPropertyId(),
                     b.getFkCanaleOtaId(),
                     grossPerCalcolo,
-                    b.getOtaCommissionAmount(),
-                    // Pulizie / PM impostate a mano: ripassate come override (come l'OTA), così
-                    // descrizioni e anteprima non tornano a quelle della regola.
-                    importoSeManuale(righeSplit, "pulizie"),
+                    otaNetta,
+                    // Pulizie / cambio biancheria / PM impostati a mano o da file: ripassati
+                    // come override (come l'OTA), così descrizioni e anteprima non tornano a
+                    // quelle della regola. Pulizie e cambio biancheria separati, niente legacy.
+                    null,
+                    importoSeImpostato(righeSplit, "pulizie"),
+                    importoSeImpostato(righeSplit, "cambio_biancheria"),
                     importoSeManuale(righeSplit, "commissione_pm"),
                     b.getNights(),
-                    b.getGuests());
+                    b.getGuests(),
+                    extraImponibiliInFattura(righeSplit),
+                    false);
 
             // Con righe split (booking post-migrazione 018) gli importi sono quelli salvati da
-            // ricalcolaNettoDaSplit(): comprendono le voci extra in fattura PM, che il calcolatore
-            // non conosce. Sono anche i valori che DocumentGenerationService usa per fattura
+            // ricalcolaNettoDaSplit(): comprendono le voci extra in fattura PM (ora passate anche
+            // al calcolatore, ma le righe restano il dato persistito). Sono anche i valori che DocumentGenerationService usa per fattura
             // (Σ righe) e ricevuta (netto proprietario): mostrarne altri romperebbe la quadratura
             // lordo = fattura PM + netto. Senza righe resta l'anteprima dalle regole correnti.
             boolean daRigheSplit = !righeSplit.isEmpty();
@@ -1124,12 +1368,20 @@ public class BookingService {
             BigDecimal imponibileFatturaPm = calcolo.getImponibileFatturaPm();
             BigDecimal ivaScorporata = calcolo.getIvaScorporata();
             if (daRigheSplit) {
-                // Stesso scorporo di DocumentGenerationService: RF19 senza IVA, RF01 lordo / 1.22
+                // Stesso calcolo di DocumentGenerationService (fattura PM): RF19 senza IVA;
+                // RF01 Σ imponibili delle righe in fattura, con scorporo lordo / 1.22 per le
+                // righe senza imponibile (create prima della migration 020).
                 boolean forfettario = "RF19".equalsIgnoreCase(calcolo.getRegimeFiscalePm());
                 imponibileFatturaPm = forfettario
                         ? fatturaPmTotale
-                        : fatturaPmTotale.divide(new BigDecimal("1.22"), 2, RoundingMode.HALF_UP);
-                ivaScorporata = fatturaPmTotale.subtract(imponibileFatturaPm);
+                        : righeSplit.stream()
+                                .filter(r -> Boolean.TRUE.equals(r.getIncludeInFatturaPm()))
+                                .map(r -> r.getImponibile() != null
+                                        ? r.getImponibile()
+                                        : safeVal(r.getImporto()).divide(new BigDecimal("1.22"), 2, RoundingMode.HALF_UP))
+                                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                                .setScale(2, RoundingMode.HALF_UP);
+                ivaScorporata = fatturaPmTotale.subtract(imponibileFatturaPm).setScale(2, RoundingMode.HALF_UP);
             }
 
             split = SplitEconomicoDTO.builder()
@@ -1169,6 +1421,8 @@ public class BookingService {
                         .tipoVoce(r.getTipoVoce())
                         .descrizione(r.getDescrizione())
                         .importo(r.getImporto())
+                        .imponibile(r.getImponibile())
+                        .importoOriginaleFile(r.getImportoOriginaleFile())
                         .aliquotaIva(r.getAliquotaIva())
                         .includeInFatturaPm(r.getIncludeInFatturaPm())
                         .ordinamento(r.getOrdinamento())

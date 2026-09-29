@@ -29,9 +29,24 @@ public class BookingUpdateSplitDTO {
     /** null = nessun override, la commissione OTA torna a quella delle regole di contratto. */
     private BigDecimal otaCommissionOverride;
 
-    /** Totale pulizie (pulizie + cambio biancheria) impostato a mano; null = dalle regole. */
+    /**
+     * Legacy: totale pulizie (pulizie + cambio biancheria) impostato a mano; null = dalle regole.
+     * Ignorato se arriva pulizieOverride o cambioBiancheriaOverride.
+     */
     private BigDecimal cleaningOverride;
+
+    /** Solo pulizie impostate a mano; null = dalla regola 'pulizie'. */
+    private BigDecimal pulizieOverride;
+
+    /** Solo cambio biancheria impostato a mano; null = dalla regola 'cambio_biancheria'. */
+    private BigDecimal cambioBiancheriaOverride;
 
     /** Provvigione PM impostata a mano; null = dalle regole (anche 'percentuale_netto'). */
     private BigDecimal pmFeeOverride;
+
+    /**
+     * Tassa di soggiorno impostata a mano (anche 0, es. ospiti esenti); null = dalla regola
+     * del comune. Il flag touristTaxIncludedInGross decide solo se va scorporata dal lordo.
+     */
+    private BigDecimal touristTaxOverride;
 }

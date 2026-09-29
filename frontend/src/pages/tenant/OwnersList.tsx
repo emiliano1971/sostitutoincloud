@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Plus, Eye, Loader2, AlertCircle } from 'lucide-react';
+import { Search, Plus, Eye, Loader2, AlertCircle, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getOwners, type OwnerListItem } from '@/api/ownerApi';
 
@@ -37,7 +37,10 @@ const OwnersList = () => {
             {isLoading ? 'Caricamento…' : `${filtered.length} proprietari`}
           </p>
         </div>
-        <Button size="sm" className="gap-2" onClick={() => navigate('/owners/new')}><Plus className="h-4 w-4" /> Nuovo Proprietario</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" className="gap-2" onClick={() => navigate('/owners/import')}><Upload className="h-4 w-4" /> Importa da Excel</Button>
+          <Button size="sm" className="gap-2" onClick={() => navigate('/owners/new')}><Plus className="h-4 w-4" /> Nuovo Proprietario</Button>
+        </div>
       </div>
 
       <Card>

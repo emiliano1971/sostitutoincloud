@@ -78,6 +78,27 @@ public class PropertyDAO {
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
     }
 
+    /**
+     * Immobile dello stesso proprietario con lo stesso nome (senza distinzione di maiuscole
+     * e spazi esterni): chiave di deduplicazione dell'import massivo proprietari.
+     */
+    public Optional<Property> findByNameAndOwner(String name, Integer ownerId, Integer tenantId) {
+        log.debug("PropertyDAO.findByNameAndOwner() - name={} ownerId={} tenantId={}", name, ownerId, tenantId);
+        List<Property> result = jdbcTemplate.query(
+                SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? " +
+                "AND LOWER(TRIM(display_name)) = LOWER(TRIM(?)) ORDER BY id LIMIT 1",
+                propertyRowMapper, tenantId, ownerId, name);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /** Codici interni del tenant che iniziano col prefisso: serve a generare il progressivo. */
+    public List<String> findInternalCodesByPrefix(Integer tenantId, String prefix) {
+        log.debug("PropertyDAO.findInternalCodesByPrefix() - tenantId={} prefix={}", tenantId, prefix);
+        return jdbcTemplate.queryForList(
+                "SELECT internal_code FROM property WHERE fk_tenant_id = ? AND internal_code LIKE ? || '%'",
+                String.class, tenantId, prefix);
+    }
+
     public int countActiveByOwner(Integer ownerId, Integer tenantId) {
         log.debug("PropertyDAO.countActiveByOwner() - ownerId={} tenantId={}", ownerId, tenantId);
         Integer count = jdbcTemplate.queryForObject(

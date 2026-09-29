@@ -26,6 +26,7 @@ import BookingNew from "./pages/tenant/BookingNew";
 import BookingDetail from "./pages/tenant/BookingDetail";
 import OwnersList from "./pages/tenant/OwnersList";
 import OwnerCreate from "./pages/tenant/OwnerCreate";
+import OwnerBulkImport from "./pages/tenant/OwnerBulkImport";
 import OwnerDetail from "./pages/tenant/OwnerDetail";
 import PropertyContracts from "./pages/tenant/PropertyContracts";
 import PropertiesList from "./pages/tenant/PropertiesList";
@@ -122,6 +123,7 @@ function AppRoutes() {
         <Route path="bookings/:id" element={<BookingDetail />} />
         <Route path="owners" element={<OwnersList />} />
         <Route path="owners/new" element={<OwnerCreate />} />
+        <Route path="owners/import" element={<OwnerBulkImport />} />
         <Route path="owners/:id" element={<OwnerDetail />} />
         <Route path="properties" element={<PropertiesList />} />
         <Route path="properties/new" element={<PropertyCreate />} />

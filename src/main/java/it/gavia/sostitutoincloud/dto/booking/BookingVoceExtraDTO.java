@@ -19,7 +19,17 @@ public class BookingVoceExtraDTO {
     /** Obbligatoria, es. "Parcheggio". */
     private String descrizione;
 
-    /** Obbligatorio, &gt; 0. Importo lordo (IVA inclusa, come le altre voci della fattura PM). */
+    /**
+     * Obbligatorio, &gt; 0. Imponibile inserito dal PM (netto IVA esclusa): il lordo in fattura
+     * lo calcola il sistema con l'aliquota del regime PM (22% RF01, 0 RF19).
+     */
+    private BigDecimal imponibile;
+
+    /**
+     * Deprecato: importo lordo (IVA inclusa). Usato solo se imponibile manca, per i client
+     * che non sono ancora passati all'imponibile: il netto si ricava scorporando l'IVA.
+     */
+    @Deprecated
     private BigDecimal importo;
 
     /** null = true in creazione, invariato in modifica. */

@@ -21,6 +21,7 @@ public class TenantSettingsDAO {
             "data_nascita, sesso, comune_nascita, provincia_nascita, " +
             "sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
+            "fk_canale_ota_default_id, " +
             "created_at, updated_at FROM tenant_settings";
 
     private final JdbcTemplate jdbcTemplate;
@@ -47,8 +48,9 @@ public class TenantSettingsDAO {
             "  regime_fiscale_pm, natura_iva_esente, " +
             "  data_nascita, sesso, comune_nascita, provincia_nascita, " +
             "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
-            "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email" +
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+            "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
+            "  fk_canale_ota_default_id" +
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
             " ON CONFLICT (fk_tenant_id) DO UPDATE SET" +
             "  withholding_rate_primary    = EXCLUDED.withholding_rate_primary," +
             "  withholding_rate_secondary  = EXCLUDED.withholding_rate_secondary," +
@@ -70,6 +72,7 @@ public class TenantSettingsDAO {
             "  alert_scadenze_documenti    = EXCLUDED.alert_scadenze_documenti," +
             "  alert_scadenze_f24          = EXCLUDED.alert_scadenze_f24," +
             "  notifiche_email             = EXCLUDED.notifiche_email," +
+            "  fk_canale_ota_default_id    = EXCLUDED.fk_canale_ota_default_id," +
             "  updated_at                  = NOW()" +
             " RETURNING " +
             "  id, fk_tenant_id, withholding_rate_primary, withholding_rate_secondary, " +
@@ -79,6 +82,7 @@ public class TenantSettingsDAO {
             "  data_nascita, sesso, comune_nascita, provincia_nascita, " +
             "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
+            "  fk_canale_ota_default_id, " +
             "  created_at, updated_at";
 
         return jdbcTemplate.queryForObject(sql, rowMapper,
@@ -92,7 +96,8 @@ public class TenantSettingsDAO {
                 s.getSdiAutoSend(),
                 s.getDerogaRicevutaEnabled(), s.getNumerazioneAutomatica(),
                 s.getAlertScadenzeDocumenti(), s.getAlertScadenzeF24(),
-                s.getNotificheEmail());
+                s.getNotificheEmail(),
+                s.getFkCanaleOtaDefaultId());
     }
 
     /**

@@ -57,6 +57,14 @@ public class OwnerProfileDAO {
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
     }
 
+    /** Proprietario per codice fiscale nel tenant: il CF è univoco per tenant (uq_owner_tax_code_per_tenant). */
+    public Optional<OwnerProfile> findByTaxCodeAndTenant(String taxCode, Integer tenantId) {
+        log.debug("OwnerProfileDAO.findByTaxCodeAndTenant() - taxCode={} tenantId={}", taxCode, tenantId);
+        List<OwnerProfile> result = jdbcTemplate.query(
+                SELECT_COLS + " WHERE tax_code = ? AND fk_tenant_id = ?", ownerProfileRowMapper, taxCode, tenantId);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
     public List<OwnerProfile> findByAttivo(Boolean attivo) {
         log.debug("OwnerProfileDAO.findByAttivo() - attivo={}", attivo);
         List<OwnerProfile> result = jdbcTemplate.query(

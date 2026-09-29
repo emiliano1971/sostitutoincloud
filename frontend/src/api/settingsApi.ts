@@ -38,6 +38,8 @@ export interface TenantSettingsDTO {
   alertScadenzeDocumenti: boolean;
   alertScadenzeF24: boolean;
   notificheEmail: boolean;
+  // import massivo proprietari: canale per la regola commissione OTA (in scrittura 0 = nessuno)
+  fkCanaleOtaDefaultId?: number | null;
 }
 
 export async function getSettings(): Promise<TenantSettingsDTO> {

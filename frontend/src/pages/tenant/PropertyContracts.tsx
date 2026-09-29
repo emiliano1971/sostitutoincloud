@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Pencil, Calculator, Loader2, AlertCircle } from 'lucide-react';
 import { get } from '@/lib/apiClient';
 import { getPropertyById, type PropertyDetail } from '@/api/propertyApi';
+import { getSettings } from '@/api/settingsApi';
 import {
   getContractRules,
   createContractRule,
@@ -100,6 +101,8 @@ const PropertyContracts = () => {
   const [simGross, setSimGross] = useState('1000');
   const [simNights, setSimNights] = useState('3');
   const [simGuests, setSimGuests] = useState('2');
+  // IVA delle voci PM dal regime del tenant, come il calcolatore: RF19 forfettario → 0, altrimenti 22%
+  const [ivaPmPct, setIvaPmPct] = useState(22);
 
   // New rule form state
   const [newType, setNewType] = useState<CostRuleType>('pulizie');
@@ -124,6 +127,14 @@ const PropertyContracts = () => {
       .catch(err => setLoadError(err.message))
       .finally(() => setIsLoading(false));
   }, [propertyId]);
+
+  // Regime PM caricato a parte e non bloccante: se le impostazioni non sono leggibili
+  // (es. permessi) la simulazione resta al 22%, il caso RF01.
+  useEffect(() => {
+    getSettings()
+      .then(st => setIvaPmPct(st.regimeFiscalePm?.toUpperCase() === 'RF19' ? 0 : 22))
+      .catch(() => { /* default 22% */ });
+  }, []);
 
   const reloadRules = () => getContractRules(propertyId).then(setRules);
 
@@ -174,40 +185,42 @@ const PropertyContracts = () => {
     ? otaRulesInContract.map(r => r.canaleName || 'N/D')
     : ['Diretto'];
 
+  // Schema Barbagallo, stessa logica di ContrattoCalcolatoreService: ogni regola dà un NETTO,
+  // il lordo in fattura PM è netto × (1 + IVA), il proprietario riceve lordo − Σ lordi.
+  //   PM 'percentuale' / 'percentuale_lordo' → lordo × %
+  //   PM 'percentuale_netto'                 → (lordo − Σ spese nette: OTA, pulizie, cambio) × %
+  // Le regole 'rimanenza' e la provvigione proprietario non entrano in fattura PM: la quota
+  // del proprietario è il netto proprietario. (Nessuna voce extra: sono per prenotazione.)
+  const round2 = (v: number) => Math.round(v * 100) / 100;
   const buildSimulation = (channelName: string) => {
     const otaRule = otaRulesInContract.find(r => (r.canaleName || 'N/D') === channelName);
     const activeRules = otaRule ? [...nonOtaRules, otaRule] : [...nonOtaRules];
+    const inFattura = activeRules.filter(r => !r.isRemainder && r.tipo !== 'provvigione_proprietario');
 
-    // Passaggio 1: tutte le voci tranne quelle in percentuale sul netto.
-    const items = activeRules
-      .filter(r => !r.isRemainder && r.calcMode !== 'percentuale_netto')
-      .map(r => ({
-        rule: r,
-        amount: calculateRuleAmount(r, sampleGross, sampleNights, sampleGuests),
-      }));
+    // Passaggio 1: netti di tutte le voci tranne la PM in percentuale sul netto.
+    const netti = inFattura
+      .filter(r => r.calcMode !== 'percentuale_netto')
+      .map(r => ({ rule: r, netto: round2(calculateRuleAmount(r, sampleGross, sampleNights, sampleGuests)) }));
 
-    // Passaggio 2: percentuale sul netto, con base = lordo meno le voci del passaggio 1.
-    // Stessa logica di ContrattoCalcolatoreService: base unica, mai negativa.
-    const totalePassaggio1 = items.reduce((s, i) => s + i.amount, 0);
-    const baseNetto = Math.max(0, Math.round((sampleGross - totalePassaggio1) * 100) / 100);
-    activeRules
-      .filter(r => !r.isRemainder && r.calcMode === 'percentuale_netto')
-      .forEach(r => items.push({
-        rule: r,
-        amount: Math.round(baseNetto * r.valore / 100 * 100) / 100,
-      }));
+    // Passaggio 2: base_pm = lordo − spese nette (OTA, pulizie, cambio biancheria), mai negativa.
+    const speseNette = netti
+      .filter(i => i.rule.tipo !== 'commissione_pm')
+      .reduce((s, i) => s + i.netto, 0);
+    const basePm = Math.max(0, round2(sampleGross - speseNette));
+    inFattura
+      .filter(r => r.calcMode === 'percentuale_netto')
+      .forEach(r => netti.push({ rule: r, netto: round2(basePm * r.valore / 100) }));
 
-    const totalNonRemainder = items.reduce((s, i) => s + i.amount, 0);
+    const items = netti.map(i => {
+      const lordo = round2(i.netto * (1 + ivaPmPct / 100));
+      return { rule: i.rule, netto: i.netto, iva: round2(lordo - i.netto), lordo };
+    });
+    const totaleNetti = round2(items.reduce((s, i) => s + i.netto, 0));
+    const totaleLordi = round2(items.reduce((s, i) => s + i.lordo, 0));
+    const totaleIva = round2(totaleLordi - totaleNetti);
+    const nettoProprietario = round2(sampleGross - totaleLordi);
     const remainderRule = activeRules.find(r => r.isRemainder);
-    const remainderAmount = remainderRule ? Math.round((sampleGross - totalNonRemainder) * 100) / 100 : 0;
-
-    const allItems = items.map(i => ({ ...i, isRemainder: false }));
-    if (remainderRule) {
-      allItems.push({ rule: remainderRule, amount: remainderAmount, isRemainder: true });
-    }
-
-    const total = totalNonRemainder + remainderAmount;
-    return { channelName, items: allItems, total, remainderAmount };
+    return { channelName, items, totaleNetti, totaleIva, totaleLordi, nettoProprietario, remainderRule };
   };
 
   const simulations = simulationChannels.map(ch => buildSimulation(ch));
@@ -425,36 +438,58 @@ const PropertyContracts = () => {
           <Separator />
 
           {/* Per-OTA simulation tables */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {/* Due colonne al massimo: con quattro colonne di importi una card più stretta
+              lascerebbe troppo poco spazio al nome della voce. */}
+          <div className="grid gap-4 md:grid-cols-2">
             {simulations.map(sim => {
-              const isExact = Math.abs(sim.total - sampleGross) < 0.02;
+              const ok = sim.nettoProprietario >= 0;
+              const eur = (v: number) => v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               return (
-                <Card key={sim.channelName} className={`border ${isExact ? 'border-green-500/50' : 'border-destructive/50'}`}>
+                <Card key={sim.channelName} className={`border ${ok ? 'border-green-500/50' : 'border-destructive/50'}`}>
                   <CardHeader className="py-3 px-4">
                     <CardTitle className="text-sm flex items-center justify-between">
                       <Badge variant="outline">{sim.channelName}</Badge>
-                      <span className={`font-mono text-xs ${isExact ? 'text-green-600' : 'text-destructive'}`}>
-                        {isExact ? '✓ 100%' : `${Math.round(sim.total / sampleGross * 100)}%`}
+                      <span className={`font-mono text-xs ${ok ? 'text-green-600' : 'text-destructive'}`}>
+                        {ok ? '✓ quadra' : 'costi > lordo'}
                       </span>
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="px-4 pb-3 space-y-1.5">
+                  <CardContent className="px-4 pb-3">
+                    {/* Intestazione colonne */}
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 text-xs text-muted-foreground/60 border-b pb-1 mb-2">
+                      <span>Voce</span>
+                      <span className="text-right w-20">Netto</span>
+                      <span className="text-right w-16">IVA {ivaPmPct}%</span>
+                      <span className="text-right w-20">Totale</span>
+                    </div>
                     {sim.items.map((item, idx) => (
-                      <div key={idx} className={`flex justify-between text-xs ${item.isRemainder ? 'font-semibold text-primary' : ''}`}>
-                        <span className="text-muted-foreground">
-                          {item.rule.tipoLabel}
-                          {item.isRemainder && ' ⇐'}
-                        </span>
-                        <span className="font-mono">€{item.amount.toFixed(2)}</span>
+                      <div key={idx} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 text-sm py-1">
+                        <span className="text-muted-foreground min-w-0">{item.rule.tipoLabel}</span>
+                        <span className="text-right text-xs text-muted-foreground w-20 font-mono">€{eur(item.netto)}</span>
+                        <span className="text-right text-xs text-muted-foreground w-16 font-mono">+€{eur(item.iva)}</span>
+                        <span className="text-right text-destructive w-20 font-mono">-€{eur(item.lordo)}</span>
                       </div>
                     ))}
-                    <Separator className="my-1" />
-                    <div className="flex justify-between text-xs font-bold">
-                      <span>Totale</span>
-                      <span className="font-mono">€{sim.total.toFixed(2)}</span>
+                    {/* Totale servizi PM = totale della fattura PM */}
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 text-xs border-t pt-1 mt-1 text-muted-foreground">
+                      <span>Totale servizi PM</span>
+                      <span className="text-right w-20 font-mono">€{eur(sim.totaleNetti)}</span>
+                      <span className="text-right w-16 font-mono">+€{eur(sim.totaleIva)}</span>
+                      <span className="text-right w-20 font-medium text-foreground font-mono">€{eur(sim.totaleLordi)}</span>
                     </div>
-                    {sim.remainderAmount < 0 && (
-                      <p className="text-[10px] text-destructive mt-1">⚠️ La rimanenza è negativa: i costi superano il lordo!</p>
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 font-medium py-1 mt-1">
+                      <span>
+                        Netto proprietario
+                        {sim.remainderRule && (
+                          <span className="text-xs font-normal text-muted-foreground"> ⇐ rimanenza</span>
+                        )}
+                      </span>
+                      <span></span>
+                      <span></span>
+                      <span className={`text-right w-20 font-mono ${ok ? '' : 'text-destructive'}`}>€{eur(sim.nettoProprietario)}</span>
+                    </div>
+                    {!ok && (
+                      <p className="text-[10px] text-destructive mt-1">⚠️ I costi superano il lordo: il netto proprietario è negativo!</p>
                     )}
                   </CardContent>
                 </Card>
@@ -477,8 +512,12 @@ const PropertyContracts = () => {
           <div><span className="font-medium text-foreground">Commissione PM</span> — Compenso del PM: fisso per notte, % sul lordo, <strong>% sul netto</strong>, oppure <strong>rimanenza</strong>.</div>
           <div className="text-xs pl-4">
             <span className="font-medium text-foreground">Percentuale sul Netto</span> — Percentuale calcolata sul lordo
-            residuo dopo aver sottratto tutte le altre voci di costo (OTA, pulizie, ecc.).
-            Disponibile solo per la Commissione PM.
+            ospite meno le spese nette (OTA, pulizie, cambio biancheria ed extra). Il risultato è il netto PM,
+            {/* Stessa aliquota della simulazione (regime PM: 22% RF01, 0% RF19) */}
+            {ivaPmPct > 0
+              ? <>a cui viene aggiunta IVA {ivaPmPct}%.</>
+              : <>senza IVA (regime forfettario).</>}
+            {' '}Disponibile solo per la Commissione PM.
           </div>
           <Separator />
           <div><span className="font-medium text-foreground">Provvigione Proprietario</span> — Quota proprietario: % sul lordo, fisso per notte, oppure <strong>rimanenza</strong>.</div>
@@ -492,7 +531,7 @@ const PropertyContracts = () => {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{editingRule ? 'Modifica Regola' : 'Nuova Regola di Costo'}</DialogTitle>
-            <DialogDescription>Configura la voce di costo e la modalità di calcolo.</DialogDescription>
+            <DialogDescription>Configura la voce di costo e la modalità di calcolo. I prezzi inseriti sono senza IVA.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">

@@ -27,7 +27,9 @@ public class BookingSplitEconomico {
     private Integer fkPropertyContractRuleId;   // null per le righe manuali / da import
     private String tipoVoce;                    // commissione_ota | pulizie | cambio_biancheria | commissione_pm | extra | tassa_soggiorno
     private String descrizione;
-    private BigDecimal importo;
+    private BigDecimal importo;                 // lordo = imponibile × (1 + aliquotaIva/100)
+    private BigDecimal imponibile;              // netto IVA esclusa; null sulle righe pre-migration 020
+    private BigDecimal importoOriginaleFile;    // commissione OTA grezza dal file di import; storico, mai aggiornato
     private BigDecimal aliquotaIva;
     private Boolean includeInFatturaPm;
     private Integer ordinamento;

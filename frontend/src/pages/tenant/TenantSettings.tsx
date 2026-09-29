@@ -321,6 +321,29 @@ const TenantSettings = () => {
                 </div>
               </div>
 
+              {/* Sezione Import massivo proprietari */}
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold mb-3">Import massivo proprietari</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Canale OTA default per import</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Usato per la regola commissione OTA nell'importazione massiva proprietari.
+                    </p>
+                    {/* key: rimonta quando arrivano le lookup, altrimenti il defaultValue non trova l'option */}
+                    <select key={lookups ? 'lookups' : 'loading'} id="fkCanaleOtaDefaultId" defaultValue={settings.fkCanaleOtaDefaultId?.toString() ?? ''}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                      <option value="">Nessun canale default</option>
+                      {lookups?.canaliOta
+                        .filter(c => c.attivo || c.id === settings.fkCanaleOtaDefaultId)
+                        .map(c => (
+                          <option key={c.id} value={c.id.toString()}>{c.descrizione}</option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex justify-end">
                 <Button disabled={saving} onClick={() => {
                   handleSave({
@@ -338,6 +361,8 @@ const TenantSettings = () => {
                     sesso: (document.getElementById('pmSesso') as HTMLSelectElement).value || undefined,
                     comuneNascita: (document.getElementById('pmComuneNascita') as HTMLInputElement).value || undefined,
                     provinciaNascita: ((document.getElementById('pmProvinciaNascita') as HTMLInputElement).value || '').toUpperCase() || undefined,
+                    // 0 = nessun canale default (null nel DTO significherebbe "non modificare")
+                    fkCanaleOtaDefaultId: parseInt((document.getElementById('fkCanaleOtaDefaultId') as HTMLSelectElement).value) || 0,
                   });
                 }}>
                   {saving ? 'Salvataggio...' : 'Salva Parametri'}

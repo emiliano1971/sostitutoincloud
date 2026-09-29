@@ -126,11 +126,13 @@ const formatRegola = (r: ContractRule) => {
 };
 
 /** Voci dello split con importo impostabile a mano, e campo di override corrispondente. */
-type VoceModificabile = 'ota' | 'pulizie' | 'pm';
+type VoceModificabile = 'ota' | 'pulizie' | 'cambio_biancheria' | 'pm' | 'tassa';
 const CAMPO_OVERRIDE = {
   ota: 'otaCommissionOverride',
-  pulizie: 'cleaningOverride',
+  pulizie: 'pulizieOverride',
+  cambio_biancheria: 'cambioBiancheriaOverride',
   pm: 'pmFeeOverride',
+  tassa: 'touristTaxOverride',
 } as const satisfies Record<VoceModificabile, keyof BookingUpdateSplitRequest>;
 
 /**
@@ -139,7 +141,7 @@ const CAMPO_OVERRIDE = {
  * riferimento. Al server si manda sempre e solo l'importo (onApplica).
  */
 const EditorImporto = ({
-  importoIniziale, base, disabled, onApplica, onAnnulla,
+  importoIniziale, base, disabled, onApplica, onAnnulla, showMinus = true,
 }: {
   importoIniziale: number;
   /** Base su cui leggere la % (lordo, al netto della tassa se inclusa). */
@@ -147,6 +149,8 @@ const EditorImporto = ({
   disabled: boolean;
   onApplica: (importo: number) => void;
   onAnnulla: () => void;
+  /** "-" davanti all'importo: false sulle righe mostrate in positivo (tassa "(extra)" in fondo). */
+  showMinus?: boolean;
 }) => {
   const pctDaImporto = (importo: number) =>
     base > 0 ? ((importo / base) * 100).toFixed(2) : '0.00';
@@ -158,7 +162,7 @@ const EditorImporto = ({
 
   return (
     <div className="flex items-center gap-1">
-      <span className="text-sm text-destructive">-</span>
+      {showMinus && <span className="text-sm text-destructive">-</span>}
       {/* Toggle % / € — cambiando modalità il valore dell'altra unità viene
           ricalcolato, così non si perde quanto già digitato. */}
       <button
@@ -225,6 +229,36 @@ const EditorImporto = ({
   );
 };
 
+/**
+ * Imponibile (netto) di una riga split. Le righe create prima della migration 020 non lo
+ * hanno: si ricava scorporando l'IVA dal lordo, importo / (1 + aliquota/100).
+ */
+const nettoRiga = (r: BookingSplitRiga): number =>
+  r.imponibile ?? (r.aliquotaIva > 0
+    ? Math.round((r.importo / (1 + r.aliquotaIva / 100)) * 100) / 100
+    : r.importo);
+
+/**
+ * Colonne delle voci con IVA: etichetta | Netto | IVA | Totale. Larghezze fisse (non auto):
+ * ogni riga è una griglia a sé, con colonne auto non sarebbero incolonnate fra le righe.
+ *
+ * Affiancata, l'etichetta ha almeno 180px: serve una card di ~512px. Dove la card è più
+ * stretta (misurata: 390px mobile; 768px → 464px, con la sidebar che compare da md) le
+ * parole lunghe finivano sopra la colonna Netto e il Totale usciva dalla card. Lì la riga si
+ * impila: etichetta a tutta riga (ETICHETTA_IVA), importi sotto dalla colonna 2 (INIZIO_IMPORTI).
+ *   < sm: impilata   sm: affiancata (card ≥ 592px)   md: impilata   ≥ lg: affiancata (card ≥ 720px)
+ * Niente overflow-x: nello stesso contenitore ci sono le righe non a griglia (lordo, netto,
+ * ritenuta), che non scorrerebbero insieme alle voci.
+ */
+const GRIGLIA_IVA = 'grid gap-x-3 grid-cols-[minmax(0,1fr)_4.5rem_4rem_5.5rem]'
+  + ' sm:grid-cols-[minmax(180px,2fr)_4.5rem_4rem_5.5rem]'
+  + ' md:grid-cols-[minmax(0,1fr)_4.5rem_4rem_5.5rem]'
+  + ' lg:grid-cols-[minmax(180px,2fr)_4.5rem_4rem_5.5rem]';
+/** Cella etichetta: riga intera quando la griglia è impilata, prima colonna quando è affiancata. */
+const ETICHETTA_IVA = 'col-span-4 sm:col-span-1 md:col-span-4 lg:col-span-1';
+/** Primo importo (Netto) quando la riga è impilata: colonna 2, sotto la sua intestazione. */
+const INIZIO_IMPORTI = 'col-start-2 sm:col-start-auto md:col-start-2 lg:col-start-auto';
+
 /** Riga visualizzata nello split economico (voci di costo, totali, note). */
 interface RigaSplitView {
   key?: number;
@@ -243,6 +277,14 @@ interface RigaSplitView {
   source?: string;
   /** Voce extra inserita dal PM: modificabile ed eliminabile (matita + cestino). */
   extra?: BookingSplitRiga;
+  /** Voce con IVA: imponibile e IVA mostrati sotto il lordo. */
+  iva?: { imponibile: number; iva: number };
+  /** Netto da precompilare nell'editor (gli override manuali sono netti). */
+  nettoEditor?: number;
+  /** Commissione OTA dal file di import, se diversa dal netto: confronto con il valore trasformato. */
+  valoreFile?: number;
+  /** Riepilogo "Totale servizi PM" (imponibile / IVA / totale) al posto dell'importo. */
+  riepilogoIva?: { imponibile: number; iva: number; lordo: number };
   /** Ultima voce di costo: dopo di lei si mostrano "Aggiungi voce" e il form. */
   ultimaVoceCosto?: boolean;
 }
@@ -273,7 +315,8 @@ const BookingDetail = () => {
   // Voci extra dello split: form inline di aggiunta / modifica (una alla volta)
   const [showAggiungiVoce, setShowAggiungiVoce] = useState(false);
   const [editingRigaId, setEditingRigaId] = useState<number | null>(null);
-  const [voceForm, setVoceForm] = useState({ descrizione: '', importo: '', includeInFatturaPm: true });
+  // Il PM inserisce l'imponibile (netto): il lordo lo calcola il backend
+  const [voceForm, setVoceForm] = useState({ descrizione: '', imponibile: '', includeInFatturaPm: true });
 
   const reloadBooking = async () => {
     if (!id) return;
@@ -354,7 +397,7 @@ const BookingDetail = () => {
     try {
       const data = {
         descrizione: voceForm.descrizione.trim(),
-        importo: parseFloat(voceForm.importo),
+        imponibile: parseFloat(voceForm.imponibile),
         includeInFatturaPm: voceForm.includeInFatturaPm,
       };
       const updated = editingRigaId
@@ -504,27 +547,52 @@ const BookingDetail = () => {
   const pctOf = (v: number) => (baseCalcolo > 0 ? ((v / baseCalcolo) * 100).toFixed(2) : '0.00');
 
   // Override attivo, per mostrare il ripristino. OTA: lo segnala la descrizione ("importo
-  // forzato" se diverge dalla regola, "importo impostato" senza regola OTA). Pulizie e PM:
-  // la riga split è 'manuale'.
+  // forzato" se diverge dalla regola, "importo impostato" senza regola OTA). Pulizie, cambio
+  // biancheria e PM: la riga split è 'manuale'.
   const rigaDi = (tipo: string) => booking.righeSplit?.find(r => r.tipoVoce === tipo);
+  // IVA delle voci PM, come il backend: 0 in RF19 (forfettario), 22 altrimenti
+  const ivaPmPct = split.regimeFiscalePm === 'RF19' ? 0 : 22;
+  // Override = NETTO (imponibile): il backend ci aggiunge l'IVA. Ripassare il lordo
+  // gonfierebbe la voce di un'altra IVA a ogni PATCH.
   const importoManuale = (tipo: string) => {
     const r = rigaDi(tipo);
-    return r?.source === 'manuale' ? r.importo : null;
+    return r?.source === 'manuale' ? nettoRiga(r) : null;
   };
+  // Pulizie e cambio biancheria arrivati dal file ('import') si ripassano come quelli manuali:
+  // altrimenti la prima PATCH li rimpiazzerebbe con la regola.
+  const importoImpostato = (tipo: string) => {
+    const r = rigaDi(tipo);
+    return r && (r.source === 'manuale' || r.source === 'import') ? nettoRiga(r) : null;
+  };
+  const rigaOta = rigaDi('commissione_ota');
+  const otaNetta = rigaOta
+    ? nettoRiga(rigaOta)
+    : Math.round(((split.otaCommissionAmount ?? 0) / (1 + ivaPmPct / 100)) * 100) / 100;
+  // Tassa di soggiorno: vale anche l'importo arrivato dal file ('import'), altrimenti la prima
+  // PATCH lo rimpiazzerebbe con la regola del comune.
+  const rigaTassa = rigaDi('tassa_soggiorno');
+  const tassaImpostata = rigaTassa && (rigaTassa.source === 'manuale' || rigaTassa.source === 'import')
+    ? rigaTassa.importo : null;
   const haOverride: Record<VoceModificabile, boolean> = {
     ota: /importo (forzato|impostato)/.test(split.otaDescrizione ?? ''),
-    pulizie: importoManuale('pulizie') != null,
+    pulizie: importoImpostato('pulizie') != null,
+    cambio_biancheria: importoImpostato('cambio_biancheria') != null,
     pm: importoManuale('commissione_pm') != null,
+    tassa: tassaImpostata != null,
   };
 
   // Per il backend un override assente (null) vuol dire "torna alla regola". A ogni PATCH
   // si ripassano quindi gli importi manuali attuali: l'OTA sempre (come già al cambio del
-  // flag tassa), pulizie e PM solo se impostate a mano — altrimenti una percentuale verrebbe
-  // congelata e non seguirebbe più la base. Ricalcola invece manda {} (tutto dalle regole).
+  // flag tassa), pulizie, cambio biancheria e PM solo se impostati a mano — altrimenti una
+  // percentuale verrebbe congelata e non seguirebbe più la base. Ricalcola invece manda {}
+  // (tutto dalle regole). Pulizie e cambio biancheria sono separati: cleaningOverride
+  // (legacy, totale delle due) non si manda più.
   const overrideCorrenti = (): BookingUpdateSplitRequest => ({
-    otaCommissionOverride: split.otaCommissionAmount ?? 0,
-    cleaningOverride: importoManuale('pulizie'),
+    otaCommissionOverride: otaNetta,
+    pulizieOverride: importoImpostato('pulizie'),
+    cambioBiancheriaOverride: importoImpostato('cambio_biancheria'),
     pmFeeOverride: importoManuale('commissione_pm'),
+    touristTaxOverride: tassaImpostata,
   });
   const impostaVoce = (voce: VoceModificabile, importo: number | null) =>
     handleUpdateSplit({ ...overrideCorrenti(), [CAMPO_OVERRIDE[voce]]: importo });
@@ -533,68 +601,212 @@ const BookingDetail = () => {
   // flat dello split (prenotazioni pre-migrazione 018). La tassa di soggiorno ha una riga
   // split ma resta mostrata a parte, in fondo, come prima.
   // La riga OTA mantiene editable: 'ota', quindi usa lo stesso editor e le stesse icone.
-  // Le voci extra si accodano sempre: il fallback sui campi flat vale solo per le voci
-  // calcolate, altrimenti su un booking pre-migrazione una voce extra nasconderebbe
-  // OTA/pulizie/PM (la lista righeSplit conterrebbe solo lei).
-  const righeCosto = (booking.righeSplit ?? [])
-    .filter(r => r.tipoVoce !== 'tassa_soggiorno' && r.tipoVoce !== 'extra');
-  const righeExtra = (booking.righeSplit ?? []).filter(r => r.tipoVoce === 'extra');
-  const vociCalcolate: RigaSplitView[] = righeCosto.length > 0
-    ? righeCosto.map(r => ({
-        key: r.id,
-        label: r.descrizione,
-        value: -r.importo,
-        pct: pctOf(r.importo),
-        source: r.source,
-        ...(r.tipoVoce === 'commissione_ota'
-          ? { editable: 'ota' as const, descrizione: split.otaDescrizione }
-          : r.tipoVoce === 'pulizie'
-            ? { editable: 'pulizie' as const }
-            : r.tipoVoce === 'commissione_pm'
-              ? { editable: 'pm' as const, descrizione: split.pmFeeDescrizione }
-              : {}),
-      }))
-    : [
-        // descrizione = regola di contratto applicata, assente sugli split storici
-        { label: 'Commissione OTA', value: -split.otaCommissionAmount, editable: 'ota', descrizione: split.otaDescrizione },
-        { label: 'Pulizie', value: -split.cleaningAmount, editable: 'pulizie' },
-        { label: 'Provvigione PM', value: -split.pmFeeAmount, editable: 'pm', descrizione: split.pmFeeDescrizione },
-      ];
-  const vociCosto: RigaSplitView[] = [
-    ...vociCalcolate,
-    ...righeExtra.map(r => ({
-      key: r.id,
-      label: r.descrizione,
-      value: -r.importo,
-      pct: pctOf(r.importo),
-      // niente source: su una voce aggiunta dal PM "importo modificato" sarebbe fuorviante
-      descrizione: r.includeInFatturaPm ? undefined : 'fuori fattura PM',
-      extra: r,
-    })),
-  ].map((v, i, all) => (i === all.length - 1 ? { ...v, ultimaVoceCosto: true } : v));
+  // Ordine = ordinamento delle righe (OTA 10, pulizie 20, cambio 25, extra da 50, PM 1000):
+  // la provvigione PM è l'ultima voce, dopo le extra e subito prima di "Aggiungi voce".
+  const vistaCalcolata = (r: BookingSplitRiga): RigaSplitView => ({
+    key: r.id,
+    label: r.descrizione,
+    value: -r.importo,
+    // % sul netto: è quella della regola (es. OTA 18%), il lordo comprende l'IVA
+    pct: pctOf(nettoRiga(r)),
+    source: r.source,
+    nettoEditor: nettoRiga(r),
+    ...(r.aliquotaIva > 0 ? { iva: { imponibile: nettoRiga(r), iva: r.importo - nettoRiga(r) } } : {}),
+    // Valore grezzo del file solo se diverge dal netto (commissione lorda scorporata):
+    // con una commissione netta dal file i due coincidono e l'hint sarebbe rumore.
+    ...(r.importoOriginaleFile != null && r.importoOriginaleFile !== nettoRiga(r)
+      ? { valoreFile: r.importoOriginaleFile }
+      : {}),
+    ...(r.tipoVoce === 'commissione_ota'
+      ? { editable: 'ota' as const, descrizione: split.otaDescrizione }
+      : r.tipoVoce === 'pulizie'
+        ? { editable: 'pulizie' as const }
+        : r.tipoVoce === 'cambio_biancheria'
+          ? { editable: 'cambio_biancheria' as const }
+        : r.tipoVoce === 'commissione_pm'
+          ? { editable: 'pm' as const, descrizione: split.pmFeeDescrizione }
+          : {}),
+  });
+  const vistaExtra = (r: BookingSplitRiga): RigaSplitView => ({
+    key: r.id,
+    label: r.descrizione,
+    value: -r.importo,
+    pct: pctOf(nettoRiga(r)),
+    ...(r.aliquotaIva > 0 ? { iva: { imponibile: nettoRiga(r), iva: r.importo - nettoRiga(r) } } : {}),
+    // niente source: su una voce aggiunta dal PM "importo modificato" sarebbe fuorviante
+    descrizione: r.includeInFatturaPm ? undefined : 'fuori fattura PM',
+    extra: r,
+  });
+  const righeVoci = (booking.righeSplit ?? [])
+    .filter(r => r.tipoVoce !== 'tassa_soggiorno')
+    .sort((a, b) => a.ordinamento - b.ordinamento || a.id - b.id);
+  // Il fallback sui campi flat vale solo se mancano le voci calcolate: su un booking
+  // pre-migrazione una voce extra da sola non deve nascondere OTA/pulizie/PM.
+  const haVociCalcolate = righeVoci.some(r => r.tipoVoce !== 'extra');
+  const vociFlat: RigaSplitView[] = [
+    // descrizione = regola di contratto applicata, assente sugli split storici
+    // Senza righe (pre-migrazione 018) gli importi flat sono lordi: l'editor parte dal netto
+    { label: 'Commissione OTA', value: -split.otaCommissionAmount, editable: 'ota', descrizione: split.otaDescrizione,
+      nettoEditor: split.otaCommissionAmount / (1 + ivaPmPct / 100) },
+    { label: 'Pulizie', value: -split.cleaningAmount, editable: 'pulizie',
+      nettoEditor: split.cleaningAmount / (1 + ivaPmPct / 100) },
+    { label: 'Provvigione PM', value: -split.pmFeeAmount, editable: 'pm', descrizione: split.pmFeeDescrizione,
+      nettoEditor: split.pmFeeAmount / (1 + ivaPmPct / 100) },
+  ];
+  const vociCosto: RigaSplitView[] = (haVociCalcolate
+    ? righeVoci.map(r => (r.tipoVoce === 'extra' ? vistaExtra(r) : vistaCalcolata(r)))
+    : [...vociFlat, ...righeVoci.map(vistaExtra)]
+  ).map((v, i, all) => (i === all.length - 1 ? { ...v, ultimaVoceCosto: true } : v));
+
+  // Tassa di soggiorno modificabile: % sul lordo ospite (non sulla base di calcolo, che ne è
+  // già al netto) e origine dell'importo dalla riga split.
+  const tassaScorporata = !!split.touristTaxIncludedInGross && split.touristTaxAmount > 0;
+  const pctLordo = (v: number) =>
+    split.grossAmount > 0 ? ((v / split.grossAmount) * 100).toFixed(2) : '0.00';
+  const editorTassa = {
+    editable: 'tassa' as const,
+    pct: pctLordo(split.touristTaxAmount ?? 0),
+    source: rigaTassa?.source,
+  };
+
+  // Totali della fattura PM dalle righe in fattura (extra comprese); senza righe (pre-018)
+  // dai totali dello split.
+  const righeInFattura = (booking.righeSplit ?? []).filter(r => r.includeInFatturaPm);
+  const riepilogoIva = righeInFattura.length > 0
+    ? (() => {
+        const imponibile = righeInFattura.reduce((s, r) => s + nettoRiga(r), 0);
+        const lordo = righeInFattura.reduce((s, r) => s + r.importo, 0);
+        return { imponibile, iva: lordo - imponibile, lordo };
+      })()
+    : {
+        imponibile: split.imponibileFatturaPm ?? 0,
+        iva: split.ivaScorporataPm ?? 0,
+        lordo: split.fatturaPmTotale ?? 0,
+      };
 
   const splitRows: RigaSplitView[] = [
     { label: 'Lordo ospite', value: split.grossAmount },
     // Tassa già compresa nel lordo: si rende esplicito lo scorporo e la base effettiva su cui
     // il backend calcola provvigioni, netto proprietario e ritenuta (la tassa è incassata per
     // conto del Comune, non è reddito del proprietario).
-    ...(split.touristTaxIncludedInGross && split.touristTaxAmount > 0
+    // Editor della tassa su questa riga quando c'è, altrimenti su quella "(extra)" in fondo:
+    // mai su entrambe, un solo editingVoce === 'tassa' le aprirebbe insieme.
+    ...(tassaScorporata
       ? [
-          { label: 'Tassa soggiorno (scorporata dal lordo)', value: -split.touristTaxAmount },
+          { label: 'Tassa soggiorno (scorporata dal lordo)', value: -split.touristTaxAmount, ...editorTassa },
           { label: 'Base di calcolo', value: split.grossAmount - split.touristTaxAmount, bold: true },
         ]
       : []),
     ...vociCosto,
-    ...(split.ivaScorporataPm && split.ivaScorporataPm > 0
-      ? [{ label: 'di cui IVA 22% (scorporata sui servizi PM)', value: split.ivaScorporataPm, note: true }]
+    // Totale servizi PM (voci in fattura PM): imponibile, IVA, totale lordo. Sostituisce la
+    // vecchia nota "di cui IVA 22% (scorporata)": con il modello netto + IVA è ridondante.
+    ...(riepilogoIva.lordo > 0
+      ? [{ label: 'Totale servizi PM', value: riepilogoIva.lordo, riepilogoIva }]
       : []),
     { label: 'Netto proprietario', value: split.ownerNetAmount, bold: true },
     { label: `Ritenuta ${aliquotaRitenuta}%`, value: -split.withholdingAmount },
     { label: 'Liquidazione proprietario', value: split.liquidazioneOwner, bold: true },
-    { label: `Tassa di Soggiorno ${split.touristTaxIncludedInGross ? '(incl. nel lordo)' : '(extra)'}`, value: split.touristTaxAmount, highlight: true },
+    { label: `Tassa di Soggiorno ${split.touristTaxIncludedInGross ? '(incl. nel lordo)' : '(extra)'}`, value: split.touristTaxAmount, highlight: true,
+      ...(tassaScorporata ? {} : editorTassa) },
   ];
 
   const fmt = (v: number) => `€${Math.abs(v).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
+
+  // Prima voce con IVA: prima di lei l'intestazione delle colonne Netto / IVA / Totale
+  const primaRigaIva = splitRows.findIndex(r => !!r.iva);
+
+  /**
+   * Colonna 1 di una riga: etichetta, regola applicata, % sulla base di calcolo (sotto la
+   * label, così non occupa le colonne degli importi) e origine dell'importo.
+   */
+  const etichettaVoce = (row: RigaSplitView) => (
+    // ETICHETTA_IVA conta solo nelle righe a griglia; nelle righe flex col-span non ha effetto
+    <div className={`flex flex-col min-w-0 ${ETICHETTA_IVA}`}>
+      <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
+      {row.descrizione && (
+        <span className="text-xs text-muted-foreground/70">{row.descrizione}</span>
+      )}
+      {row.valoreFile != null && (
+        <span className="text-xs text-muted-foreground/60">file: {fmt(row.valoreFile)}</span>
+      )}
+      {/* % solo per le voci di costo e la tassa (row.pct), o per le voci modificabili */}
+      {(row.pct || row.editable) && (
+        <span className="text-xs text-muted-foreground/60">({row.pct ?? pctOf(Math.abs(row.value))}%)</span>
+      )}
+      {/* Origine dell'importo (source della riga split); 'calcolato' = nessuna indicazione */}
+      {row.source === 'manuale' && (
+        <span className="text-xs text-amber-600">importo modificato</span>
+      )}
+      {row.source === 'import' && (
+        <span className="text-xs text-muted-foreground">da file</span>
+      )}
+    </div>
+  );
+
+  /**
+   * Icone di una voce, fuori dal flusso (nel pr-6 del contenitore) così non spostano
+   * l'importo: matita + ripristina per le voci modificabili, matita + cestino per le extra.
+   */
+  const iconeVoce = (row: RigaSplitView) => {
+    if (hasDocuments) return null;
+    if (row.editable) {
+      return (
+        <div className="absolute left-full top-0.5 ml-1.5 flex items-center gap-1">
+          <button
+            onClick={() => setEditingVoce(row.editable!)}
+            disabled={isUpdatingSplit}
+            title="Modifica importo"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+          {/* null = nessun override: il backend ricalcola la voce dalle regole di contratto */}
+          {haOverride[row.editable] && (
+            <button
+              onClick={() => impostaVoce(row.editable!, null)}
+              disabled={isUpdatingSplit}
+              title="Ripristina da regole contratto"
+              className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <RotateCcw className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      );
+    }
+    if (row.extra) {
+      return (
+        <div className="absolute left-full top-0.5 ml-1.5 flex items-center gap-1">
+          <button
+            onClick={() => {
+              const r = row.extra!;
+              setEditingRigaId(r.id);
+              setShowAggiungiVoce(false);
+              setVoceForm({
+                descrizione: r.descrizione,
+                imponibile: String(nettoRiga(r)),
+                includeInFatturaPm: r.includeInFatturaPm,
+              });
+            }}
+            disabled={isUpdatingSplit}
+            title="Modifica voce"
+            className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+          <button
+            onClick={() => handleEliminaVoce(row.extra!.id)}
+            disabled={isUpdatingSplit}
+            title="Elimina voce"
+            className="text-destructive hover:text-destructive/80 disabled:opacity-40"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      );
+    }
+    return null;
+  };
   const dialogBooking = toDialogBooking(booking);
 
   // Documento già emesso per tipo (codice lookup tipo_documento: 'ricevuta' / 'fattura')
@@ -818,101 +1030,75 @@ const BookingDetail = () => {
           <div className="space-y-2 pr-6">
             {splitRows.map((row, i) => (
               <Fragment key={row.key ?? `r${i}`}>
-              <div className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
-                <div className="flex flex-col">
-                  <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
-                  {'descrizione' in row && row.descrizione && (
-                    <span className="text-xs text-muted-foreground">{row.descrizione}</span>
-                  )}
-                  {/* Origine dell'importo (source della riga split); 'calcolato' = nessuna indicazione */}
-                  {row.source === 'manuale' && (
-                    <span className="text-xs text-amber-600">importo modificato</span>
-                  )}
-                  {row.source === 'import' && (
-                    <span className="text-xs text-muted-foreground">da file</span>
+              {/* Intestazione Netto / IVA / Totale, prima della prima voce con IVA */}
+              {i === primaRigaIva && (
+                <div className={`${GRIGLIA_IVA} text-xs text-muted-foreground/60 border-b pb-1 mb-1`}>
+                  <span></span>
+                  <span className="text-right">Netto</span>
+                  <span className="text-right">IVA</span>
+                  <span className="text-right">Totale</span>
+                </div>
+              )}
+              {row.riepilogoIva ? (
+                // Totale servizi PM (fattura PM): stesse colonne delle voci
+                <div className={`${GRIGLIA_IVA} items-center text-xs border-t pt-2 mt-1 text-muted-foreground`}>
+                  <span className={`font-medium text-foreground ${ETICHETTA_IVA}`}>{row.label}</span>
+                  <span className={`text-right ${INIZIO_IMPORTI}`}>{fmt(row.riepilogoIva.imponibile)}</span>
+                  <span className="text-right">+{fmt(row.riepilogoIva.iva)}</span>
+                  <span className="text-right font-medium text-foreground">-{fmt(row.riepilogoIva.lordo)}</span>
+                </div>
+              ) : row.iva ? (
+                // Voce con IVA: Netto / IVA / Totale (schema Barbagallo)
+                <div className={`${GRIGLIA_IVA} items-start text-sm py-1`}>
+                  {etichettaVoce(row)}
+                  {row.editable && editingVoce === row.editable ? (
+                    // L'editor lavora sul netto: occupa le tre colonne degli importi
+                    // sotto l'etichetta a tutta riga (griglia impilata) prende l'intera riga
+                    <div className="col-span-4 sm:col-span-3 md:col-span-4 lg:col-span-3 flex justify-end">
+                      <EditorImporto
+                        importoIniziale={row.nettoEditor ?? Math.abs(row.value)}
+                        base={baseCalcolo}
+                        disabled={isUpdatingSplit}
+                        onApplica={(importo) => impostaVoce(row.editable!, importo)}
+                        onAnnulla={() => setEditingVoce(null)}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <span className={`text-xs text-muted-foreground text-right pt-0.5 ${INIZIO_IMPORTI}`}>{fmt(row.iva.imponibile)}</span>
+                      <span className="text-xs text-muted-foreground text-right pt-0.5">+{fmt(row.iva.iva)}</span>
+                      <div className="relative flex justify-end">
+                        <span className="text-destructive font-medium">-{fmt(row.value)}</span>
+                        {iconeVoce(row)}
+                      </div>
+                    </>
                   )}
                 </div>
-                {row.editable ? (
-                  editingVoce === row.editable ? (
-                    <EditorImporto
-                      importoIniziale={Math.abs(row.value)}
-                      base={baseCalcolo}
-                      disabled={isUpdatingSplit}
-                      onApplica={(importo) => impostaVoce(row.editable!, importo)}
-                      onAnnulla={() => setEditingVoce(null)}
-                    />
-                  ) : (
-                    <div className="relative flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">({row.pct ?? pctOf(Math.abs(row.value))}%)</span>
-                      <span className="text-sm text-destructive">-{fmt(row.value)}</span>
-
-                      {/* Icone fuori dal flusso (nel pr-6 del contenitore): inline spostavano
-                          l'importo rispetto a quelli delle altre righe */}
-                      {!hasDocuments && (
-                        <div className="absolute left-full ml-1.5 flex items-center gap-1">
-                          <button
-                            onClick={() => setEditingVoce(row.editable!)}
-                            disabled={isUpdatingSplit}
-                            title="Modifica importo"
-                            className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          {/* null = nessun override: il backend ricalcola la voce dalle regole di contratto */}
-                          {haOverride[row.editable] && (
-                            <button
-                              onClick={() => impostaVoce(row.editable!, null)}
-                              disabled={isUpdatingSplit}
-                              title="Ripristina da regole contratto"
-                              className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                            >
-                              <RotateCcw className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
+              ) : (
+              <div className={`flex justify-between py-1.5 ${row.bold ? 'border-t pt-2 font-semibold' : ''} ${'highlight' in row && row.highlight ? 'bg-amber-50 dark:bg-amber-950/20 rounded px-2 -mx-2' : ''}`}>
+                {etichettaVoce(row)}
+                {row.editable && editingVoce === row.editable ? (
+                  <EditorImporto
+                    importoIniziale={row.nettoEditor ?? Math.abs(row.value)}
+                    // La tassa si legge in % sul lordo ospite, le altre voci sulla base di calcolo
+                    base={row.editable === 'tassa' ? split.grossAmount : baseCalcolo}
+                    disabled={isUpdatingSplit}
+                    onApplica={(importo) => impostaVoce(row.editable!, importo)}
+                    onAnnulla={() => setEditingVoce(null)}
+                    // riga "Tassa di Soggiorno" in fondo: mostrata in positivo, senza "-"
+                    showMinus={!row.highlight}
+                  />
                 ) : (
                   <div className="relative flex items-center gap-2">
-                    {/* % sulla base di calcolo: solo per le voci da booking_split_economico */}
-                    {row.pct && <span className="text-xs text-muted-foreground">({row.pct}%)</span>}
+                    {/* Voci di costo in negativo; la tassa in fondo (highlight) in positivo */}
                     <span className={`text-sm ${'note' in row && row.note ? 'text-muted-foreground' : row.value < 0 ? 'text-destructive' : ''} ${row.bold ? 'text-foreground' : ''} ${'highlight' in row && row.highlight ? 'text-amber-700 dark:text-amber-400 font-medium' : ''}`}>
                       {'note' in row && row.note ? '' : row.value < 0 ? '-' : ''}{fmt(row.value)}
                     </span>
-                    {/* Voce extra: matita + cestino fuori dal flusso (nel pr-6), come le icone OTA */}
-                    {row.extra && !hasDocuments && (
-                      <div className="absolute left-full ml-1.5 flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            const r = row.extra!;
-                            setEditingRigaId(r.id);
-                            setShowAggiungiVoce(false);
-                            setVoceForm({
-                              descrizione: r.descrizione,
-                              importo: String(r.importo),
-                              includeInFatturaPm: r.includeInFatturaPm,
-                            });
-                          }}
-                          disabled={isUpdatingSplit}
-                          title="Modifica voce"
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => handleEliminaVoce(row.extra!.id)}
-                          disabled={isUpdatingSplit}
-                          title="Elimina voce"
-                          className="text-destructive hover:text-destructive/80 disabled:opacity-40"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
+                    {iconeVoce(row)}
                   </div>
                 )}
               </div>
+              )}
               {/* Dopo l'ultima voce di costo: pulsante "Aggiungi voce" e form inline
                   (aggiunta o modifica di una voce extra), solo senza documenti emessi. */}
               {row.ultimaVoceCosto && !hasDocuments && (
@@ -928,14 +1114,20 @@ const BookingDetail = () => {
                       />
                       <Input
                         type="number"
-                        placeholder="€"
-                        value={voceForm.importo}
-                        onChange={e => setVoceForm({ ...voceForm, importo: e.target.value })}
+                        placeholder="€ netto"
+                        title="Imponibile (€ netto IVA esclusa)"
+                        value={voceForm.imponibile}
+                        onChange={e => setVoceForm({ ...voceForm, imponibile: e.target.value })}
                         className="w-24 h-7 text-xs"
                         min="0.01"
                         step="0.01"
                       />
                     </div>
+                    {/* Anteprima del lordo: stessa IVA del backend (22% RF01, 0 RF19) */}
+                    <span className="block text-xs text-muted-foreground text-right">
+                      + IVA {ivaPmPct}% = €{((parseFloat(voceForm.imponibile || '0') || 0) * ivaPmPct / 100).toFixed(2)}
+                      {' '}→ totale €{((parseFloat(voceForm.imponibile || '0') || 0) * (1 + ivaPmPct / 100)).toFixed(2)}
+                    </span>
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
                         <Switch
@@ -951,7 +1143,7 @@ const BookingDetail = () => {
                           disabled={
                             isUpdatingSplit
                             || !voceForm.descrizione.trim()
-                            || !(parseFloat(voceForm.importo) > 0)
+                            || !(parseFloat(voceForm.imponibile) > 0)
                           }
                           className="text-xs px-2 py-1 bg-primary text-primary-foreground rounded disabled:opacity-50"
                         >
@@ -968,7 +1160,7 @@ const BookingDetail = () => {
                     onClick={() => {
                       setShowAggiungiVoce(true);
                       setEditingRigaId(null);
-                      setVoceForm({ descrizione: '', importo: '', includeInFatturaPm: true });
+                      setVoceForm({ descrizione: '', imponibile: '', includeInFatturaPm: true });
                     }}
                     disabled={isUpdatingSplit}
                     className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50"

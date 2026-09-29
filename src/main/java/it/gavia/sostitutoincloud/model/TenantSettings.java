@@ -50,6 +50,9 @@ public class TenantSettings {
     private Boolean alertScadenzeF24;
     private Boolean notificheEmail;
 
+    // Import massivo proprietari: canale per le regole commissione_ota (null = nessuno)
+    private Integer fkCanaleOtaDefaultId;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

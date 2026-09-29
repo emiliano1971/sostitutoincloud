@@ -26,6 +26,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @Log4j2
@@ -185,14 +186,16 @@ public class DocumentGenerationService {
             canoneLocazione = canone;
             fkDocumentoCollegatoId = fatturaPM.map(FiscalDocument::getId).orElse(null);
         } else { // fattura_pm
-            // I valori dei servizi (OTA, pulizie, commissione PM) sono GIÀ LORDI, IVA inclusa.
-            // L'IVA va SCORPORATA dal lordo (lordo / 1.22), non aggiunta sopra.
-            // Il totale della fattura coincide con il lordo dei servizi.
-            // Voci lette da booking_split_economico: somma solo quelle in fattura PM
-            // (la tassa di soggiorno ha una riga ma include_in_fattura_pm=false).
+            // Voci lette da booking_split_economico: solo quelle in fattura PM (la tassa di
+            // soggiorno ha una riga ma include_in_fattura_pm=false). Modello IVA (migration 020):
+            // ogni riga ha imponibile (netto) e importo (lordo = imponibile × (1 + IVA)).
+            // Totale fattura = Σ lordi; imponibile = Σ imponibili delle righe, non Σ lordi / 1.22,
+            // che può scostarsi di qualche centesimo dai netti mostrati nello split.
             List<BookingSplitEconomico> righe = splitEconomicoDAO.findByBookingId(booking.getId());
-            BigDecimal lordoServizi = righe.stream()
+            List<BookingSplitEconomico> righeInFattura = righe.stream()
                     .filter(r -> Boolean.TRUE.equals(r.getIncludeInFatturaPm()))
+                    .collect(Collectors.toList());
+            BigDecimal lordoServizi = righeInFattura.stream()
                     .map(BookingSplitEconomico::getImporto)
                     .reduce(BigDecimal.ZERO, BigDecimal::add)
                     .setScale(2, RoundingMode.HALF_UP);
@@ -217,8 +220,19 @@ public class DocumentGenerationService {
                 imponibile = lordoServizi;
                 iva = BigDecimal.ZERO.setScale(2);
                 aliquotaIva = BigDecimal.ZERO.setScale(2);
+            } else if (!righeInFattura.isEmpty()) {
+                // Regime ordinario (RF01): Σ imponibili delle righe. Le righe create prima
+                // della migration 020 non hanno imponibile: per quelle si scorpora il lordo.
+                imponibile = righeInFattura.stream()
+                        .map(r -> r.getImponibile() != null
+                                ? r.getImponibile()
+                                : r.getImporto().divide(DIVISORE_IVA_22, 2, RoundingMode.HALF_UP))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .setScale(2, RoundingMode.HALF_UP);
+                iva = lordoServizi.subtract(imponibile).setScale(2, RoundingMode.HALF_UP);
+                aliquotaIva = ALIQUOTA_IVA_22;
             } else {
-                // Regime ordinario (RF01): scorporo IVA dal lordo.
+                // Regime ordinario senza righe split (campi flat pre-018): scorporo IVA dal lordo.
                 imponibile = lordoServizi.divide(DIVISORE_IVA_22, 2, RoundingMode.HALF_UP);
                 iva = lordoServizi.subtract(imponibile).setScale(2, RoundingMode.HALF_UP);
                 aliquotaIva = ALIQUOTA_IVA_22;

@@ -97,7 +97,7 @@ ON booking_split_economico(fk_tenant_id);
 CREATE TRIGGER trg_bse_updated_at
 BEFORE UPDATE ON booking_split_economico
 FOR EACH ROW
-EXECUTE FUNCTION update_updated_at_column();
+EXECUTE FUNCTION set_updated_at();
 
 -- ============================================
 -- Aggiungi total_costi_pm al booking

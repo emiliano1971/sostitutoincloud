@@ -22,6 +22,7 @@ import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
+import it.gavia.sostitutoincloud.util.ExcelCellUtils;
 import it.gavia.sostitutoincloud.util.NazioneUtils;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
@@ -330,17 +331,36 @@ public class BookingImportService {
                         : orZero(row.getGrossAmount());
 
                 // Calcolo dello split economico tramite le regole del contratto immobile.
-                // La commissione OTA dal CSV è passata come override.
+                // La commissione OTA dal CSV è passata come override. Anche l'importo pulizie
+                // dal file va come override, ma solo di pulizie: il cambio biancheria resta
+                // dalla regola. Solo se > 0: il tracciato legacy mette 0 sulle celle vuote e
+                // uno zero forzato annullerebbe la regola pulizie dell'immobile.
+                BigDecimal pulizieDaFile = orZero(row.getCleaningAmount()).signum() > 0
+                        ? row.getCleaningAmount() : null;
+                // Commissione OTA del file: lorda (IVA inclusa, es. Booking.com) o netta (es.
+                // Airbnb) secondo il canale. Senza canale: lorda, il comportamento di prima.
+                // Riguarda solo la commissione: le pulizie dal file restano lorde.
+                boolean commissioneIvata = canale == null || !Boolean.FALSE.equals(canale.getCommissioneIvata());
+                // Valore grezzo del file, prima di qualsiasi trasformazione IVA (riconciliazione)
+                BigDecimal commissioneOriginale = row.getOtaCommissionAmount();
                 ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
                         tenantId,
                         fkPropertyId,
                         fkCanaleOtaId,
                         grossPerCalcolo,
                         row.getOtaCommissionAmount(),  // override dal CSV
-                        null,                          // pulizie dalle regole
+                        null,                          // cleaningOverride legacy: non usato
+                        pulizieDaFile,                 // pulizie dal file, se presenti
+                        null,                          // cambio biancheria dalle regole
                         null,                          // provvigione PM dalle regole
                         row.getNights(),
-                        row.getGuests());
+                        row.getGuests(),
+                        // Nessuna voce extra: la prenotazione nasce ora, non ha ancora righe split
+                        List.of(),
+                        // Importi del file = LORDI (se ne scorpora l'IVA)...
+                        true,
+                        // ...salvo la commissione OTA di un canale che la dà netta
+                        !commissioneIvata);
 
                 if (calcolo.getWarnings() != null && !calcolo.getWarnings().isEmpty()) {
                     calcolo.getWarnings().forEach(w ->
@@ -414,8 +434,9 @@ public class BookingImportService {
                 // serve più l'UPDATE dopo l'insert.
                 // Avanzamento automatico dello stato in base ai dati disponibili (imported/enriched/ready)
                 bookingService.aggiornaStato(saved.getId());
-                // Righe split economico + total_costi_pm. Riga OTA 'import' se la commissione
-                // arriva dal file (passata come override al calcolatore), altrimenti 'calcolato'.
+                // Righe split economico + total_costi_pm. Righe OTA e pulizie 'import' se
+                // l'importo arriva dal file (passato come override al calcolatore), altrimenti
+                // 'calcolato' (cambio biancheria: regola, oppure 'manuale' se manca la regola).
                 // L'import parte da una richiesta autenticata: l'utente è quello che conferma.
                 bookingService.popolaSplitEconomico(
                         saved.getId(),
@@ -425,7 +446,14 @@ public class BookingImportService {
                         tassaInclusa,
                         canale != null ? canale.getNome() : null,
                         SecurityUtils.getCurrentUtenteId(),
-                        row.getOtaCommissionAmount() != null ? "import" : "calcolato");
+                        row.getOtaCommissionAmount() != null ? "import" : "calcolato",
+                        pulizieDaFile != null ? "import" : "calcolato",
+                        calcolo.getFkRegolaCambioBiancheriaId() != null ? "calcolato" : "manuale",
+                        "calcolato",
+                        // tassa dal file (vedi sopra) → 'import': il dettaglio la ripassa come
+                        // override e le PATCH successive non la rimpiazzano con la regola
+                        orZero(row.getTouristTaxAmount()).signum() > 0 ? "import" : "calcolato",
+                        commissioneOriginale);
                 imported++;
             } catch (Exception e) {
                 errors++;
@@ -712,9 +740,20 @@ public class BookingImportService {
             }
             BigDecimal grossPerCalcolo = tassaInclusa ? gross.subtract(touristTax) : gross;
 
+            // Commissione del file lorda o netta secondo il canale, come confirm(). Il canale
+            // si carica solo se serve (commissione presente e non già letto per la tassa).
+            CanaleOta canaleCommissione = commissione == null ? null
+                    : canaleRiga != null ? canaleRiga
+                    : canaleOtaDAO.findById(m.canaleId()).orElse(null);
+            boolean commissioneNetta = canaleCommissione != null
+                    && Boolean.FALSE.equals(canaleCommissione.getCommissioneIvata());
+
             // calcolo split economico
             ContrattoCalcoloResult calcolo = contrattoCalcolatore.calcola(
-                    tenantId, m.propertyId(), m.canaleId(), grossPerCalcolo, commissione, null, null, nights, guests);
+                    tenantId, m.propertyId(), m.canaleId(), grossPerCalcolo, commissione,
+                    null, null, null, null, nights, guests,
+                    // come confirm(): nessuna extra, importi del file lordi salvo commissione netta
+                    List.of(), true, commissioneNetta);
 
             String comuneNascita = guest != null ? guest.getBirthPlace() : null;
             String dataNascita   = guest != null ? guest.getBirthDate()  : null;
@@ -960,40 +999,9 @@ public class BookingImportService {
         return getCellValue(cell, fmt);
     }
 
-    /**
-     * Valore grezzo della cella, senza la formattazione di Excel: DataFormatter produceva
-     * stringhe dipendenti dal locale (es. "1,234.56" o "€ 380,00" con U+00A0).
-     */
+    /** Valore grezzo della cella: logica condivisa con l'import proprietari, vedi ExcelCellUtils. */
     private String getCellValue(Cell cell, DataFormatter fmt) {
-        if (cell == null) return "";
-        switch (cell.getCellType()) {
-            case NUMERIC:
-                // Stringa formattata di sole cifre: si tiene quella, conserva gli zeri
-                // iniziali (CAP 00184 con formato "00000") ed è indipendente dal locale.
-                String formatted = fmt.formatCellValue(cell);
-                if (formatted.matches("[0-9]+")) {
-                    return formatted;
-                }
-                // Altrimenti valore numerico diretto, evita problemi di formattazione.
-                // BigDecimal.valueOf (non new BigDecimal) per evitare l'espansione binaria
-                // lunga del double; stripTrailingZeros perché gli interi in celle con formato
-                // decimale restino interi ("2", non "2.0", che Integer.parseInt rifiuta);
-                // toPlainString per evitare la notazione scientifica.
-                double d = cell.getNumericCellValue();
-                return BigDecimal.valueOf(d).stripTrailingZeros().toPlainString();
-            case STRING:
-                return cell.getStringCellValue().trim();
-            case BOOLEAN:
-                return String.valueOf(cell.getBooleanCellValue());
-            case FORMULA:
-                try {
-                    return String.valueOf(cell.getNumericCellValue());
-                } catch (Exception e) {
-                    return cell.getStringCellValue();
-                }
-            default:
-                return "";
-        }
+        return ExcelCellUtils.getCellValue(cell, fmt);
     }
 
     // ── mapping suggerito ──────────────────────────────────────────────────────

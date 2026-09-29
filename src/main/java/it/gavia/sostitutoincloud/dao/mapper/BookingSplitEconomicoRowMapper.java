@@ -21,6 +21,8 @@ public class BookingSplitEconomicoRowMapper implements RowMapper<BookingSplitEco
                 .tipoVoce(rs.getString("tipo_voce"))
                 .descrizione(rs.getString("descrizione"))
                 .importo(rs.getBigDecimal("importo"))
+                .imponibile(rs.getBigDecimal("imponibile"))
+                .importoOriginaleFile(rs.getBigDecimal("importo_originale_file"))
                 .aliquotaIva(rs.getBigDecimal("aliquota_iva"))
                 .includeInFatturaPm(rs.getBoolean("include_in_fattura_pm"))
                 .ordinamento(rs.getInt("ordinamento"))

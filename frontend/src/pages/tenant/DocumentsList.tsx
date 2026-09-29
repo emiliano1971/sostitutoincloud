@@ -234,6 +234,11 @@ const DocumentsList = () => {
         <p className="text-sm text-muted-foreground">
           {isLoading ? 'Caricamento…' : `${filtered.length} documenti`}
         </p>
+        {/* Nota informativa: la conservazione sostitutiva non è gestita dall'applicazione */}
+        <p className="text-xs text-muted-foreground mt-2">
+          L'archiviazione sostitutiva delle fatture inviate va attivata nel proprio cassetto
+          fiscale dell'Agenzia delle Entrate.
+        </p>
       </div>
 
       <Card>

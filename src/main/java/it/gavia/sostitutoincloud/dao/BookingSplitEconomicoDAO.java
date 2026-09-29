@@ -20,7 +20,7 @@ public class BookingSplitEconomicoDAO {
 
     private static final String SELECT_ALL =
             "SELECT id, fk_booking_id, fk_tenant_id, fk_property_contract_rule_id, " +
-            "tipo_voce, descrizione, importo, aliquota_iva, include_in_fattura_pm, " +
+            "tipo_voce, descrizione, importo, imponibile, importo_originale_file, aliquota_iva, include_in_fattura_pm, " +
             "ordinamento, source, deleted_at, created_at, updated_at, created_by, updated_by " +
             "FROM booking_split_economico";
 
@@ -50,11 +50,11 @@ public class BookingSplitEconomicoDAO {
     public BookingSplitEconomico insert(BookingSplitEconomico riga) {
         String sql = "INSERT INTO booking_split_economico " +
                 "(fk_booking_id, fk_tenant_id, fk_property_contract_rule_id, " +
-                "tipo_voce, descrizione, importo, " +
+                "tipo_voce, descrizione, importo, imponibile, importo_originale_file, " +
                 "aliquota_iva, include_in_fattura_pm, " +
                 "ordinamento, source, " +
                 "created_by, updated_by) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -64,14 +64,17 @@ public class BookingSplitEconomicoDAO {
             ps.setString(4, riga.getTipoVoce());
             ps.setString(5, riga.getDescrizione());
             ps.setBigDecimal(6, riga.getImporto());
+            ps.setBigDecimal(7, riga.getImponibile());   // nullable
+            // Valore storico dal file: solo in INSERT, update() non lo tocca
+            ps.setBigDecimal(8, riga.getImportoOriginaleFile());   // nullable
             // Colonne NOT NULL con default a DB: un null esplicito nell'INSERT non attiva il
             // DEFAULT, quindi i default si replicano qui.
-            ps.setBigDecimal(7, riga.getAliquotaIva() != null ? riga.getAliquotaIva() : BigDecimal.ZERO);
-            ps.setBoolean(8, !Boolean.FALSE.equals(riga.getIncludeInFatturaPm()));
-            ps.setInt(9, riga.getOrdinamento() != null ? riga.getOrdinamento() : 0);
-            ps.setString(10, riga.getSource() != null ? riga.getSource() : "calcolato");
-            ps.setObject(11, riga.getCreatedBy());
-            ps.setObject(12, riga.getUpdatedBy());
+            ps.setBigDecimal(9, riga.getAliquotaIva() != null ? riga.getAliquotaIva() : BigDecimal.ZERO);
+            ps.setBoolean(10, !Boolean.FALSE.equals(riga.getIncludeInFatturaPm()));
+            ps.setInt(11, riga.getOrdinamento() != null ? riga.getOrdinamento() : 0);
+            ps.setString(12, riga.getSource() != null ? riga.getSource() : "calcolato");
+            ps.setObject(13, riga.getCreatedBy());
+            ps.setObject(14, riga.getUpdatedBy());
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
@@ -87,6 +90,7 @@ public class BookingSplitEconomicoDAO {
         String sql = "UPDATE booking_split_economico SET " +
                 "descrizione = ?, " +
                 "importo = ?, " +
+                "imponibile = ?, " +
                 "aliquota_iva = ?, " +
                 "include_in_fattura_pm = ?, " +
                 "ordinamento = ?, " +
@@ -96,6 +100,7 @@ public class BookingSplitEconomicoDAO {
         int updated = jdbcTemplate.update(sql,
                 riga.getDescrizione(),
                 riga.getImporto(),
+                riga.getImponibile(),
                 riga.getAliquotaIva() != null ? riga.getAliquotaIva() : BigDecimal.ZERO,
                 !Boolean.FALSE.equals(riga.getIncludeInFatturaPm()),
                 riga.getOrdinamento() != null ? riga.getOrdinamento() : 0,

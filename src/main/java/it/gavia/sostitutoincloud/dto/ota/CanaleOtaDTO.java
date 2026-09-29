@@ -19,6 +19,8 @@ public class CanaleOtaDTO {
     private String nome;
     private BigDecimal commissioneDefaultPct;
     private Boolean touristTaxIncluded;
+    /** true = commissione nel file lorda (IVA inclusa); false = netta (es. Airbnb).  */
+    private Boolean commissioneIvata;
     private String touristTaxCollection;
     private Boolean attivo;
     private LocalDateTime createdAt;

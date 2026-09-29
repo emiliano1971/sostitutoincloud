@@ -1,4 +1,5 @@
-import { get, post, put, patch } from '@/lib/apiClient';
+import { get, post, put, patch, getToken } from '@/lib/apiClient';
+import { getConfig } from '@/config/AppConfig';
 import type { MensileDTO } from './dashboardApi';
 import type { BookingListItem } from './bookingApi';
 import type { SettlementListItem } from './settlementApi';
@@ -122,4 +123,44 @@ export interface OwnerUpdateRequest {
 
 export async function updateOwner(id: number, data: OwnerUpdateRequest): Promise<OwnerDetail> {
   return put<OwnerDetail>(`/owners/${id}`, data);
+}
+
+// ── Import massivo proprietari/immobili da Excel ─────────────────────────────
+
+export interface OwnerBulkImportErrore {
+  numeroRiga: number;
+  descrizioneRiga: string;
+  messaggio: string;
+}
+
+export interface OwnerBulkImportResult {
+  righeProcessate: number;
+  proprietariCreati: number;
+  proprietariEsistenti: number;
+  immobiliCreati: number;
+  immobiliSaltati: number;
+  righeInErrore: number;
+  errori: OwnerBulkImportErrore[];
+}
+
+export async function importOwnersBulk(file: File): Promise<OwnerBulkImportResult> {
+  const url = `${getConfig().apiBaseUrl}/owners/import-bulk`;
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    let message = text;
+    try { const j = JSON.parse(text); message = j.message ?? j.error ?? text; } catch { /* */ }
+    throw new Error(message);
+  }
+  return res.json();
 }

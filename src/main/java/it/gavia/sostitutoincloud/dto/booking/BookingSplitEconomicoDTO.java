@@ -20,7 +20,9 @@ public class BookingSplitEconomicoDTO {
     private Integer fkPropertyContractRuleId;   // null per le righe manuali / da import
     private String tipoVoce;
     private String descrizione;
-    private BigDecimal importo;
+    private BigDecimal importo;       // lordo
+    private BigDecimal imponibile;    // netto IVA esclusa; null sulle righe pre-migration 020
+    private BigDecimal importoOriginaleFile;   // commissione OTA grezza dal file di import
     private BigDecimal aliquotaIva;
     private Boolean includeInFatturaPm;
     private Integer ordinamento;

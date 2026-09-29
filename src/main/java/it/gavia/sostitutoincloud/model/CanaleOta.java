@@ -21,6 +21,8 @@ public class CanaleOta {
     private String nome;
     private BigDecimal commissioneDefaultPct;
     private Boolean tassaSoggiornoInclusa;
+    /** true = commissione nel file di import lorda (IVA inclusa); false = netta, il sistema aggiunge l'IVA. */
+    private Boolean commissioneIvata;
     private String touristTaxCollection;
     private Boolean attivo;
     private LocalDateTime createdAt;

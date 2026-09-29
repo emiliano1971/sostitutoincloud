@@ -53,4 +53,7 @@ public class TenantSettingsUpdateDTO {
     private Boolean alertScadenzeDocumenti;
     private Boolean alertScadenzeF24;
     private Boolean notificheEmail;
+
+    // Import massivo proprietari: null = non modificare, 0 = nessun canale default
+    private Integer fkCanaleOtaDefaultId;
 }

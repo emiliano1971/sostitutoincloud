@@ -19,6 +19,7 @@ public class CanaleOtaRowMapper implements RowMapper<CanaleOta> {
                 .nome(rs.getString("nome"))
                 .commissioneDefaultPct((java.math.BigDecimal) rs.getObject("commissione_default_pct"))
                 .tassaSoggiornoInclusa(rs.getBoolean("tassa_soggiorno_inclusa"))
+                .commissioneIvata(rs.getBoolean("commissione_ivata"))
                 .touristTaxCollection(rs.getString("tourist_tax_collection"))
                 .attivo(rs.getBoolean("attivo"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))

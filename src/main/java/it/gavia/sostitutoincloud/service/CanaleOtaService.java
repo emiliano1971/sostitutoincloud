@@ -45,6 +45,8 @@ public class CanaleOtaService {
                 .commissioneDefaultPct(dto.getCommissioneDefaultPct() != null
                         ? dto.getCommissioneDefaultPct() : BigDecimal.ZERO)
                 .tassaSoggiornoInclusa(Boolean.TRUE.equals(dto.getTouristTaxIncluded()))
+                // default true: commissione lorda, come i canali esistenti prima della migration 021
+                .commissioneIvata(!Boolean.FALSE.equals(dto.getCommissioneIvata()))
                 .touristTaxCollection(dto.getTouristTaxCollection() != null
                         ? dto.getTouristTaxCollection() : "contanti")
                 .attivo(true)
@@ -67,6 +69,8 @@ public class CanaleOtaService {
                         ? dto.getCommissioneDefaultPct() : existing.getCommissioneDefaultPct())
                 .tassaSoggiornoInclusa(dto.getTouristTaxIncluded() != null
                         ? dto.getTouristTaxIncluded() : existing.getTassaSoggiornoInclusa())
+                .commissioneIvata(dto.getCommissioneIvata() != null
+                        ? dto.getCommissioneIvata() : existing.getCommissioneIvata())
                 .touristTaxCollection(dto.getTouristTaxCollection() != null
                         ? dto.getTouristTaxCollection() : existing.getTouristTaxCollection())
                 .attivo(dto.getAttivo() != null ? dto.getAttivo() : existing.getAttivo())
@@ -91,6 +95,7 @@ public class CanaleOtaService {
                 .nome(c.getNome())
                 .commissioneDefaultPct(c.getCommissioneDefaultPct())
                 .touristTaxIncluded(c.getTassaSoggiornoInclusa())
+                .commissioneIvata(c.getCommissioneIvata())
                 .touristTaxCollection(c.getTouristTaxCollection())
                 .attivo(c.getAttivo())
                 .createdAt(c.getCreatedAt())

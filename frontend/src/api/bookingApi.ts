@@ -31,7 +31,12 @@ export interface BookingSplitRiga {
   fkPropertyContractRuleId?: number;
   tipoVoce: string;
   descrizione: string;
+  /** Lordo = imponibile × (1 + aliquotaIva/100). */
   importo: number;
+  /** Netto IVA esclusa; null sulle righe create prima della migration 020. */
+  imponibile?: number | null;
+  /** Commissione OTA grezza dal file di import, prima della trasformazione IVA. */
+  importoOriginaleFile?: number | null;
   aliquotaIva: number;
   includeInFatturaPm: boolean;
   ordinamento: number;
@@ -210,10 +215,16 @@ export interface BookingUpdateSplitRequest {
   touristTaxIncludedInGross?: boolean;
   /** null = nessun override, torna alla commissione delle regole di contratto. */
   otaCommissionOverride?: number | null;
-  /** Totale pulizie (pulizie + cambio biancheria) impostato a mano; null = dalle regole. */
+  /** Legacy: totale pulizie + cambio biancheria; ignorato se arriva uno dei due override separati. */
   cleaningOverride?: number | null;
+  /** Solo pulizie impostate a mano; null = dalla regola. */
+  pulizieOverride?: number | null;
+  /** Solo cambio biancheria impostato a mano; null = dalla regola. */
+  cambioBiancheriaOverride?: number | null;
   /** Provvigione PM impostata a mano; null = dalle regole. */
   pmFeeOverride?: number | null;
+  /** Tassa di soggiorno impostata a mano (anche 0); null = dalla regola del comune. */
+  touristTaxOverride?: number | null;
 }
 
 /** Modifica gli input dello split e lo fa ricalcolare al backend. 400 se ci sono documenti emessi. */
@@ -235,8 +246,10 @@ export async function ricalcolaSplit(id: number): Promise<BookingDetail> {
 /** Voce extra dello split (tipo_voce 'extra'), es. "Parcheggio". */
 export interface VoceExtraRequest {
   descrizione: string;
-  /** Importo lordo, > 0. */
-  importo: number;
+  /** Imponibile (netto IVA esclusa), > 0: il lordo lo calcola il backend con l'IVA del regime PM. */
+  imponibile: number;
+  /** @deprecated lordo IVA inclusa: usato dal backend solo se manca imponibile. */
+  importo?: number;
   /** Omesso = true in creazione, invariato in modifica. */
   includeInFatturaPm?: boolean;
 }

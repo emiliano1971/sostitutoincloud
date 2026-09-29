@@ -149,10 +149,22 @@ public class TenantSettingsService {
                         dto.getNotificheEmail() != null
                                 ? dto.getNotificheEmail()
                                 : existing.getNotificheEmail())
+                // null = campo non inviato (resta com'è); 0 = rimuovi il canale default
+                .fkCanaleOtaDefaultId(
+                        dto.getFkCanaleOtaDefaultId() == null
+                                ? existing.getFkCanaleOtaDefaultId()
+                                : dto.getFkCanaleOtaDefaultId() == 0 ? null : dto.getFkCanaleOtaDefaultId())
                 .build();
 
         TenantSettings saved = tenantSettingsDAO.save(updated);
         return toDTO(tenant, saved);
+    }
+
+    /** Canale OTA di default per l'import massivo proprietari; null se non configurato. */
+    public Integer getCanaleOtaDefaultId(Integer tenantId) {
+        return tenantSettingsDAO.findByTenantId(tenantId)
+                .map(TenantSettings::getFkCanaleOtaDefaultId)
+                .orElse(null);
     }
 
     private boolean hasTenantDataChanges(TenantSettingsUpdateDTO dto) {
@@ -224,6 +236,7 @@ public class TenantSettingsService {
                 .alertScadenzeDocumenti(s.getAlertScadenzeDocumenti())
                 .alertScadenzeF24(s.getAlertScadenzeF24())
                 .notificheEmail(s.getNotificheEmail())
+                .fkCanaleOtaDefaultId(s.getFkCanaleOtaDefaultId())
                 .build();
     }
 }

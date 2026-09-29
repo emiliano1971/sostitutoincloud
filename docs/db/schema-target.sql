@@ -95,6 +95,8 @@ CREATE TABLE canale_ota (
     nome                    VARCHAR(100)    NOT NULL,
     commissione_default_pct DECIMAL(5,2)    NOT NULL DEFAULT 0,
     tassa_soggiorno_inclusa BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- migration 021: true = commissione nel file lorda (IVA inclusa), false = netta (es. Airbnb)
+    commissione_ivata       BOOLEAN         NOT NULL DEFAULT TRUE,
     attivo                  BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP       NOT NULL DEFAULT NOW()
@@ -102,6 +104,13 @@ CREATE TABLE canale_ota (
 COMMENT ON TABLE canale_ota IS
     'Canali OTA supportati dalla piattaforma. '
     'Gestito come lookup per consentire aggiunta di nuovi canali senza modificare il codice.';
+COMMENT ON COLUMN canale_ota.commissione_ivata IS
+    'true = commissione nel file di import '
+    'è lorda (IVA inclusa, es. Booking.com). '
+    'false = commissione nel file è netta, '
+    'il sistema aggiunge IVA 22% '
+    '(es. Airbnb). '
+    'Default true per retrocompatibilità.';
 
 CREATE TRIGGER trg_canale_ota_updated_at
     BEFORE UPDATE ON canale_ota
@@ -592,6 +601,13 @@ CREATE TABLE booking_split_economico (
     -- 'commissione_ota' | 'pulizie' | 'cambio_biancheria' |
     -- 'commissione_pm' | 'extra' | 'tassa_soggiorno'
     descrizione                  VARCHAR(255)  NOT NULL,
+    -- ordine delle tre colonne importo: migration 022 (valore dal file → netto → lordo)
+    -- migration 021: commissione OTA grezza dal file di import (prima della trasformazione IVA),
+    -- NULL per le altre righe. Valore storico: non si aggiorna
+    importo_originale_file       DECIMAL(10,2) DEFAULT NULL,
+    -- migration 020: netto IVA esclusa; importo = imponibile × (1 + aliquota_iva/100).
+    -- NULL per le righe create prima della 020 (nessun backfill)
+    imponibile                   DECIMAL(10,2) DEFAULT NULL,
     importo                      DECIMAL(10,2) NOT NULL,
     aliquota_iva                 DECIMAL(5,2)  NOT NULL DEFAULT 0,
     include_in_fattura_pm        BOOLEAN       NOT NULL DEFAULT TRUE,
@@ -1161,12 +1177,18 @@ CREATE TABLE tenant_settings (
     alert_scadenze_documenti    BOOLEAN         NOT NULL DEFAULT TRUE,
     alert_scadenze_f24          BOOLEAN         NOT NULL DEFAULT TRUE,
     notifiche_email             BOOLEAN         NOT NULL DEFAULT TRUE,
+    -- migration 024: canale OTA per le regole commissione_ota dell'import massivo proprietari
+    fk_canale_ota_default_id    INTEGER         REFERENCES canale_ota(id) ON DELETE SET NULL,
     created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at                  TIMESTAMP       NOT NULL DEFAULT NOW()
 );
 
 COMMENT ON TABLE tenant_settings IS
   'Parametri fiscali, policy documentali e notifiche per tenant';
+COMMENT ON COLUMN tenant_settings.fk_canale_ota_default_id IS
+    'Canale OTA di default usato per le regole commissione_ota '
+    'nell import massivo proprietari. '
+    'NULL = nessun canale default configurato.';
 
 CREATE TRIGGER trg_tenant_settings_updated_at
     BEFORE UPDATE ON tenant_settings

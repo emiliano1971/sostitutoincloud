@@ -26,7 +26,7 @@ public class CanaleOtaDAO {
     public List<CanaleOta> findAll() {
         log.debug("CanaleOtaDAO.findAll()");
         String sql = "SELECT id, codice, nome, commissione_default_pct, tassa_soggiorno_inclusa, " +
-                     "tourist_tax_collection, attivo, created_at, updated_at " +
+                     "commissione_ivata, tourist_tax_collection, attivo, created_at, updated_at " +
                      "FROM canale_ota ORDER BY id";
         List<CanaleOta> result = jdbcTemplate.query(sql, canaleOtaRowMapper);
         log.debug("CanaleOtaDAO.findAll() - trovati {} record", result.size());
@@ -36,7 +36,7 @@ public class CanaleOtaDAO {
     public Optional<CanaleOta> findById(Integer id) {
         log.debug("CanaleOtaDAO.findById() - id={}", id);
         String sql = "SELECT id, codice, nome, commissione_default_pct, tassa_soggiorno_inclusa, " +
-                     "tourist_tax_collection, attivo, created_at, updated_at " +
+                     "commissione_ivata, tourist_tax_collection, attivo, created_at, updated_at " +
                      "FROM canale_ota WHERE id = ?";
         List<CanaleOta> result = jdbcTemplate.query(sql, canaleOtaRowMapper, id);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
@@ -45,7 +45,7 @@ public class CanaleOtaDAO {
     public Optional<CanaleOta> findByCodice(String codice) {
         log.debug("CanaleOtaDAO.findByCodice() - codice={}", codice);
         String sql = "SELECT id, codice, nome, commissione_default_pct, tassa_soggiorno_inclusa, " +
-                     "tourist_tax_collection, attivo, created_at, updated_at " +
+                     "commissione_ivata, tourist_tax_collection, attivo, created_at, updated_at " +
                      "FROM canale_ota WHERE codice = ?";
         List<CanaleOta> result = jdbcTemplate.query(sql, canaleOtaRowMapper, codice);
         return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
@@ -54,8 +54,8 @@ public class CanaleOtaDAO {
     public CanaleOta insert(CanaleOta canale) {
         String sql = "INSERT INTO canale_ota " +
                      "(codice, nome, commissione_default_pct, tassa_soggiorno_inclusa, " +
-                     "tourist_tax_collection, attivo) " +
-                     "VALUES (?, ?, ?, ?, ?, ?)";
+                     "commissione_ivata, tourist_tax_collection, attivo) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -63,8 +63,10 @@ public class CanaleOtaDAO {
             ps.setString(2, canale.getNome());
             ps.setObject(3, canale.getCommissioneDefaultPct());
             ps.setBoolean(4, Boolean.TRUE.equals(canale.getTassaSoggiornoInclusa()));
-            ps.setObject(5, canale.getTouristTaxCollection());
-            ps.setBoolean(6, Boolean.TRUE.equals(canale.getAttivo()));
+            // NOT NULL DEFAULT TRUE: un null esplicito non attiva il DEFAULT, si replica qui
+            ps.setBoolean(5, !Boolean.FALSE.equals(canale.getCommissioneIvata()));
+            ps.setObject(6, canale.getTouristTaxCollection());
+            ps.setBoolean(7, Boolean.TRUE.equals(canale.getAttivo()));
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
@@ -76,11 +78,12 @@ public class CanaleOtaDAO {
         log.info("CanaleOtaDAO.update() - id={}", canale.getId());
         jdbcTemplate.update(
                 "UPDATE canale_ota SET nome = ?, commissione_default_pct = ?, " +
-                "tassa_soggiorno_inclusa = ?, tourist_tax_collection = ?, " +
+                "tassa_soggiorno_inclusa = ?, commissione_ivata = ?, tourist_tax_collection = ?, " +
                 "attivo = ?, updated_at = NOW() WHERE id = ?",
                 canale.getNome(),
                 canale.getCommissioneDefaultPct(),
                 canale.getTassaSoggiornoInclusa(),
+                !Boolean.FALSE.equals(canale.getCommissioneIvata()),
                 canale.getTouristTaxCollection(),
                 canale.getAttivo(),
                 canale.getId());
@@ -98,7 +101,7 @@ public class CanaleOtaDAO {
     public List<CanaleOta> findByAttivo(Boolean attivo) {
         log.debug("CanaleOtaDAO.findByAttivo() - attivo={}", attivo);
         String sql = "SELECT id, codice, nome, commissione_default_pct, tassa_soggiorno_inclusa, " +
-                     "tourist_tax_collection, attivo, created_at, updated_at " +
+                     "commissione_ivata, tourist_tax_collection, attivo, created_at, updated_at " +
                      "FROM canale_ota WHERE attivo = ? ORDER BY id";
         List<CanaleOta> result = jdbcTemplate.query(sql, canaleOtaRowMapper, attivo);
         log.debug("CanaleOtaDAO.findByAttivo() - trovati {} record", result.size());
