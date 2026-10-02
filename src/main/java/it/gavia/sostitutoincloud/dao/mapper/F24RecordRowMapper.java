@@ -27,6 +27,10 @@ public class F24RecordRowMapper implements RowMapper<F24Record> {
                 .periodoMese(rs.getObject("periodo_mese", Integer.class))
                 .periodoAnno(rs.getObject("periodo_anno", Integer.class))
                 .referenceYear(rs.getObject("reference_year", Integer.class))
+                .importoCredito(rs.getBigDecimal("importo_credito"))
+                .codiceTributoCreditoImposta(rs.getString("codice_tributo_credito"))
+                .annoCredito(rs.getObject("anno_credito", Integer.class))
+                .saldoNetto(rs.getBigDecimal("saldo_netto"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

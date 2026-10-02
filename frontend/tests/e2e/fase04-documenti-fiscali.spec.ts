@@ -211,8 +211,8 @@ test.describe('Fase 04 — Documenti Fiscali', () => {
 
     await expect(page.getByText('Da emettere')).toHaveCount(0);
     await expect(page.getByText(/^FT-\d{4}-\d{4}$/)).toBeVisible();
-    // Il badge in intestazione riporta il codice grezzo dello stato, non l'etichetta
-    await expect(page.getByText('doc_issued')).toBeVisible();
+    // Il badge in intestazione riporta l'etichetta dello stato (labelStatoPrenotazione)
+    await expect(page.getByText('Doc. emesso')).toBeVisible();
   });
 
   test('4.7 — Importi della ricevuta', async ({ page }) => {

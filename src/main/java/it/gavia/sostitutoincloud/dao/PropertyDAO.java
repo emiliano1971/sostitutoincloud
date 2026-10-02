@@ -202,4 +202,14 @@ public class PropertyDAO {
         log.info("PropertyDAO.delete() - id={}", id);
         return jdbcTemplate.update("DELETE FROM property WHERE id = ?", id);
     }
+
+    /**
+     * Elimina tutti gli immobili del proprietario nel tenant. Regole di contratto e codici OTA
+     * vanno in cascata; booking → property è RESTRICT (il chiamante verifica prima l'assenza).
+     */
+    public int deleteByOwnerId(Integer ownerId, Integer tenantId) {
+        int righe = jdbcTemplate.update("DELETE FROM property WHERE fk_owner_id = ? AND fk_tenant_id = ?", ownerId, tenantId);
+        log.info("PropertyDAO.deleteByOwnerId() - ownerId={} tenantId={} eliminati={}", ownerId, tenantId, righe);
+        return righe;
+    }
 }

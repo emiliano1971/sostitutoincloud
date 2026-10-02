@@ -5,6 +5,8 @@
 <!--
   Template fattura PM — placeholder {NOME_CAMPO} sostituiti da DocumentPdfService
   con String.replace(). NON è un template Thymeleaf.
+  Usato anche per la nota di credito (migration 025): {DOC_TITLE}, {TOTAL_LABEL} e
+  {RIFERIMENTO_DOCUMENTO} (vuoto per la fattura, riferimento alla fattura stornata per la NDC).
 
   NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox.
   Le zone a più colonne usano display:table/table-cell (equivalente e supportato)
@@ -113,6 +115,13 @@
     color: #666;
     font-size: 9px;
   }
+  .riferimento {
+    margin-bottom: 20px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    background: #fafafa;
+    font-size: 11px;
+  }
   .footer {
     margin-top: 40px;
     font-size: 9px;
@@ -134,11 +143,13 @@
     <div>PEC: {TENANT_PEC}</div>
   </div>
   <div class="header-right">
-    <div class="doc-title">FATTURA</div>
+    <div class="doc-title">{DOC_TITLE}</div>
     <div class="doc-number">{DOCUMENT_NUMBER}</div>
     <div class="doc-number">Data: {ISSUE_DATE}</div>
   </div>
 </div>
+
+{RIFERIMENTO_DOCUMENTO}
 
 <!-- DESTINATARIO + IMMOBILE + SOGGIORNO -->
 <div class="cols">
@@ -199,7 +210,7 @@
       </td>
     </tr>
     <tr class="total-row">
-      <td>TOTALE FATTURA</td>
+      <td>{TOTAL_LABEL}</td>
       <td class="text-right">
         {TOTAL_AMOUNT} &#8364;
       </td>

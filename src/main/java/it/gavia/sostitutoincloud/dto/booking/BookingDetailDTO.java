@@ -85,4 +85,16 @@ public class BookingDetailDTO {
 
     // Documenti fiscali associati alla prenotazione
     private List<FiscalDocumentSummaryDTO> documenti;
+
+    // Righe delle note di credito attive (importi positivi): mostrate in coda allo split,
+    // non concorrono a costi PM e netto proprietario
+    private List<it.gavia.sostitutoincloud.dto.fiscal.RigaNdcDTO> righeNdc;
+
+    // Copia di un booking stornato (migration 026)
+    private Integer fkBookingOrigineId;     // booking stornato da cui questa è stata copiata
+    private String bookingOrigineCodice;    // suo externalBookingId, per il link
+    private Integer fkBookingCopiaId;       // copia attiva di questo booking (se stornato)
+    private String bookingCopiaCodice;
+    // Ritenuta già in un F24 pagato/inviato: la NDC genererà un credito d'imposta
+    private Boolean ritenutaVersata;
 }

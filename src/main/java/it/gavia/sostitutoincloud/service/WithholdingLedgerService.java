@@ -25,6 +25,8 @@ public class WithholdingLedgerService {
 
     private static final String CODICE_RICEVUTA = "ricevuta";
     private static final String STATO_DA_VERSARE = "da_versare";
+    private static final String STATO_STORNATA = "stornata";
+    private static final String STATO_CREDITO_IMPOSTA = "credito_imposta";
 
     private final WithholdingLedgerDAO withholdingLedgerDAO;
     private final BookingService bookingService;
@@ -102,6 +104,71 @@ public class WithholdingLedgerService {
                         + " periodo " + periodoMese + "/" + periodoAnno);
 
         return saved;
+    }
+
+    // ── storno da nota di credito (migration 026) ─────────────────────────────
+
+    /** Ritenuta non ancora in un F24: stornata e collegata alla NDC. */
+    public void stornaRitenuta(Integer tenantId, Integer ledgerId, Integer ndcId) {
+        withholdingLedgerDAO.updateStorno(ledgerId, STATO_STORNATA, ndcId, false);
+        auditService.log("withholding.storno", "WithholdingLedger", ledgerId,
+                "Ritenuta stornata da nota di credito id=" + ndcId);
+    }
+
+    /**
+     * Ritenuta in un F24 non pagato: stornata e sganciata dall'F24. Il totale dell'F24 va
+     * ricalcolato dal chiamante (F24Service.ricalcolaTotale: F24Service dipende già da
+     * questo service, il contrario creerebbe un ciclo).
+     */
+    public void stornaRitenutaDaF24(Integer tenantId, Integer ledgerId, Integer ndcId) {
+        withholdingLedgerDAO.updateStorno(ledgerId, STATO_STORNATA, ndcId, true);
+        auditService.log("withholding.storno", "WithholdingLedger", ledgerId,
+                "Ritenuta stornata e rimossa dall'F24 non pagato, nota di credito id=" + ndcId);
+    }
+
+    /**
+     * Ritenuta già versata (F24 pagato o inviato): la riga originale resta 'versata' ma viene
+     * collegata alla NDC (esce da CU e liquidazioni) e si registra una riga 'credito_imposta'
+     * con ritenuta negativa, compensabile in un F24 successivo.
+     * Le colonne obbligatorie del ledger arrivano dalla riga originale; periodo e data dalla NDC.
+     */
+    public WithholdingLedger registraCredito(Integer tenantId, WithholdingLedger originale,
+                                             FiscalDocument ndc, BigDecimal importoCredito) {
+        withholdingLedgerDAO.updateStorno(originale.getId(), originale.getStato(), ndc.getId(), false);
+        WithholdingLedger credito = withholdingLedgerDAO.insert(WithholdingLedger.builder()
+                .fkTenantId(tenantId)
+                .fkOwnerId(originale.getFkOwnerId())
+                .fkBookingId(originale.getFkBookingId())
+                .fkFiscalDocumentId(ndc.getId())
+                .periodoMese(ndc.getIssueDate().getMonthValue())
+                .periodoAnno(ndc.getIssueDate().getYear())
+                .canoneLocazione(BigDecimal.ZERO)
+                .aliquotaRitenuta(originale.getAliquotaRitenuta())
+                .ritenutaAmount(importoCredito)
+                .dataEvento(ndc.getIssueDate())
+                .stato(STATO_CREDITO_IMPOSTA)
+                .fkNdcId(ndc.getId())
+                .build());
+        auditService.log("withholding.credito", "WithholdingLedger", credito.getId(),
+                "Credito d'imposta €" + importoCredito + " da nota di credito " + ndc.getDocumentNumber());
+        return credito;
+    }
+
+    /**
+     * Annullamento della NDC: crediti cancellati, ritenute stornate di nuovo 'da_versare'
+     * (senza F24: le riprende generaF24/ricalcola), ritenute versate scollegate dalla NDC.
+     */
+    public void ripristinaDaNdc(Integer ndcId) {
+        for (WithholdingLedger w : withholdingLedgerDAO.findByNdcId(ndcId)) {
+            if (STATO_CREDITO_IMPOSTA.equals(w.getStato())) {
+                withholdingLedgerDAO.deleteById(w.getId());
+            } else if (STATO_STORNATA.equals(w.getStato())) {
+                withholdingLedgerDAO.ripristinaDaNdc(w.getId(), STATO_DA_VERSARE);
+            } else {
+                withholdingLedgerDAO.ripristinaDaNdc(w.getId(), w.getStato());
+            }
+        }
+        log.info("WithholdingLedgerService.ripristinaDaNdc() - ndcId={}", ndcId);
     }
 
     /** Ritenute del periodo (tutti gli stati). */

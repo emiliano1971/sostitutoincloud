@@ -352,6 +352,33 @@ public class SettlementService {
     }
 
     /**
+     * Ricalcola i totali del settlement dalle prenotazioni rimaste collegate, con la stessa
+     * fonte di calcolaPerOwner() (canone e ritenuta dal withholding_ledger, righe da NDC
+     * escluse): net = total - withholding. Senza prenotazioni il settlement viene eliminato.
+     * Usato da NdcService quando toglie un booking stornato da un rendiconto 'calculated'.
+     */
+    public void ricalcolaTotali(Integer settlementId, Integer tenantId) {
+        Settlement settlement = settlementDAO.findById(settlementId)
+                .filter(s -> tenantId.equals(s.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Settlement non trovato: id=" + settlementId));
+        if (settlementBookingDAO.findBySettlementId(settlementId).isEmpty()) {
+            settlementDAO.deleteById(settlementId);
+            auditService.log("settlement.delete", "Settlement", settlementId,
+                    "Rendiconto " + settlement.getPeriod() + " eliminato: nessuna prenotazione rimasta");
+            log.info("SettlementService.ricalcolaTotali() - settlement={} eliminato: nessuna prenotazione rimasta",
+                    settlementId);
+            return;
+        }
+        Map<String, Object> somme = withholdingLedgerDAO.sommaPerSettlement(settlementId);
+        BigDecimal total = ((BigDecimal) somme.get("canone")).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal withholding = ((BigDecimal) somme.get("ritenuta")).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal net = total.subtract(withholding);
+        settlementDAO.updateTotali(settlementId, total, withholding, net);
+        log.info("SettlementService.ricalcolaTotali() - settlement={} nuovi totali: total={} withholding={} net={}",
+                settlementId, total, withholding, net);
+    }
+
+    /**
      * Calcola i settlement mensili per tutti gli owner con ritenute nel periodo.
      * Gli owner già liquidati (settlement 'paid') vengono saltati.
      */

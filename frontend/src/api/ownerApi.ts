@@ -1,4 +1,4 @@
-import { get, post, put, patch, getToken } from '@/lib/apiClient';
+import { get, post, put, patch, del, getToken } from '@/lib/apiClient';
 import { getConfig } from '@/config/AppConfig';
 import type { MensileDTO } from './dashboardApi';
 import type { BookingListItem } from './bookingApi';
@@ -104,6 +104,14 @@ export async function createOwner(data: OwnerCreateRequest): Promise<OwnerDetail
   return post<OwnerDetail>('/owners', data);
 }
 
+/**
+ * Elimina proprietario, immobili e regole di contratto (DELETE /api/owners/{id}, 204).
+ * 400 se ha prenotazioni, dati fiscali o un utente di accesso collegati.
+ */
+export async function eliminaProprietario(id: number): Promise<void> {
+  await del<void>(`/owners/${id}`);
+}
+
 export async function updateOwnerStatus(id: number, attivo: boolean): Promise<OwnerDetail> {
   return patch<OwnerDetail>(`/owners/${id}/status`, { attivo });
 }
@@ -143,12 +151,30 @@ export interface OwnerBulkImportResult {
   errori: OwnerBulkImportErrore[];
 }
 
-export async function importOwnersBulk(file: File): Promise<OwnerBulkImportResult> {
-  const url = `${getConfig().apiBaseUrl}/owners/import-bulk`;
+export interface OwnerImportRigaPreview {
+  numeroRiga: number;
+  cognome: string;
+  nome: string;
+  codFisc: string;
+  nomeImmobile: string;
+  citta: string;
+  stato: 'ok' | 'duplicato_proprietario' | 'duplicato_immobile' | 'errore';
+  messaggioStato?: string;
+  selezionabile: boolean;
+  selezionato: boolean;
+}
+
+export interface OwnerImportPreviewResult {
+  righe: OwnerImportRigaPreview[];
+  righeOk: number;
+  righeDuplicato: number;
+  righeErrore: number;
+}
+
+/** POST multipart verso /owners/import-bulk*: fetch diretta, apiClient invia solo JSON. */
+async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
   const token = getToken();
-  const formData = new FormData();
-  formData.append('file', file);
-  const res = await fetch(url, {
+  const res = await fetch(`${getConfig().apiBaseUrl}${path}`, {
     method: 'POST',
     headers: {
       'Accept': 'application/json',
@@ -163,4 +189,22 @@ export async function importOwnersBulk(file: File): Promise<OwnerBulkImportResul
     throw new Error(message);
   }
   return res.json();
+}
+
+/** Analizza il file senza scrivere nulla: stato di ogni riga (POST /api/owners/import-bulk/preview). */
+export async function previewImportProprietari(file: File): Promise<OwnerImportPreviewResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return postMultipart<OwnerImportPreviewResult>('/owners/import-bulk/preview', formData);
+}
+
+/**
+ * Importa le righe scelte nella preview (POST /api/owners/import-bulk): il file va
+ * ricaricato insieme ai numeri di riga. Lista vuota = tutte le righe valide.
+ */
+export async function importaProprietari(file: File, righeSelezionate: number[]): Promise<OwnerBulkImportResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  righeSelezionate.forEach(r => formData.append('righe', String(r)));
+  return postMultipart<OwnerBulkImportResult>('/owners/import-bulk', formData);
 }

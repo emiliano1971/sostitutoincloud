@@ -15,7 +15,7 @@ import { Eye, CheckCircle2, Loader2, AlertCircle, Plus, Info, X, RefreshCw, Filt
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
 import {
-  getF24List, generaF24, getF24Detail, marcaF24Pagato, ricalcolaF24, downloadF24Pdf,
+  getF24List, generaF24, getF24Detail, marcaF24Pagato, ricalcolaF24, downloadF24Pdf, applicaCrediti,
   type F24Record, type F24GenerazioneResult,
 } from '@/api/f24Api';
 
@@ -103,6 +103,9 @@ const F24List = () => {
   const [anno, setAnno] = useState<number>(new Date().getFullYear());
   const [generating, setGenerating] = useState(false);
   const [risultato, setRisultato] = useState<F24GenerazioneResult | null>(null);
+  // Crediti d'imposta da compensare nell'F24 appena generato: ledgerId → importo digitato
+  const [compensazioni, setCompensazioni] = useState<Record<number, string>>({});
+  const [applicandoCrediti, setApplicandoCrediti] = useState(false);
 
   // Dialog dettaglio
   const [dettaglio, setDettaglio] = useState<F24GenerazioneResult | null>(null);
@@ -185,7 +188,38 @@ const F24List = () => {
 
   const closeGenera = (open: boolean) => {
     setGeneraOpen(open);
-    if (!open) setRisultato(null);
+    if (!open) {
+      setRisultato(null);
+      setCompensazioni({});
+    }
+  };
+
+  const totaleCompensato = Object.values(compensazioni)
+    .reduce((s, v) => s + (parseFloat(v) || 0), 0);
+  const saldoNetto = risultato ? Math.max(0, risultato.totaleRitenute - totaleCompensato) : 0;
+
+  // L'F24 è già salvato dalla generazione: i crediti si applicano con una seconda chiamata,
+  // che sostituisce le eventuali compensazioni precedenti dello stesso F24.
+  const handleApplicaCrediti = async () => {
+    if (!risultato) return;
+    const comp = Object.entries(compensazioni)
+      .filter(([, v]) => parseFloat(v) > 0)
+      .map(([id, v]) => ({ ledgerId: parseInt(id), importoUsato: Math.round(parseFloat(v) * 100) / 100 }));
+    setApplicandoCrediti(true);
+    try {
+      const aggiornato = await applicaCrediti(risultato.f24RecordId, comp);
+      setRisultato(aggiornato);
+      setCompensazioni({});
+      toast({
+        title: comp.length > 0 ? 'Crediti compensati' : 'Compensazioni rimosse',
+        description: `Saldo da versare ${fmtEuro(aggiornato.saldoNetto ?? aggiornato.totaleRitenute)}`,
+      });
+      reload();
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setApplicandoCrediti(false);
+    }
   };
 
   return (
@@ -306,7 +340,14 @@ const F24List = () => {
                   <TableRow key={f.id}>
                     <TableCell className="font-medium">{fmtPeriodo(f.periodoMese, f.periodoAnno)}</TableCell>
                     <TableCell className="font-mono text-sm">{f.codiceTributo}</TableCell>
-                    <TableCell className="text-right font-medium">{fmtEuro(f.totalAmount)}</TableCell>
+                    <TableCell className="text-right font-medium">
+                      {fmtEuro(f.saldoNetto ?? f.totalAmount)}
+                      {(f.importoCredito ?? 0) > 0 && (
+                        <span className="block text-xs font-normal text-green-700" title="Credito d'imposta compensato">
+                          ritenute {fmtEuro(f.totalAmount)} − credito {fmtEuro(f.importoCredito ?? 0)}
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">{f.withholdingsCount}</TableCell>
                     <TableCell className="text-sm">{f.deadlineDate}</TableCell>
                     <TableCell><Badge variant="outline" className={statusColors[f.stato]}>{statusLabels[f.stato] || f.stato}</Badge></TableCell>
@@ -384,6 +425,15 @@ const F24List = () => {
                 <div className="flex justify-between"><span className="text-muted-foreground">Totale ritenute</span><span className="font-medium">{fmtEuro(risultato.totaleRitenute)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">N° ritenute</span><span className="font-medium">{risultato.numeroRitenute}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Scadenza</span><span className="font-medium">{risultato.scadenza}</span></div>
+                {(risultato.importoCredito ?? 0) > 0 && (
+                  <>
+                    <div className="flex justify-between text-green-700">
+                      <span>Credito compensato (cod. {risultato.codiceTributoCreditoImposta}, anno {risultato.annoCredito})</span>
+                      <span className="font-medium">-{fmtEuro(risultato.importoCredito ?? 0)}</span>
+                    </div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Saldo da versare</span><span className="font-medium">{fmtEuro(risultato.saldoNetto ?? risultato.totaleRitenute)}</span></div>
+                  </>
+                )}
               </div>
               <RitenuteTable
                 ritenute={risultato.ritenute}
@@ -393,6 +443,74 @@ const F24List = () => {
                   navigate(`/bookings/${bookingId}`);
                 }}
               />
+
+              {(risultato.crediti?.length ?? 0) > 0 && (
+                <div className="mt-4 border rounded-md p-3 space-y-3 bg-green-50/30 dark:bg-green-950/10">
+                  <h4 className="text-sm font-medium flex items-center gap-2 text-green-800 dark:text-green-300">
+                    Crediti d'imposta disponibili
+                    <span className="text-xs text-muted-foreground font-normal">(da note di credito)</span>
+                  </h4>
+                  {(risultato.importoCredito ?? 0) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Questo F24 ha già {fmtEuro(risultato.importoCredito ?? 0)} di crediti compensati:
+                      applicando nuovi importi la compensazione viene sostituita.
+                    </p>
+                  )}
+                  {risultato.crediti!.map(c => {
+                    const max = Math.min(c.importoCredito, risultato.totaleRitenute);
+                    return (
+                      <div key={c.ledgerId} className="flex flex-wrap items-center gap-3 text-sm">
+                        <div className="flex-1 min-w-[12rem]">
+                          <span className="font-medium">{c.ndcDocumentNumber}</span>
+                          <span className="text-xs text-muted-foreground ml-2">
+                            {c.ndcDataEmissione} — anno {c.annoRiferimento}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground w-24 text-right">
+                          max {fmtEuro(c.importoCredito)}
+                        </span>
+                        <Input
+                          type="number"
+                          placeholder="€"
+                          value={compensazioni[c.ledgerId] ?? ''}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setCompensazioni({
+                              ...compensazioni,
+                              [c.ledgerId]: val > max ? String(max) : e.target.value,
+                            });
+                          }}
+                          className="w-28 h-7 text-xs"
+                          min={0}
+                          max={max}
+                          step={0.01}
+                        />
+                      </div>
+                    );
+                  })}
+                  {totaleCompensato > 0 && (
+                    <div className="border-t pt-2 space-y-1 text-sm mt-2">
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Totale ritenute</span>
+                        <span>{fmtEuro(risultato.totaleRitenute)}</span>
+                      </div>
+                      <div className="flex justify-between text-green-700">
+                        <span>Credito compensato</span>
+                        <span>-{fmtEuro(totaleCompensato)}</span>
+                      </div>
+                      <div className="flex justify-between font-medium border-t pt-1">
+                        <span>Saldo da versare</span>
+                        <span className={saldoNetto === 0 ? 'text-green-600' : ''}>{fmtEuro(saldoNetto)}</span>
+                      </div>
+                      {totaleCompensato > risultato.totaleRitenute && (
+                        <p className="text-xs text-destructive">
+                          ⚠ Il credito supera le ritenute del periodo ({fmtEuro(risultato.totaleRitenute)}).
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -406,7 +524,19 @@ const F24List = () => {
                 </Button>
               </>
             ) : (
-              <Button onClick={() => closeGenera(false)}>Chiudi</Button>
+              <>
+                {(risultato.crediti?.length ?? 0) > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={handleApplicaCrediti}
+                    disabled={applicandoCrediti || totaleCompensato <= 0 || totaleCompensato > risultato.totaleRitenute}
+                  >
+                    {applicandoCrediti && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Applica crediti
+                  </Button>
+                )}
+                <Button onClick={() => closeGenera(false)}>Chiudi</Button>
+              </>
             )}
           </DialogFooter>
         </DialogContent>
@@ -422,6 +552,8 @@ const F24List = () => {
             </DialogTitle>
             <DialogDescription>
               {dettaglio && `${dettaglio.numeroRitenute} ritenute — ${fmtEuro(dettaglio.totaleRitenute)}`}
+              {dettaglio && (dettaglio.importoCredito ?? 0) > 0 &&
+                ` — credito compensato ${fmtEuro(dettaglio.importoCredito ?? 0)} (cod. ${dettaglio.codiceTributoCreditoImposta}) — saldo ${fmtEuro(dettaglio.saldoNetto ?? dettaglio.totaleRitenute)}`}
             </DialogDescription>
           </DialogHeader>
           {dettaglio && (
@@ -449,7 +581,7 @@ const F24List = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Conferma pagamento F24</AlertDialogTitle>
             <AlertDialogDescription>
-              {pagatoTarget && `Stai per segnare come pagato il modello F24 del periodo ${fmtPeriodo(pagatoTarget.periodoMese, pagatoTarget.periodoAnno)} per un importo di ${fmtEuro(pagatoTarget.totalAmount)}. Questa operazione non può essere annullata.`}
+              {pagatoTarget && `Stai per segnare come pagato il modello F24 del periodo ${fmtPeriodo(pagatoTarget.periodoMese, pagatoTarget.periodoAnno)} per un importo di ${fmtEuro(pagatoTarget.saldoNetto ?? pagatoTarget.totalAmount)}. Questa operazione non può essere annullata.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

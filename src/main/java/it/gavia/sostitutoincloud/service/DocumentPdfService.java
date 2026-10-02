@@ -3,6 +3,7 @@ package it.gavia.sostitutoincloud.service;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
@@ -10,6 +11,7 @@ import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
+import it.gavia.sostitutoincloud.model.FiscalDocumentRigaNdc;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.Tenant;
@@ -37,7 +39,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 
 /**
- * Generazione PDF dei documenti fiscali (fattura PM / ricevuta owner) da template HTML
+ * Generazione PDF dei documenti fiscali (fattura PM / nota di credito / ricevuta owner) da template HTML
  * con OpenHTMLToPDF. I template usano placeholder {NOME_CAMPO} sostituiti con String.replace()
  * — nessun motore di template.
  *
@@ -55,6 +57,7 @@ public class DocumentPdfService {
     // i termini di dominio sono fattura_pm/ricevuta_owner).
     private static final String CODICE_FATTURA = "fattura";
     private static final String CODICE_RICEVUTA = "ricevuta";
+    private static final String CODICE_NOTA_CREDITO = "nota_credito";
     private static final String TIPO_FATTURA_PM = "fattura_pm";
     private static final String TIPO_RICEVUTA_OWNER = "ricevuta_owner";
 
@@ -79,6 +82,7 @@ public class DocumentPdfService {
     private final TenantDAO tenantDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final VociFatturaPmService vociFatturaPmService;
+    private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
 
     public DocumentPdfService(FiscalDocumentDAO fiscalDocumentDAO,
                               BookingDAO bookingDAO,
@@ -87,8 +91,10 @@ public class DocumentPdfService {
                               PropertyDAO propertyDAO,
                               TenantDAO tenantDAO,
                               TipoDocumentoDAO tipoDocumentoDAO,
-                              VociFatturaPmService vociFatturaPmService) {
+                              VociFatturaPmService vociFatturaPmService,
+                              FiscalDocumentRigaNdcDAO rigaNdcDAO) {
         this.vociFatturaPmService = vociFatturaPmService;
+        this.rigaNdcDAO = rigaNdcDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.tenantSettingsDAO = tenantSettingsDAO;
@@ -130,8 +136,9 @@ public class DocumentPdfService {
         if (CODICE_RICEVUTA.equals(codiceTipo)) {
             tipo = TIPO_RICEVUTA_OWNER;
             templateFile = TEMPLATE_RICEVUTA;
-        } else if (CODICE_FATTURA.equals(codiceTipo)) {
-            tipo = TIPO_FATTURA_PM;
+        } else if (CODICE_FATTURA.equals(codiceTipo) || CODICE_NOTA_CREDITO.equals(codiceTipo)) {
+            // La nota di credito riusa il layout della fattura PM
+            tipo = codiceTipo.equals(CODICE_FATTURA) ? TIPO_FATTURA_PM : CODICE_NOTA_CREDITO;
             templateFile = TEMPLATE_FATTURA;
         } else {
             throw new IllegalStateException("Tipo documento non gestito per il PDF: " + codiceTipo);
@@ -148,7 +155,9 @@ public class DocumentPdfService {
         // 4. Sostituzione placeholder
         Map<String, String> campi = TIPO_RICEVUTA_OWNER.equals(tipo)
                 ? campiRicevuta(doc, booking, property, owner, tenant, settings)
-                : campiFattura(doc, booking, property, tenant);
+                : CODICE_NOTA_CREDITO.equals(tipo)
+                        ? campiNotaCredito(doc, booking, property, tenant)
+                        : campiFattura(doc, booking, property, tenant);
         for (Map.Entry<String, String> e : campi.entrySet()) {
             html = html.replace("{" + e.getKey() + "}", e.getValue());
         }
@@ -204,6 +213,43 @@ public class DocumentPdfService {
         c.put("TOTAL_IMPONIBILE", importo(doc.getImponibile()));
         c.put("TOTAL_IVA", importo(doc.getVatAmount()));
         c.put("TOTAL_AMOUNT", importo(doc.getTotalAmount()));
+        c.put("DOC_TITLE", "FATTURA");
+        c.put("TOTAL_LABEL", "TOTALE FATTURA");
+        c.put("RIFERIMENTO_DOCUMENTO", "");
+        return c;
+    }
+
+    /**
+     * Nota di credito: stesso layout della fattura, righe da fiscal_document_riga_ndc e
+     * riferimento alla fattura stornata. Importi POSITIVI (come nell'XML TD04): nel DB la
+     * NDC ha totali negativi, qui si mostra il valore assoluto con la dicitura "nota di credito".
+     */
+    private Map<String, String> campiNotaCredito(FiscalDocument doc, Booking booking,
+                                                 Property property, Tenant tenant) {
+        Map<String, String> c = campiFattura(doc, booking, property, tenant);
+        StringBuilder righe = new StringBuilder();
+        for (FiscalDocumentRigaNdc r : rigaNdcDAO.findByFiscalDocumentId(doc.getId())) {
+            BigDecimal lordo = nz(r.getImportoStornato());
+            BigDecimal imponibile = r.getImponibileStornato() != null ? r.getImponibileStornato() : lordo;
+            righe.append("<tr>")
+                    .append("<td>").append(esc(r.getDescrizione())).append("</td>")
+                    .append("<td class=\"text-right\">").append(importo(imponibile)).append("</td>")
+                    .append("<td class=\"text-right\">").append(importo(lordo.subtract(imponibile))).append("</td>")
+                    .append("<td class=\"text-right\">").append(importo(lordo)).append("</td>")
+                    .append("</tr>");
+        }
+        FiscalDocument fattura = doc.getFkDocumentoCollegatoId() != null
+                ? fiscalDocumentDAO.findById(doc.getFkDocumentoCollegatoId()).orElse(null)
+                : null;
+        c.put("RIGHE_FATTURA", righe.toString());
+        c.put("TOTAL_IMPONIBILE", importo(nz(doc.getImponibile()).abs()));
+        c.put("TOTAL_IVA", importo(nz(doc.getVatAmount()).abs()));
+        c.put("TOTAL_AMOUNT", importo(nz(doc.getTotalAmount()).abs()));
+        c.put("DOC_TITLE", "NOTA DI CREDITO");
+        c.put("TOTAL_LABEL", "TOTALE NOTA DI CREDITO");
+        c.put("RIFERIMENTO_DOCUMENTO", fattura == null ? "" :
+                "<div class=\"riferimento\">A storno della fattura <strong>" + esc(fattura.getDocumentNumber())
+                        + "</strong> del " + data(fattura.getIssueDate()) + "</div>");
         return c;
     }
 

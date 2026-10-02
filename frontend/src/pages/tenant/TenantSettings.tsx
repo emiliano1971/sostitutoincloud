@@ -220,6 +220,15 @@ const TenantSettings = () => {
                   <Input defaultValue={settings.codiceTributoF24} id="codiceTributoF24" />
                 </div>
                 <div className="space-y-2">
+                  <Label>Codice tributo credito d'imposta</Label>
+                  <Input defaultValue={settings.codiceTributoCreditoImposta ?? '6782'} id="codiceTributoCreditoImposta"
+                    maxLength={10} className="w-32" />
+                  <p className="text-xs text-muted-foreground">
+                    Codice tributo per i crediti da note di credito nel modello F24.
+                    Default: 6782 (recupero eccedenze locazioni brevi)
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label>Finestra Emissione Documenti (gg)</Label>
                   <Input type="number" defaultValue={settings.documentWindowDays}
                     id="documentWindowDays" />
@@ -350,6 +359,7 @@ const TenantSettings = () => {
                     withholdingRatePrimary: parseFloat((document.getElementById('withholdingRatePrimary') as HTMLInputElement).value),
                     withholdingRateSecondary: parseFloat((document.getElementById('withholdingRateSecondary') as HTMLInputElement).value),
                     codiceTributoF24: (document.getElementById('codiceTributoF24') as HTMLInputElement).value,
+                    codiceTributoCreditoImposta: (document.getElementById('codiceTributoCreditoImposta') as HTMLInputElement).value.trim() || undefined,
                     documentWindowDays: parseInt((document.getElementById('documentWindowDays') as HTMLInputElement).value),
                     cedolareSeccaEnabled: (document.getElementById('cedolareSeccaEnabled') as HTMLButtonElement).getAttribute('data-state') === 'checked',
                     bolloImporto: parseFloat((document.getElementById('bolloImporto') as HTMLInputElement).value),

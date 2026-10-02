@@ -3,6 +3,7 @@ package it.gavia.sostitutoincloud.service;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
 import it.gavia.sostitutoincloud.dao.CuRecordDAO;
 import it.gavia.sostitutoincloud.dao.F24RecordDAO;
 import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
@@ -19,7 +20,12 @@ import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentRowDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.CanaleOta;
+import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
+import it.gavia.sostitutoincloud.model.F24Record;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
+import it.gavia.sostitutoincloud.model.WithholdingLedger;
+import it.gavia.sostitutoincloud.model.FiscalDocumentRigaNdc;
+import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.SdiEsito;
@@ -39,6 +45,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -50,6 +57,9 @@ public class FiscalDocumentService {
 
     /** Codice della lookup tipo_documento per la ricevuta owner (il dominio la chiama ricevuta_owner). */
     private static final String CODICE_RICEVUTA = "ricevuta";
+    private static final String CODICE_FATTURA = "fattura";
+    private static final String CODICE_NOTA_CREDITO = "nota_credito";
+    private static final String STATO_ANNULLATA = "annullata";
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final BookingDAO bookingDAO;
@@ -66,6 +76,7 @@ public class FiscalDocumentService {
     private final SettlementBookingDAO settlementBookingDAO;
     private final SettlementDAO settlementDAO;
     private final VociFatturaPmService vociFatturaPmService;
+    private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
 
     public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
                                   BookingDAO bookingDAO,
@@ -81,8 +92,10 @@ public class FiscalDocumentService {
                                   CuRecordDAO cuRecordDAO,
                                   SettlementBookingDAO settlementBookingDAO,
                                   SettlementDAO settlementDAO,
-                                  VociFatturaPmService vociFatturaPmService) {
+                                  VociFatturaPmService vociFatturaPmService,
+                                  FiscalDocumentRigaNdcDAO rigaNdcDAO) {
         this.vociFatturaPmService = vociFatturaPmService;
+        this.rigaNdcDAO = rigaNdcDAO;
         this.withholdingLedgerDAO = withholdingLedgerDAO;
         this.f24RecordDAO = f24RecordDAO;
         this.cuRecordDAO = cuRecordDAO;
@@ -139,7 +152,21 @@ public class FiscalDocumentService {
     private List<DocumentRowDTO> buildRighe(FiscalDocument doc, Booking booking, TipoDocumento tipo) {
         if (tipo == null || booking == null) return Collections.emptyList();
         List<DocumentRowDTO> righe = new ArrayList<>();
-        if (Boolean.TRUE.equals(tipo.getRichiedeIva())) {
+        if (CODICE_NOTA_CREDITO.equals(tipo.getCodice())) {
+            // Nota di credito: righe da fiscal_document_riga_ndc, con segno negativo come i
+            // totali del documento (nel DB le righe sono positive). Annullata → righe cancellate.
+            for (FiscalDocumentRigaNdc r : rigaNdcDAO.findByFiscalDocumentId(doc.getId())) {
+                BigDecimal lordo = r.getImportoStornato() != null ? r.getImportoStornato() : BigDecimal.ZERO;
+                BigDecimal netto = r.getImponibileStornato() != null ? r.getImponibileStornato() : lordo;
+                righe.add(DocumentRowDTO.builder()
+                        .descrizione(r.getDescrizione())
+                        .importoNetto(netto.negate())
+                        .aliquotaIva(r.getAliquotaIva())
+                        .importoIva(lordo.subtract(netto).negate())
+                        .importoLordo(lordo.negate())
+                        .build());
+            }
+        } else if (Boolean.TRUE.equals(tipo.getRichiedeIva())) {
             // Gli importi dei servizi sono GIÀ LORDI (IVA inclusa): l'IVA va scorporata dal
             // lordo, non aggiunta sopra — stessa regola di DocumentGenerationService.
             // L'aliquota è quella memorizzata sul documento (0 in regime forfettario),
@@ -225,9 +252,33 @@ public class FiscalDocumentService {
 
     public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
                                                   Integer ownerId, Integer page, Integer size) {
+        return findByTenantId(tenantId, statoFilter, q, ownerId, null, page, size);
+    }
+
+    /**
+     * Come sopra, con il filtro rapido sullo stato fiscale delle ricevute owner
+     * (filtroFiscale: da_liquidare | f24_non_pagato | senza_cu). Con il filtro si vedono solo
+     * ricevute attive: quelle annullate da una nota di credito non vanno né liquidate né
+     * certificate. Il filtro precede la paginazione.
+     */
+    public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
+                                                  Integer ownerId, String filtroFiscale,
+                                                  Integer page, Integer size) {
         LookupMaps lookup = buildLookupMaps(tenantId);
+        java.util.function.Predicate<FiscalDocument> filtroRicevute = filtroFiscale(tenantId, filtroFiscale, lookup);
 
         List<FiscalDocument> docs = fiscalDocumentDAO.findByTenantId(tenantId);
+        // Fatture con una NDC attiva collegata: NDC (nota_credito) non annullate → documento collegato
+        Set<Integer> fattureStornate = docs.stream()
+                .filter(d -> d.getFkDocumentoCollegatoId() != null)
+                .filter(d -> {
+                    TipoDocumento t = lookup.tipiById().get(d.getFkTipoDocumentoId());
+                    StatoDocumento st = lookup.statiById().get(d.getFkStatoDocumentoId());
+                    return t != null && CODICE_NOTA_CREDITO.equals(t.getCodice())
+                            && (st == null || !STATO_ANNULLATA.equals(st.getCodice()));
+                })
+                .map(FiscalDocument::getFkDocumentoCollegatoId)
+                .collect(Collectors.toSet());
         List<Booking> bookings = bookingDAO.findByTenantId(tenantId);
         List<Property> properties = propertyDAO.findByTenantId(tenantId);
         List<CanaleOta> canali = canaleOtaDAO.findAll();
@@ -274,6 +325,7 @@ public class FiscalDocumentService {
                     // Filtro diretto sul campo denormalizzato fk_owner_id del documento.
                     return ownerId.equals(d.getFkOwnerId());
                 })
+                .filter(filtroRicevute)
                 .skip((long) pageNum * pageSize)
                 .limit(pageSize)
                 .map(d -> {
@@ -315,6 +367,7 @@ public class FiscalDocumentService {
                             .createdAt(d.getCreatedAt())
                             .settlementId(settlementId)
                             .settlementStato(settlement != null ? settlement.getStato() : null)
+                            .stornata(fattureStornate.contains(d.getId()))
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -358,6 +411,114 @@ public class FiscalDocumentService {
         log.debug("FiscalDocumentService.isRicevutaDellOwner() - ownerId={} documentId={} esito={}",
                 ownerId, documentId, mia);
         return mia;
+    }
+
+    /** Filtro rapido sullo stato fiscale delle ricevute; null/blank = nessun filtro. */
+    private java.util.function.Predicate<FiscalDocument> filtroFiscale(Integer tenantId, String filtro,
+                                                                       LookupMaps lookup) {
+        if (filtro == null || filtro.isBlank()) {
+            return d -> true;
+        }
+        if (!Set.of("da_liquidare", "f24_non_pagato", "senza_cu").contains(filtro)) {
+            throw new IllegalArgumentException("filtroFiscale non valido: " + filtro);
+        }
+        // Ritenuta per documento (una per ricevuta, uq_withholding_per_document)
+        Map<Integer, WithholdingLedger> ritenute = withholdingLedgerDAO.findByTenantId(tenantId).stream()
+                .filter(w -> w.getFkLedgerOrigineId() == null)
+                .collect(Collectors.toMap(WithholdingLedger::getFkFiscalDocumentId, w -> w, (a, b) -> a));
+        Map<Integer, Integer> settlementByBooking = settlementBookingDAO.findSettlementIdByBookingIdForTenant(tenantId);
+        Map<Integer, String> statoF24 = f24RecordDAO.findByTenant(tenantId).stream()
+                .collect(Collectors.toMap(F24Record::getId, F24Record::getStato));
+        Set<String> cuOwnerAnno = cuRecordDAO.findByTenantId(tenantId).stream()
+                .map(c -> c.getFkOwnerId() + "|" + c.getTaxYear())
+                .collect(Collectors.toSet());
+
+        return d -> {
+            TipoDocumento tipo = lookup.tipiById().get(d.getFkTipoDocumentoId());
+            StatoDocumento stato = lookup.statiById().get(d.getFkStatoDocumentoId());
+            if (tipo == null || !CODICE_RICEVUTA.equals(tipo.getCodice())
+                    || (stato != null && STATO_ANNULLATA.equals(stato.getCodice()))) {
+                return false;
+            }
+            WithholdingLedger w = ritenute.get(d.getId());
+            if (w != null && w.getFkNdcId() != null) {
+                return false;   // ritenuta stornata da nota di credito
+            }
+            return switch (filtro) {
+                case "da_liquidare" -> d.getFkBookingId() == null || !settlementByBooking.containsKey(d.getFkBookingId());
+                case "f24_non_pagato" -> w == null || w.getFkF24RecordId() == null
+                        || !"paid".equals(statoF24.get(w.getFkF24RecordId()));
+                default -> d.getIssueDate() == null
+                        || !cuOwnerAnno.contains(d.getFkOwnerId() + "|" + d.getIssueDate().getYear());
+            };
+        };
+    }
+
+    private static final String[] MESI_BREVI =
+            {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"};
+
+    /**
+     * Stato fiscale di una ricevuta owner: ritenuta/F24, liquidazione, CU dell'anno.
+     *
+     * @throws NoSuchElementException documento inesistente, di altro tenant o non ricevuta (404)
+     */
+    public StatoFiscaleRicevutaDTO getStatoFiscale(Integer tenantId, Integer documentId) {
+        FiscalDocument doc = fiscalDocumentDAO.findById(documentId)
+                .filter(d -> tenantId.equals(d.getFkTenantId()))
+                .orElseThrow(() -> new java.util.NoSuchElementException("Documento non trovato: id=" + documentId));
+        String tipo = tipoDocumentoDAO.findById(doc.getFkTipoDocumentoId()).map(TipoDocumento::getCodice).orElse(null);
+        if (!CODICE_RICEVUTA.equals(tipo)) {
+            throw new java.util.NoSuchElementException("Il documento id=" + documentId + " non è una ricevuta owner");
+        }
+
+        StatoFiscaleRicevutaDTO.StatoFiscaleRicevutaDTOBuilder dto = StatoFiscaleRicevutaDTO.builder()
+                .documentId(doc.getId())
+                .documentNumber(doc.getDocumentNumber())
+                .statoDocumento(statoDocumentoDAO.findById(doc.getFkStatoDocumentoId())
+                        .map(StatoDocumento::getCodice).orElse(null))
+                .proprietarioNome(doc.getFkOwnerId() != null
+                        ? ownerProfileDAO.findById(doc.getFkOwnerId()).map(this::ownerDisplayName).orElse(null) : null)
+                .canoneLocazione(primoNonNullo(doc.getCanoneLocazione(), doc.getImponibile(), doc.getTotalAmount()))
+                .ritenutaAmount(doc.getRitenutaAmount());
+
+        // Ritenuta e F24 (riga del registro collegata al documento)
+        withholdingLedgerDAO.findByFiscalDocumentId(doc.getId()).ifPresent(w -> {
+            dto.ritenutaStato(w.getStato()).aliquotaRitenuta(w.getAliquotaRitenuta());
+            if (w.getFkF24RecordId() != null) {
+                f24RecordDAO.findById(w.getFkF24RecordId()).ifPresent(f -> dto
+                        .f24Id(f.getId())
+                        .f24Stato(f.getStato())
+                        .f24Mese(f.getPeriodoMese())
+                        .f24Anno(f.getPeriodoAnno())
+                        .f24Periodo(String.format("%02d/%d", f.getPeriodoMese(), f.getPeriodoAnno())));
+            }
+        });
+
+        // Liquidazione della prenotazione
+        if (doc.getFkBookingId() != null) {
+            settlementBookingDAO.findSettlementIdByBookingId(doc.getFkBookingId())
+                    .flatMap(settlementDAO::findById)
+                    .ifPresent(s -> dto
+                            .liquidazioneId(s.getId())
+                            .liquidazioneStato(s.getStato())
+                            .liquidazionePeriodo(periodoBreve(s.getPeriod())));
+        }
+
+        // CU del proprietario per l'anno della ricevuta
+        if (doc.getFkOwnerId() != null && doc.getIssueDate() != null) {
+            int anno = doc.getIssueDate().getYear();
+            cuRecordDAO.findByTenantOwnerYear(tenantId, doc.getFkOwnerId(), anno)
+                    .ifPresent(cu -> dto.cuId(cu.getId()).cuStato(cu.getStato()).cuAnno(anno));
+        }
+        log.debug("FiscalDocumentService.getStatoFiscale() - tenantId={} documentId={}", tenantId, documentId);
+        return dto.build();
+    }
+
+    /** "2026-09" → "Set 2026" */
+    private String periodoBreve(String period) {
+        if (period == null || !period.matches("\\d{4}-\\d{2}")) return period;
+        int mese = Integer.parseInt(period.substring(5, 7));
+        return MESI_BREVI[mese - 1] + " " + period.substring(0, 4);
     }
 
     public Optional<DocumentDetailDTO> findById(Integer tenantId, Integer documentId) {
@@ -434,6 +595,7 @@ public class FiscalDocumentService {
         // Liquidazione della prenotazione: stessa logica di BookingService, valorizzata per
         // qualsiasi tipo di documento (la card è mostrata solo sulla ricevuta owner).
         popolaSettlement(detail, doc);
+        popolaNoteCredito(detail, doc, tipo, lookup);
 
         // F24 e CU riguardano la ritenuta, quindi solo la ricevuta owner.
         if (tipo != null && !Boolean.TRUE.equals(tipo.getRichiedeIva())) {
@@ -445,6 +607,50 @@ public class FiscalDocumentService {
 
         log.info("FiscalDocumentService.findById() - tenantId={}, documentId={}", tenantId, documentId);
         return Optional.of(detail);
+    }
+
+    /**
+     * Collegamenti delle note di credito:
+     * - sulla NDC il numero della fattura stornata;
+     * - sulla fattura le NDC non annullate collegate e l'esito dello storno
+     *   ('totale' se la somma delle NDC pareggia il totale fattura, altrimenti 'parziale').
+     */
+    private void popolaNoteCredito(DocumentDetailDTO detail, FiscalDocument doc, TipoDocumento tipo, LookupMaps lookup) {
+        if (tipo == null) return;
+        if (doc.getFkDocumentoCollegatoId() != null) {
+            fiscalDocumentDAO.findById(doc.getFkDocumentoCollegatoId())
+                    .ifPresent(c -> detail.setDocumentoCollegatoNumber(c.getDocumentNumber()));
+        }
+        if (!CODICE_FATTURA.equals(tipo.getCodice()) || doc.getFkBookingId() == null) return;
+
+        List<FiscalDocumentSummaryDTO> ndc = fiscalDocumentDAO.findByBookingId(doc.getFkBookingId()).stream()
+                .filter(d -> doc.getId().equals(d.getFkDocumentoCollegatoId()))
+                .filter(d -> {
+                    TipoDocumento t = lookup.tipiById().get(d.getFkTipoDocumentoId());
+                    return t != null && CODICE_NOTA_CREDITO.equals(t.getCodice());
+                })
+                .map(d -> FiscalDocumentSummaryDTO.builder()
+                        .id(d.getId())
+                        .documentNumber(d.getDocumentNumber())
+                        .tipoDocumento(CODICE_NOTA_CREDITO)
+                        .statoDocumento(Optional.ofNullable(lookup.statiById().get(d.getFkStatoDocumentoId()))
+                                .map(StatoDocumento::getCodice).orElse(null))
+                        .dataEmissione(d.getIssueDate())
+                        .importoTotale(d.getTotalAmount())
+                        .imponibile(d.getImponibile())
+                        .aliquotaIva(d.getAliquotaIva())
+                        .fkDocumentoCollegatoId(d.getFkDocumentoCollegatoId())
+                        .build())
+                .toList();
+        detail.setNoteCredito(ndc);
+        BigDecimal stornato = ndc.stream()
+                .filter(n -> !STATO_ANNULLATA.equals(n.getStatoDocumento()))
+                .map(n -> n.getImportoTotale() != null ? n.getImportoTotale().abs() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (stornato.signum() > 0) {
+            BigDecimal totale = doc.getTotalAmount() != null ? doc.getTotalAmount() : BigDecimal.ZERO;
+            detail.setStatoStorno(stornato.compareTo(totale) >= 0 ? "totale" : "parziale");
+        }
     }
 
     /**

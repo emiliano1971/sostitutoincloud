@@ -124,7 +124,7 @@ const PropertyDetail = () => {
   };
 
   const aliquotaPrimaria = settings?.withholdingRatePrimary ?? 21;
-  const aliquotaSecondaria = settings?.withholdingRateSecondary ?? 26;
+  const aliquotaSecondaria = settings?.withholdingRateSecondary ?? 21;
 
   // Scrittura effettiva: eseguita solo dopo la conferma nel dialog.
   const applyPrimoImmobile = async (value: boolean) => {

@@ -25,6 +25,8 @@ public class Booking {
     // Regime fiscale del proprietario al momento della prenotazione (lookup regime_fiscale
     // con metadata='REGIME_FISCALE'): fotografato qui perché l'owner può cambiarlo nel tempo.
     private Integer fkRegimeFiscaleId;
+    /** Booking 'stornata' da cui questa prenotazione è stata copiata (migration 026). */
+    private Integer fkBookingOrigineId;
     private String externalBookingId;
     private String guestName;
     private String guestTaxCode;

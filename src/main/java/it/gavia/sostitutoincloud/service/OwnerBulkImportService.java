@@ -7,7 +7,9 @@ import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.TipoImmobileDAO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportErrore;
+import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportPreviewResult;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportResult;
+import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportRigaPreview;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.PropertyContractRule;
@@ -29,7 +31,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -41,6 +49,10 @@ import java.util.Set;
  * - immobile per nome + proprietario: se esiste la riga viene saltata.
  * Ogni riga gira in una transazione propria: un errore annulla solo quella riga
  * (niente immobili creati senza le loro regole) e l'import prosegue.
+ * Stesso CF con nome/cognome diversi (dal proprietario a DB o da una riga precedente del
+ * file) è un errore della riga: l'import non sovrascrive mai i dati del proprietario.
+ *
+ * preview() fa le stesse verifiche senza scrivere nulla; importa() riceve le righe scelte.
  */
 @Service
 @Log4j2
@@ -114,16 +126,110 @@ public class OwnerBulkImportService {
     private record EsitoRiga(boolean proprietarioCreato, boolean immobileCreato) {
     }
 
+    /** Riga non vuota del foglio con il suo numero Excel (1-based). */
+    private record RigaFile(int numeroRiga, String[] valori) {
+    }
+
+    /** Prima riga del file (valida) che ha introdotto un CF non presente a DB. */
+    private record ProprietarioNelFile(int numeroRiga, String cognome, String nome) {
+    }
+
+    // ── preview ───────────────────────────────────────────────────────────────
+
+    /**
+     * Analizza il file senza scrivere a DB: per ogni riga lo stato che avrà all'import.
+     * Simula anche gli effetti delle righe precedenti del file (proprietario creato da una
+     * riga sopra, stesso immobile ripetuto).
+     *
+     * @throws IllegalArgumentException file vuoto, non Excel o senza riga di intestazione
+     * @throws IOException              errore di lettura del file
+     */
+    public OwnerBulkImportPreviewResult preview(Integer tenantId, MultipartFile file) throws IOException {
+        log.info("OwnerBulkImportService.preview() - tenant={} file={}", tenantId, file != null ? file.getOriginalFilename() : null);
+        OwnerBulkImportPreviewResult result = new OwnerBulkImportPreviewResult();
+        Map<String, Optional<OwnerProfile>> ownersDb = new HashMap<>();
+        Map<String, ProprietarioNelFile> ownersFile = new HashMap<>();
+        Set<String> immobiliFile = new HashSet<>();
+
+        for (RigaFile rf : leggiFile(file)) {
+            String[] v = rf.valori();
+            OwnerBulkImportRigaPreview.OwnerBulkImportRigaPreviewBuilder p = OwnerBulkImportRigaPreview.builder()
+                    .numeroRiga(rf.numeroRiga())
+                    .cognome(v[COL_COGNOME])
+                    .nome(v[COL_NOME])
+                    .codFisc(v[COL_CF].toUpperCase(Locale.ROOT))
+                    .nomeImmobile(v[COL_NOME_IMMOBILE])
+                    .citta(v[COL_CITTA]);
+            String stato;
+            String messaggio;
+            try {
+                RigaImport riga = parseRiga(v);
+                String cf = riga.codiceFiscale();
+                String chiaveImmobile = cf + "|" + normalizzaNome(riga.nomeImmobile());
+                OwnerProfile ownerDb = ownersDb
+                        .computeIfAbsent(cf, k -> ownerProfileDAO.findByTaxCodeAndTenant(k, tenantId))
+                        .orElse(null);
+                ProprietarioNelFile ownerFile = ownersFile.get(cf);
+
+                if (ownerDb != null) {
+                    verificaCoerenza(riga, ownerDb.getLastName(), ownerDb.getFirstName(), "proprietario già registrato");
+                    boolean giaADb = propertyDAO.findByNameAndOwner(riga.nomeImmobile(), ownerDb.getId(), tenantId).isPresent();
+                    if (giaADb || immobiliFile.contains(chiaveImmobile)) {
+                        stato = "duplicato_immobile";
+                        messaggio = giaADb
+                                ? "Immobile già presente per questo proprietario"
+                                : "Immobile ripetuto nel file per lo stesso proprietario";
+                    } else {
+                        stato = "ok";
+                        messaggio = "Proprietario esistente — verrà associato";
+                    }
+                } else if (ownerFile != null) {
+                    verificaCoerenza(riga, ownerFile.cognome(), ownerFile.nome(), "riga " + ownerFile.numeroRiga());
+                    if (immobiliFile.contains(chiaveImmobile)) {
+                        stato = "duplicato_immobile";
+                        messaggio = "Immobile ripetuto nel file per lo stesso proprietario";
+                    } else {
+                        stato = "ok";
+                        messaggio = "Stesso proprietario della riga " + ownerFile.numeroRiga() + " — verrà associato";
+                    }
+                } else {
+                    ownersFile.put(cf, new ProprietarioNelFile(rf.numeroRiga(), riga.cognome(), riga.nome()));
+                    stato = "ok";
+                    messaggio = "Nuovo proprietario";
+                }
+                if ("ok".equals(stato)) {
+                    immobiliFile.add(chiaveImmobile);
+                }
+            } catch (IllegalArgumentException e) {
+                stato = "errore";
+                messaggio = e.getMessage();
+            }
+            boolean ok = "ok".equals(stato);
+            result.getRighe().add(p.stato(stato).messaggioStato(messaggio).selezionabile(ok).selezionato(ok).build());
+            switch (stato) {
+                case "ok" -> result.setRigheOk(result.getRigheOk() + 1);
+                case "errore" -> result.setRigheErrore(result.getRigheErrore() + 1);
+                default -> result.setRigheDuplicato(result.getRigheDuplicato() + 1);
+            }
+        }
+        log.info("OwnerBulkImportService.preview() - tenant={} righe={} ok={} duplicati={} errori={}",
+                tenantId, result.getRighe().size(), result.getRigheOk(), result.getRigheDuplicato(), result.getRigheErrore());
+        return result;
+    }
+
     /**
      * @throws IllegalArgumentException file vuoto, non Excel o senza riga di intestazione
      * @throws IOException              errore di lettura del file
      */
-    public OwnerBulkImportResult importa(Integer tenantId, Integer utenteId, MultipartFile file) throws IOException {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("File mancante o vuoto");
-        }
-        log.info("OwnerBulkImportService.importa() - tenant={} utente={} file={} ({} byte)",
-                tenantId, utenteId, file.getOriginalFilename(), file.getSize());
+    /**
+     * @param righeSelezionate numeri di riga Excel da importare; null o vuoto = tutte le righe
+     */
+    public OwnerBulkImportResult importa(Integer tenantId, Integer utenteId, MultipartFile file,
+                                         Set<Integer> righeSelezionate) throws IOException {
+        boolean tutte = righeSelezionate == null || righeSelezionate.isEmpty();
+        log.info("OwnerBulkImportService.importa() - tenant={} utente={} file={} righe={}",
+                tenantId, utenteId, file != null ? file.getOriginalFilename() : null,
+                tutte ? "tutte" : righeSelezionate);
 
         OwnerBulkImportResult result = new OwnerBulkImportResult();
         Integer canaleOtaDefaultId = tenantSettingsService.getCanaleOtaDefaultId(tenantId);
@@ -132,60 +238,45 @@ public class OwnerBulkImportService {
         }
         boolean warnOtaEmesso = false;
 
-        try (InputStream is = file.getInputStream(); Workbook wb = apriWorkbook(is)) {
-            Sheet sheet = wb.getSheet("Importazione");
-            if (sheet == null) {
-                sheet = wb.getSheetAt(0);
+        for (RigaFile rf : leggiFile(file)) {
+            int numeroRiga = rf.numeroRiga();
+            if (!tutte && !righeSelezionate.contains(numeroRiga)) {
+                continue;
             }
-            // Uno per lettura: DataFormatter non è thread-safe e il service è un singleton
-            DataFormatter fmt = new DataFormatter();
+            String[] valori = rf.valori();
+            String descrizione = descrizioneRiga(valori);
+            result.setRigheProcessate(result.getRigheProcessate() + 1);
 
-            int rigaIntestazione = trovaRigaIntestazione(sheet, fmt);
-            if (rigaIntestazione < 0) {
-                throw new IllegalArgumentException(
-                        "Intestazione non trovata: la prima colonna deve contenere \"Cognome Proprietario\"");
+            RigaImport riga;
+            try {
+                riga = parseRiga(valori);
+            } catch (IllegalArgumentException e) {
+                aggiungiErrore(result, numeroRiga, descrizione, e.getMessage());
+                continue;
             }
 
-            for (int r = rigaIntestazione + 1; r <= sheet.getLastRowNum(); r++) {
-                String[] valori = leggiRiga(sheet.getRow(r), fmt);
-                if (rigaVuota(valori)) {
-                    continue;
-                }
-                int numeroRiga = r + 1;
-                String descrizione = descrizioneRiga(valori);
-                result.setRigheProcessate(result.getRigheProcessate() + 1);
+            if (riga.commissioneOtaPct() != null && canaleOtaDefaultId == null && !warnOtaEmesso) {
+                log.warn("OwnerBulkImportService - Canale OTA default non configurato per tenant {}: "
+                        + "le regole commissione OTA non vengono create", tenantId);
+                warnOtaEmesso = true;
+            }
 
-                RigaImport riga;
-                try {
-                    riga = parseRiga(valori);
-                } catch (IllegalArgumentException e) {
-                    aggiungiErrore(result, numeroRiga, descrizione, e.getMessage());
-                    continue;
+            final Integer canaleOta = canaleOtaDefaultId;
+            try {
+                EsitoRiga esito = transactionTemplate.execute(status -> importaRiga(tenantId, utenteId, riga, canaleOta));
+                if (esito.proprietarioCreato()) {
+                    result.setProprietariCreati(result.getProprietariCreati() + 1);
+                } else {
+                    result.setProprietariEsistenti(result.getProprietariEsistenti() + 1);
                 }
-
-                if (riga.commissioneOtaPct() != null && canaleOtaDefaultId == null && !warnOtaEmesso) {
-                    log.warn("OwnerBulkImportService - Canale OTA default non configurato per tenant {}: "
-                            + "le regole commissione OTA non vengono create", tenantId);
-                    warnOtaEmesso = true;
+                if (esito.immobileCreato()) {
+                    result.setImmobiliCreati(result.getImmobiliCreati() + 1);
+                } else {
+                    result.setImmobiliSaltati(result.getImmobiliSaltati() + 1);
                 }
-
-                final Integer canaleOta = canaleOtaDefaultId;
-                try {
-                    EsitoRiga esito = transactionTemplate.execute(status -> importaRiga(tenantId, utenteId, riga, canaleOta));
-                    if (esito.proprietarioCreato()) {
-                        result.setProprietariCreati(result.getProprietariCreati() + 1);
-                    } else {
-                        result.setProprietariEsistenti(result.getProprietariEsistenti() + 1);
-                    }
-                    if (esito.immobileCreato()) {
-                        result.setImmobiliCreati(result.getImmobiliCreati() + 1);
-                    } else {
-                        result.setImmobiliSaltati(result.getImmobiliSaltati() + 1);
-                    }
-                } catch (RuntimeException e) {
-                    log.warn("OwnerBulkImportService - riga {} annullata: {}", numeroRiga, e.getMessage());
-                    aggiungiErrore(result, numeroRiga, descrizione, messaggioErrore(e));
-                }
+            } catch (RuntimeException e) {
+                log.warn("OwnerBulkImportService - riga {} annullata: {}", numeroRiga, e.getMessage());
+                aggiungiErrore(result, numeroRiga, descrizione, messaggioErrore(e));
             }
         }
 
@@ -220,6 +311,8 @@ public class OwnerBulkImportService {
             auditService.log("owner.create", "OwnerProfile", owner.getId(),
                     "Creato proprietario " + owner.getFirstName() + " " + owner.getLastName() + " (import massivo)");
             proprietarioCreato = true;
+        } else {
+            verificaCoerenza(riga, owner.getLastName(), owner.getFirstName(), "proprietario già registrato");
         }
 
         if (propertyDAO.findByNameAndOwner(riga.nomeImmobile(), owner.getId(), tenantId).isPresent()) {
@@ -403,6 +496,55 @@ public class OwnerBulkImportService {
         } catch (Exception e) {
             throw new IllegalArgumentException("Il file non è un Excel valido (.xlsx o .xls)");
         }
+    }
+
+    /** Righe non vuote dopo l'intestazione, con il numero di riga Excel. */
+    private List<RigaFile> leggiFile(MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File mancante o vuoto");
+        }
+        List<RigaFile> righe = new ArrayList<>();
+        try (InputStream is = file.getInputStream(); Workbook wb = apriWorkbook(is)) {
+            Sheet sheet = wb.getSheet("Importazione");
+            if (sheet == null) {
+                sheet = wb.getSheetAt(0);
+            }
+            // Uno per lettura: DataFormatter non è thread-safe e il service è un singleton
+            DataFormatter fmt = new DataFormatter();
+            int rigaIntestazione = trovaRigaIntestazione(sheet, fmt);
+            if (rigaIntestazione < 0) {
+                throw new IllegalArgumentException(
+                        "Intestazione non trovata: la prima colonna deve contenere \"Cognome Proprietario\"");
+            }
+            for (int r = rigaIntestazione + 1; r <= sheet.getLastRowNum(); r++) {
+                String[] valori = leggiRiga(sheet.getRow(r), fmt);
+                if (!rigaVuota(valori)) {
+                    righe.add(new RigaFile(r + 1, valori));
+                }
+            }
+        }
+        return righe;
+    }
+
+    /**
+     * Stesso CF, nome o cognome diversi → errore (confronto senza maiuscole, accenti e spazi
+     * doppi). Proprietari a DB senza nome/cognome (società con ragione sociale) non si confrontano.
+     */
+    private void verificaCoerenza(RigaImport riga, String cognomeAtteso, String nomeAtteso, String fonte) {
+        if (cognomeAtteso == null && nomeAtteso == null) {
+            return;
+        }
+        boolean coerente = normalizzaNome(riga.cognome()).equals(normalizzaNome(cognomeAtteso))
+                && normalizzaNome(riga.nome()).equals(normalizzaNome(nomeAtteso));
+        if (!coerente) {
+            throw new IllegalArgumentException("Codice fiscale " + riga.codiceFiscale() + " già associato a "
+                    + ((cognomeAtteso != null ? cognomeAtteso : "") + " " + (nomeAtteso != null ? nomeAtteso : "")).trim()
+                    + " (" + fonte + "): nome o cognome diversi");
+        }
+    }
+
+    private String normalizzaNome(String s) {
+        return s == null ? "" : senzaAccenti(s).trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private int trovaRigaIntestazione(Sheet sheet, DataFormatter fmt) {

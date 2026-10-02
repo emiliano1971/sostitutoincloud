@@ -5,6 +5,7 @@ import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
+import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
 import it.gavia.sostitutoincloud.service.DocumentGenerationService;
 import it.gavia.sostitutoincloud.service.DocumentPdfService;
 import it.gavia.sostitutoincloud.service.FiscalDocumentService;
@@ -45,10 +46,28 @@ public class DocumentController {
             @RequestParam(required = false) String stato,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) Integer ownerId,
+            @RequestParam(required = false) String filtroFiscale,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size) {
+        // filtroFiscale (da_liquidare | f24_non_pagato | senza_cu): solo ricevute owner attive;
+        // valore non valido → 400 via GlobalExceptionHandler
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        return ResponseEntity.ok(fiscalDocumentService.findByTenantId(tenantId, stato, q, ownerId, page, size));
+        return ResponseEntity.ok(fiscalDocumentService.findByTenantId(
+                tenantId, stato, q, ownerId, filtroFiscale, page, size));
+    }
+
+    /** Stato fiscale di una ricevuta owner: ritenuta/F24, liquidazione, CU. 404 se non è una ricevuta. */
+    @GetMapping("/{id}/stato-fiscale")
+    public ResponseEntity<?> statoFiscale(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.debug("DocumentController.statoFiscale() - tenantId={} documentId={}", tenantId, id);
+        try {
+            StatoFiscaleRicevutaDTO dto = fiscalDocumentService.getStatoFiscale(tenantId, id);
+            return ResponseEntity.ok(dto);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
     }
 
     @GetMapping("/{id}")

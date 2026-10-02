@@ -53,6 +53,9 @@ public class TenantSettings {
     // Import massivo proprietari: canale per le regole commissione_ota (null = nessuno)
     private Integer fkCanaleOtaDefaultId;
 
+    // Codice tributo dei crediti d'imposta da NDC nel modello F24 (migration 027, default 6782)
+    private String codiceTributoCreditoImposta;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

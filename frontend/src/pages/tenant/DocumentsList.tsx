@@ -4,13 +4,46 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2 } from 'lucide-react';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getDocuments, elaboraRisposteSdi, type DocumentListItem } from '@/api/documentApi';
+import { getDocuments, elaboraRisposteSdi, getStatoFiscaleRicevuta, type DocumentListItem, type StatoFiscaleRicevuta } from '@/api/documentApi';
+import { annullaNdc } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { labelStatoDocumento, labelTipoDocumento } from '@/lib/statiLabels';
+import { labelStatoDocumento, labelTipoDocumento, labelStatoCu } from '@/lib/statiLabels';
+
+// Pannello "Stato fiscale": etichette e colori dei codici di stato restituiti dal backend
+const f24StatoLabels: Record<string, string> = {
+  draft: 'Bozza', ready: 'Pronto', sent: 'Inviato', paid: '✓ Pagato', error: 'Errore',
+};
+const f24StatoColors: Record<string, string> = {
+  paid: 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-300',
+  ready: 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300',
+  sent: 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-300',
+};
+const liquidazioneColors: Record<string, string> = {
+  paid: 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-300',
+  approved: 'bg-blue-100 text-blue-800 dark:bg-blue-950/30 dark:text-blue-300',
+  calculated: 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300',
+};
+const cuColors: Record<string, string> = {
+  sent: 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-300',
+  delivered: 'bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-300',
+  generated: 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300',
+};
+const fmtImporto = (v?: number | null) =>
+  `€${Math.abs(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Filtri rapidi sullo stato fiscale delle ricevute (parametro filtroFiscale del backend). */
+const FILTRI_FISCALI = [
+  { key: '', label: 'Tutti' },
+  { key: 'da_liquidare', label: 'Da liquidare' },
+  { key: 'f24_non_pagato', label: 'F24 non pagato' },
+  { key: 'senza_cu', label: 'Senza CU' },
+];
 
 // Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
 // nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
@@ -28,7 +61,14 @@ const statusColors: Record<string, string> = {
   accepted: 'bg-success/10 text-success',
   rejected: 'bg-destructive/10 text-destructive',
   error: 'bg-destructive/10 text-destructive',
+  annullata: 'bg-muted text-muted-foreground line-through',
 };
+
+// Nota di credito: badge tipo con colore distintivo
+const NDC_BADGE = 'bg-green-100 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300';
+/** NDC annullabile finché non è presa in carico dallo SDI (stessa regola di NdcService). */
+const ndcAnnullabile = (d: DocumentListItem) =>
+  d.documentType === 'nota_credito' && !['sent_sdi', 'accepted', 'annullata'].includes(d.statoDocumento);
 
 // Stato liquidazione — stesse etichette e colori di BookingDetail
 const settlementLabels: Record<string, string> = {
@@ -116,14 +156,53 @@ const DocumentsList = () => {
     }
   };
 
+  // Filtro rapido sulle ricevute (backend, ?fiscale=… nell'URL): con un filtro attivo la
+  // lista contiene solo ricevute owner non annullate. Visibile con tipo 'Tutti' o 'Ricevute'.
+  const filtroFiscale = searchParams.get('fiscale') ?? '';
+  const filtriFiscaliVisibili = tipoFilter === '' || tipoFilter === 'ricevuta';
+  const filtroFiscaleAttivo = filtriFiscaliVisibili ? filtroFiscale : '';
+
   useEffect(() => {
     setIsLoading(true);
     setError(null);
-    getDocuments(statusFilter !== 'all' ? { stato: statusFilter } : {})
+    getDocuments({
+      ...(statusFilter !== 'all' ? { stato: statusFilter } : {}),
+      ...(filtroFiscaleAttivo ? { filtroFiscale: filtroFiscaleAttivo } : {}),
+    })
       .then(setDocs)
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
-  }, [statusFilter, reloadKey]);
+  }, [statusFilter, filtroFiscaleAttivo, reloadKey]);
+
+  // Pannello laterale "Stato fiscale" della ricevuta
+  const [statoFiscaleDocId, setStatoFiscaleDocId] = useState<number | null>(null);
+  const [statoFiscale, setStatoFiscale] = useState<StatoFiscaleRicevuta | null>(null);
+  const [loadingStatoFiscale, setLoadingStatoFiscale] = useState(false);
+
+  const handleApriStatoFiscale = async (docId: number) => {
+    setStatoFiscaleDocId(docId);
+    setStatoFiscale(null);
+    setLoadingStatoFiscale(true);
+    try {
+      setStatoFiscale(await getStatoFiscaleRicevuta(docId));
+    } catch (e) {
+      toast({ title: 'Errore', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+      setStatoFiscaleDocId(null);
+    } finally {
+      setLoadingStatoFiscale(false);
+    }
+  };
+
+  const handleAnnullaNdc = async (d: DocumentListItem) => {
+    if (!window.confirm(`Annullare la nota di credito ${d.documentNumber}?`)) return;
+    try {
+      await annullaNdc(d.id);
+      toast({ title: 'Nota di credito annullata', description: d.documentNumber });
+      setReloadKey(k => k + 1);
+    } catch (e) {
+      toast({ title: 'Annullamento non riuscito', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    }
+  };
 
   const updateFilter = (key: string, value: string | null) => {
     setSearchParams(prev => {
@@ -282,6 +361,7 @@ const DocumentsList = () => {
                 { key: '', label: 'Tutti' },
                 { key: 'fattura', label: 'Fatture' },
                 { key: 'ricevuta', label: 'Ricevute' },
+                { key: 'nota_credito', label: 'Note di credito' },
               ].map(t => (
                 <Button
                   key={t.key || 'tutti'}
@@ -399,6 +479,23 @@ const DocumentsList = () => {
         </div>
       )}
 
+      {filtriFiscaliVisibili && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground mr-1">Ricevute:</span>
+          {FILTRI_FISCALI.map(f => (
+            <Button
+              key={f.key || 'tutti'}
+              variant={filtroFiscale === f.key ? 'default' : 'outline'}
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => updateFilter('fiscale', f.key)}
+            >
+              {f.label}
+            </Button>
+          ))}
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -451,7 +548,16 @@ const DocumentsList = () => {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell><Badge variant="outline" className="text-xs">{labelTipoDocumento(d.documentType)}</Badge></TableCell>
+                    <TableCell>
+                      {d.documentType === 'nota_credito'
+                        ? <Badge variant="outline" className={`text-xs ${NDC_BADGE}`}>NDC</Badge>
+                        : <Badge variant="outline" className="text-xs">{labelTipoDocumento(d.documentType)}</Badge>}
+                      {d.stornata && (
+                        <Badge variant="outline" className="text-destructive border-destructive text-xs ml-1">
+                          Stornata
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-sm font-medium">{d.recipientName}</TableCell>
                     <TableCell className="text-sm">
                       {d.ownerName && d.fkOwnerId ? (
@@ -469,7 +575,10 @@ const DocumentsList = () => {
                     </TableCell>
                     <TableCell className="text-sm">{d.propertyName}</TableCell>
                     <TableCell className="text-sm">{d.issueDate}</TableCell>
-                    <TableCell className="text-right font-medium">€{d.totalAmount.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</TableCell>
+                    <TableCell className="text-right font-medium">
+                      {/* NDC: totale negativo, segno prima del simbolo (-€116,00) */}
+                      {d.totalAmount < 0 ? '-' : ''}€{Math.abs(d.totalAmount).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                    </TableCell>
                     <TableCell><Badge variant="outline" className={statusColors[d.statoDocumento]}>{labelStatoDocumento(d.statoDocumento)}</Badge></TableCell>
                     <TableCell>
                       {d.settlementId ? (
@@ -486,7 +595,37 @@ const DocumentsList = () => {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/documents/${d.id}`)}><Eye className="h-3.5 w-3.5" /></Button></TableCell>
+                    <TableCell>
+                      <div className="flex items-center">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Dettaglio"
+                                    onClick={() => navigate(`/documents/${d.id}`)}>
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Dettaglio</TooltipContent>
+                        </Tooltip>
+                        {d.documentType === 'ricevuta' && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                      aria-label="Stato fiscale"
+                                      onClick={e => { e.stopPropagation(); handleApriStatoFiscale(d.id); }}>
+                                <BarChart2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Stato fiscale</TooltipContent>
+                          </Tooltip>
+                        )}
+                        {ndcAnnullabile(d) && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Annulla NDC"
+                                  onClick={e => { e.stopPropagation(); handleAnnullaNdc(d); }}>
+                            <Ban className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -494,6 +633,126 @@ const DocumentsList = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Pannello laterale: stato fiscale della ricevuta (ritenuta/F24, liquidazione, CU) */}
+      <Sheet
+        open={statoFiscaleDocId !== null}
+        onOpenChange={open => {
+          if (!open) {
+            setStatoFiscaleDocId(null);
+            setStatoFiscale(null);
+          }
+        }}
+      >
+        <SheetContent side="right" className="w-80">
+          <SheetHeader>
+            <SheetTitle>Stato Fiscale</SheetTitle>
+            <SheetDescription>
+              {statoFiscale ? `${statoFiscale.documentNumber} — ${statoFiscale.proprietarioNome ?? ''}` : ' '}
+            </SheetDescription>
+          </SheetHeader>
+
+          {loadingStatoFiscale && (
+            <div className="flex items-center justify-center gap-2 text-muted-foreground py-8">
+              <Loader2 className="h-4 w-4 animate-spin" /> Caricamento...
+            </div>
+          )}
+
+          {statoFiscale && (
+            <div className="space-y-4 mt-4">
+              {statoFiscale.statoDocumento === 'annullata' && (
+                <p className="text-xs rounded-md border border-amber-300/50 bg-amber-50 dark:bg-amber-950/20 px-2 py-1.5 text-amber-800 dark:text-amber-300">
+                  Ricevuta annullata da nota di credito: esclusa da liquidazioni e CU.
+                </p>
+              )}
+
+              <div className="space-y-1 text-sm border-b pb-3">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Canone</span>
+                  <span>{fmtImporto(statoFiscale.canoneLocazione)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">
+                    Ritenuta{statoFiscale.aliquotaRitenuta != null ? ` ${Number(statoFiscale.aliquotaRitenuta).toLocaleString('it-IT')}%` : ''}
+                  </span>
+                  <span className="text-destructive">-{fmtImporto(statoFiscale.ritenutaAmount)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase text-muted-foreground">F24</p>
+                <div className="flex items-center gap-2">
+                  {statoFiscale.f24Stato ? (
+                    <Badge variant="outline" className={f24StatoColors[statoFiscale.f24Stato] ?? ''}>
+                      {f24StatoLabels[statoFiscale.f24Stato] ?? statoFiscale.f24Stato}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">
+                      {statoFiscale.ritenutaStato === 'stornata' ? 'Ritenuta stornata' : 'Da versare'}
+                    </Badge>
+                  )}
+                  {statoFiscale.f24Periodo && (
+                    <span className="text-xs text-muted-foreground">{statoFiscale.f24Periodo}</span>
+                  )}
+                </div>
+                {statoFiscale.f24Id && (
+                  <button
+                    onClick={() => navigate(`/f24?anno=${statoFiscale.f24Anno}&mese=${statoFiscale.f24Mese}`)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Vai all'F24 →
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Liquidazione</p>
+                <div className="flex items-center gap-2">
+                  {statoFiscale.liquidazioneStato ? (
+                    <Badge variant="outline" className={liquidazioneColors[statoFiscale.liquidazioneStato] ?? ''}>
+                      {settlementLabels[statoFiscale.liquidazioneStato] ?? statoFiscale.liquidazioneStato}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">Da liquidare</Badge>
+                  )}
+                  {statoFiscale.liquidazionePeriodo && (
+                    <span className="text-xs text-muted-foreground">{statoFiscale.liquidazionePeriodo}</span>
+                  )}
+                </div>
+                {statoFiscale.liquidazioneId && (
+                  <button
+                    onClick={() => navigate(`/settlements/${statoFiscale.liquidazioneId}`)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Vai alla liquidazione →
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase text-muted-foreground">Certificazione Unica</p>
+                <div className="flex items-center gap-2">
+                  {statoFiscale.cuStato ? (
+                    <Badge variant="outline" className={cuColors[statoFiscale.cuStato] ?? ''}>
+                      {labelStatoCu(statoFiscale.cuStato)}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">Non generata</Badge>
+                  )}
+                  {statoFiscale.cuAnno && (
+                    <span className="text-xs text-muted-foreground">Anno {statoFiscale.cuAnno}</span>
+                  )}
+                </div>
+                {statoFiscale.cuId && (
+                  <button onClick={() => navigate('/cu')} className="text-xs text-primary hover:underline">
+                    Vai alla CU →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {/* Dettagli dell'elaborazione SDI: scarti, mancate consegne, file ignorati */}
       <Dialog open={sdiDettagli !== null} onOpenChange={open => { if (!open) setSdiDettagli(null); }}>

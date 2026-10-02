@@ -56,4 +56,7 @@ public class TenantSettingsUpdateDTO {
 
     // Import massivo proprietari: null = non modificare, 0 = nessun canale default
     private Integer fkCanaleOtaDefaultId;
+
+    // Codice tributo dei crediti d'imposta da NDC nel modello F24 (default 6782)
+    private String codiceTributoCreditoImposta;
 }

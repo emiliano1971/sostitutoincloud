@@ -28,6 +28,8 @@ public class WithholdingLedgerRowMapper implements RowMapper<WithholdingLedger> 
                 .dataEvento(rs.getObject("data_evento", LocalDate.class))
                 .stato(rs.getString("stato"))
                 .fkF24RecordId(rs.getObject("fk_f24_record_id", Integer.class))
+                .fkNdcId(rs.getObject("fk_ndc_id", Integer.class))
+                .fkLedgerOrigineId(rs.getObject("fk_ledger_origine_id", Integer.class))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

@@ -148,6 +148,26 @@ public class BookingController {
      * OTA) e restituisce la prenotazione con lo split ricalcolato.
      * 400 se la prenotazione ha già documenti fiscali emessi.
      */
+    /**
+     * Copia di un booking stornato con NDC totale (migration 026).
+     * 201 nuovo booking, 400 non stornato o copia già presente, 404 non trovato.
+     */
+    @PostMapping("/{id}/copia")
+    public ResponseEntity<?> copia(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        Integer utenteId = SecurityUtils.getCurrentUtenteId();
+        log.info("BookingController.copia() - tenantId={} bookingId={}", tenantId, id);
+        try {
+            BookingDetailDTO copia = bookingService.copiaBooking(tenantId, id, utenteId);
+            return ResponseEntity.status(HttpStatus.CREATED).body(copia);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("BookingController.copia() - bookingId={} rifiutato: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
     // ── Voci extra dello split (booking_split_economico, tipo_voce='extra') ──
 
     @PostMapping("/{id}/split/extra")

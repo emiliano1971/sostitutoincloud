@@ -28,7 +28,15 @@ public class WithholdingLedgerDAO {
     private static final String SELECT_ALL =
             "SELECT id, fk_tenant_id, fk_owner_id, fk_booking_id, fk_fiscal_document_id, " +
             "periodo_mese, periodo_anno, canone_locazione, aliquota_ritenuta, ritenuta_amount, " +
-            "data_evento, stato, fk_f24_record_id, created_at, updated_at FROM withholding_ledger";
+            "data_evento, stato, fk_f24_record_id, fk_ndc_id, fk_ledger_origine_id, created_at, updated_at FROM withholding_ledger";
+
+    /**
+     * Esclude le righe toccate da una nota di credito (migration 026): ritenute stornate,
+     * righe di credito d'imposta e ritenute già versate di un booking stornato. Non devono
+     * entrare né nelle liquidazioni né nella CU.
+     */
+    private static final String SENZA_NDC = " AND fk_ndc_id IS NULL";
+    private static final String SENZA_NDC_WL = " AND wl.fk_ndc_id IS NULL";
 
     private final JdbcTemplate jdbcTemplate;
     private final WithholdingLedgerRowMapper rowMapper = new WithholdingLedgerRowMapper();
@@ -145,8 +153,8 @@ public class WithholdingLedgerDAO {
         String sql = "INSERT INTO withholding_ledger (" +
                 "fk_tenant_id, fk_owner_id, fk_booking_id, fk_fiscal_document_id, " +
                 "periodo_mese, periodo_anno, canone_locazione, aliquota_ritenuta, ritenuta_amount, " +
-                "data_evento, stato, fk_f24_record_id" +
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
+                "data_evento, stato, fk_f24_record_id, fk_ndc_id, fk_ledger_origine_id" +
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -162,6 +170,8 @@ public class WithholdingLedgerDAO {
             ps.setObject(10, ledger.getDataEvento());
             ps.setString(11, ledger.getStato() != null ? ledger.getStato() : "da_versare");
             ps.setObject(12, ledger.getFkF24RecordId());
+            ps.setObject(13, ledger.getFkNdcId());
+            ps.setObject(14, ledger.getFkLedgerOrigineId());
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
@@ -179,7 +189,7 @@ public class WithholdingLedgerDAO {
     public List<WithholdingLedger> findByOwnerAndPeriodo(Integer tenantId, Integer ownerId,
                                                           Integer mese, Integer anno) {
         String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_owner_id = ? " +
-                "AND periodo_mese = ? AND periodo_anno = ? ORDER BY id";
+                "AND periodo_mese = ? AND periodo_anno = ?" + SENZA_NDC + " ORDER BY id";
         List<WithholdingLedger> result = jdbcTemplate.query(sql, rowMapper, tenantId, ownerId, mese, anno);
         log.debug("WithholdingLedgerDAO.findByOwnerAndPeriodo() - tenantId={} ownerId={} periodo={}/{} righe={}",
                 tenantId, ownerId, mese, anno, result.size());
@@ -204,8 +214,8 @@ public class WithholdingLedgerDAO {
         String sql = SELECT_ALL + " wl WHERE wl.fk_tenant_id = ? AND wl.fk_owner_id = ? " +
                 "AND (wl.periodo_anno < ? OR (wl.periodo_anno = ? AND wl.periodo_mese < ?)) " +
                 "AND NOT EXISTS (SELECT 1 FROM settlement_booking sb " +
-                "WHERE sb.fk_booking_id = wl.fk_booking_id AND sb.fk_settlement_id <> ?) " +
-                "ORDER BY wl.periodo_anno, wl.periodo_mese, wl.id";
+                "WHERE sb.fk_booking_id = wl.fk_booking_id AND sb.fk_settlement_id <> ?)" + SENZA_NDC_WL +
+                " ORDER BY wl.periodo_anno, wl.periodo_mese, wl.id";
         List<WithholdingLedger> result = jdbcTemplate.query(sql, rowMapper,
                 tenantId, ownerId, annoCorrente, annoCorrente, meseCorrente,
                 excludeSettlementId != null ? excludeSettlementId : -1);
@@ -224,8 +234,8 @@ public class WithholdingLedgerDAO {
                 "WHERE wl.fk_tenant_id = ? " +
                 "AND (wl.periodo_anno < ? OR (wl.periodo_anno = ? AND wl.periodo_mese < ?)) " +
                 "AND NOT EXISTS (SELECT 1 FROM settlement_booking sb " +
-                "WHERE sb.fk_booking_id = wl.fk_booking_id) " +
-                "ORDER BY wl.fk_owner_id";
+                "WHERE sb.fk_booking_id = wl.fk_booking_id)" + SENZA_NDC_WL +
+                " ORDER BY wl.fk_owner_id";
         List<Integer> result = jdbcTemplate.queryForList(sql, Integer.class,
                 tenantId, annoCorrente, annoCorrente, meseCorrente);
         log.debug("WithholdingLedgerDAO.findDistinctOwnerIdsConArretrati() - tenantId={} periodo={}/{} owner={}",
@@ -246,7 +256,7 @@ public class WithholdingLedgerDAO {
                 "COALESCE(SUM(ritenuta_amount), 0) AS ritenuta, COUNT(id) AS num_righe " +
                 "FROM withholding_ledger " +
                 "WHERE fk_tenant_id = ? AND fk_owner_id = ? AND periodo_anno = ? " +
-                "AND fk_booking_id IN (SELECT id FROM booking WHERE fk_property_id = ?)";
+                "AND fk_booking_id IN (SELECT id FROM booking WHERE fk_property_id = ?)" + SENZA_NDC;
         return jdbcTemplate.queryForMap(sql, tenantId, ownerId, anno, propertyId);
     }
 
@@ -254,7 +264,7 @@ public class WithholdingLedgerDAO {
     public List<Integer> findDistinctOwnerIdsByPeriodo(Integer tenantId, Integer mese, Integer anno) {
         log.debug("WithholdingLedgerDAO.findDistinctOwnerIdsByPeriodo() - tenantId={}, mese={}, anno={}", tenantId, mese, anno);
         String sql = "SELECT DISTINCT fk_owner_id FROM withholding_ledger " +
-                "WHERE fk_tenant_id = ? AND periodo_mese = ? AND periodo_anno = ? ORDER BY fk_owner_id";
+                "WHERE fk_tenant_id = ? AND periodo_mese = ? AND periodo_anno = ?" + SENZA_NDC + " ORDER BY fk_owner_id";
         return jdbcTemplate.queryForList(sql, Integer.class, tenantId, mese, anno);
     }
 
@@ -280,5 +290,108 @@ public class WithholdingLedgerDAO {
         log.debug("WithholdingLedgerDAO.resetF24Record() - f24RecordId={}, stato={}", f24RecordId, stato);
         String sql = "UPDATE withholding_ledger SET fk_f24_record_id = NULL, stato = ? WHERE fk_f24_record_id = ?";
         return jdbcTemplate.update(sql, stato, f24RecordId);
+    }
+
+    /** Ritenute registrate per il proprietario (FK RESTRICT su owner_profile). */
+    public int countByOwner(Integer ownerId, Integer tenantId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM withholding_ledger WHERE fk_owner_id = ? AND fk_tenant_id = ?",
+                Integer.class, ownerId, tenantId);
+        return count != null ? count : 0;
+    }
+
+    // ── note di credito (migration 026) ──────────────────────────────────────
+
+    /** Righe collegate a una NDC: stornate, crediti e ritenute versate di un booking stornato. */
+    public List<WithholdingLedger> findByNdcId(Integer ndcId) {
+        return jdbcTemplate.query(SELECT_ALL + " WHERE fk_ndc_id = ? ORDER BY id", rowMapper, ndcId);
+    }
+
+    /**
+     * Storno della ritenuta da NDC: stato, collegamento alla NDC e, se richiesto, sgancio
+     * dall'F24 non pagato in cui era confluita.
+     */
+    public int updateStorno(Integer id, String stato, Integer ndcId, boolean sganciaF24) {
+        log.info("WithholdingLedgerDAO.updateStorno() - id={} stato={} ndcId={} sganciaF24={}", id, stato, ndcId, sganciaF24);
+        return jdbcTemplate.update(
+                "UPDATE withholding_ledger SET stato = ?, fk_ndc_id = ?, " +
+                (sganciaF24 ? "fk_f24_record_id = NULL, " : "") +
+                "updated_at = NOW() WHERE id = ?",
+                stato, ndcId, id);
+    }
+
+    /** Annullamento NDC: toglie il collegamento alla NDC e ripristina lo stato. */
+    public int ripristinaDaNdc(Integer id, String stato) {
+        log.info("WithholdingLedgerDAO.ripristinaDaNdc() - id={} stato={}", id, stato);
+        return jdbcTemplate.update(
+                "UPDATE withholding_ledger SET stato = ?, fk_ndc_id = NULL, updated_at = NOW() WHERE id = ?",
+                stato, id);
+    }
+
+    public int deleteById(Integer id) {
+        log.info("WithholdingLedgerDAO.deleteById() - id={}", id);
+        return jdbcTemplate.update("DELETE FROM withholding_ledger WHERE id = ?", id);
+    }
+
+    /**
+     * Canone e ritenuta delle prenotazioni ancora collegate al settlement, con le stesse
+     * esclusioni del calcolo (righe toccate da NDC escluse): usato dal ricalcolo dei totali
+     * dopo la rimozione di un booking stornato.
+     */
+    public Map<String, Object> sommaPerSettlement(Integer settlementId) {
+        String sql = "SELECT COALESCE(SUM(wl.canone_locazione), 0) AS canone, " +
+                "COALESCE(SUM(wl.ritenuta_amount), 0) AS ritenuta " +
+                "FROM withholding_ledger wl " +
+                "WHERE wl.fk_booking_id IN (SELECT sb.fk_booking_id FROM settlement_booking sb " +
+                "WHERE sb.fk_settlement_id = ?)" + SENZA_NDC_WL;
+        return jdbcTemplate.queryForMap(sql, settlementId);
+    }
+
+    // ── crediti d'imposta e compensazione F24 (migration 027) ─────────────────
+
+    /** Crediti ancora da usare: righe 'credito_imposta' (ritenuta negativa = residuo). */
+    public List<WithholdingLedger> findCreditiDisponibili(Integer tenantId) {
+        return jdbcTemplate.query(SELECT_ALL + " WHERE stato = 'credito_imposta' AND fk_tenant_id = ? " +
+                "ORDER BY created_at, id", rowMapper, tenantId);
+    }
+
+    /** Righe di compensazione usate in un F24. */
+    public List<WithholdingLedger> findCompensatiByF24(Integer f24RecordId) {
+        return jdbcTemplate.query(SELECT_ALL + " WHERE stato = 'compensato' AND fk_f24_record_id = ? ORDER BY id",
+                rowMapper, f24RecordId);
+    }
+
+    /** Compensazione totale: la riga di credito diventa 'compensato' nell'F24. */
+    public int compensaTotale(Integer id, Integer f24RecordId) {
+        log.info("WithholdingLedgerDAO.compensaTotale() - id={} f24={}", id, f24RecordId);
+        return jdbcTemplate.update("UPDATE withholding_ledger SET stato = 'compensato', fk_f24_record_id = ?, " +
+                "updated_at = NOW() WHERE id = ? AND stato = 'credito_imposta'", f24RecordId, id);
+    }
+
+    /** Aggiorna l'importo (negativo) di una riga di credito: residuo dopo spezzamento o ricongiunzione. */
+    public int updateRitenutaAmount(Integer id, java.math.BigDecimal ritenutaAmount) {
+        log.info("WithholdingLedgerDAO.updateRitenutaAmount() - id={} ritenuta={}", id, ritenutaAmount);
+        return jdbcTemplate.update("UPDATE withholding_ledger SET ritenuta_amount = ?, updated_at = NOW() WHERE id = ?",
+                ritenutaAmount, id);
+    }
+
+    /** Annulla una compensazione totale: la riga torna credito disponibile. */
+    public int ripristinaCredito(Integer id) {
+        log.info("WithholdingLedgerDAO.ripristinaCredito() - id={}", id);
+        return jdbcTemplate.update("UPDATE withholding_ledger SET stato = 'credito_imposta', fk_f24_record_id = NULL, " +
+                "updated_at = NOW() WHERE id = ?", id);
+    }
+
+    /** Righe 'compensato' collegate a una NDC: se presenti la NDC non è più annullabile. */
+    public int countCompensatiByNdc(Integer ndcId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM withholding_ledger WHERE fk_ndc_id = ? AND stato = 'compensato'",
+                Integer.class, ndcId);
+        return count != null ? count : 0;
+    }
+
+    /** Tutte le righe del tenant: filtri della lista documenti (stato fiscale delle ricevute). */
+    public List<WithholdingLedger> findByTenantId(Integer tenantId) {
+        return jdbcTemplate.query(SELECT_ALL + " WHERE fk_tenant_id = ? ORDER BY id", rowMapper, tenantId);
     }
 }

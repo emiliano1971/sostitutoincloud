@@ -64,7 +64,7 @@ public class DashboardService {
         Map<String, Integer> statoDocumentoMap = statoDocumentoDAO.findAll().stream()
                 .collect(Collectors.toMap(s -> s.getCodice(), s -> s.getId()));
 
-        Set<Integer> statiEsclusiIds = Stream.of("doc_issued", "settled", "cancelled")
+        Set<Integer> statiEsclusiIds = Stream.of("doc_issued", "settled", "cancelled", "stornata")
                 .map(statoPrenotazioneMap::get)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());

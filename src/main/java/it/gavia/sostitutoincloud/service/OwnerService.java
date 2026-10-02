@@ -1,22 +1,31 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.CuRecordDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
+import it.gavia.sostitutoincloud.dao.PropertyContractRuleDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.SettlementDAO;
+import it.gavia.sostitutoincloud.dao.UtenteDAO;
+import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerCreateDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerDetailDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerListDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerUpdateDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
+import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.RegimeFiscale;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -31,13 +40,28 @@ public class OwnerService {
     private final SettlementDAO settlementDAO;
     private final RegimeFiscaleDAO regimeFiscaleDAO;
     private final AuditService auditService;
+    private final PropertyContractRuleDAO propertyContractRuleDAO;
+    private final FiscalDocumentDAO fiscalDocumentDAO;
+    private final CuRecordDAO cuRecordDAO;
+    private final WithholdingLedgerDAO withholdingLedgerDAO;
+    private final UtenteDAO utenteDAO;
 
     public OwnerService(OwnerProfileDAO ownerProfileDAO,
                         PropertyDAO propertyDAO,
                         BookingDAO bookingDAO,
                         SettlementDAO settlementDAO,
                         RegimeFiscaleDAO regimeFiscaleDAO,
-                        AuditService auditService) {
+                        AuditService auditService,
+                        PropertyContractRuleDAO propertyContractRuleDAO,
+                        FiscalDocumentDAO fiscalDocumentDAO,
+                        CuRecordDAO cuRecordDAO,
+                        WithholdingLedgerDAO withholdingLedgerDAO,
+                        UtenteDAO utenteDAO) {
+        this.propertyContractRuleDAO = propertyContractRuleDAO;
+        this.fiscalDocumentDAO = fiscalDocumentDAO;
+        this.cuRecordDAO = cuRecordDAO;
+        this.withholdingLedgerDAO = withholdingLedgerDAO;
+        this.utenteDAO = utenteDAO;
         this.ownerProfileDAO = ownerProfileDAO;
         this.propertyDAO = propertyDAO;
         this.bookingDAO = bookingDAO;
@@ -187,6 +211,56 @@ public class OwnerService {
                 propertyDAO.findByOwnerId(updated.getId()).size(),
                 bookings.size(), totalGross, totalOwnerNet,
                 settlementDAO.findByOwnerId(updated.getId()).size());
+    }
+
+    /**
+     * Elimina il proprietario con i suoi immobili e le regole di contratto.
+     * Bloccato (IllegalStateException → 400) se esistono prenotazioni sugli immobili, dati
+     * fiscali collegati (documenti, liquidazioni, CU, ritenute: FK RESTRICT) o un utente di
+     * accesso al portale collegato.
+     *
+     * @throws NoSuchElementException proprietario inesistente o di altro tenant (404)
+     */
+    @Transactional
+    public void eliminaProprietario(Integer tenantId, Integer ownerId) {
+        OwnerProfile owner = ownerProfileDAO.findById(ownerId)
+                .filter(o -> tenantId.equals(o.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Proprietario non trovato: id=" + ownerId));
+
+        int prenotazioni = bookingDAO.countByOwnerProperties(ownerId, tenantId);
+        if (prenotazioni > 0) {
+            throw new IllegalStateException("Impossibile eliminare: esistono " + prenotazioni
+                    + " prenotazioni associate agli immobili di questo proprietario");
+        }
+        List<String> vincoli = new ArrayList<>();
+        int documenti = fiscalDocumentDAO.findByOwnerAndTenant(tenantId, ownerId).size();
+        if (documenti > 0) vincoli.add(documenti + " documenti fiscali");
+        int liquidazioni = settlementDAO.findByTenantIdAndOwnerId(tenantId, ownerId).size();
+        if (liquidazioni > 0) vincoli.add(liquidazioni + " liquidazioni");
+        int cu = cuRecordDAO.findByTenantIdAndOwnerId(tenantId, ownerId).size();
+        if (cu > 0) vincoli.add(cu + " CU");
+        int ritenute = withholdingLedgerDAO.countByOwner(ownerId, tenantId);
+        if (ritenute > 0) vincoli.add(ritenute + " ritenute registrate");
+        if (!vincoli.isEmpty()) {
+            throw new IllegalStateException("Impossibile eliminare: esistono " + String.join(", ", vincoli)
+                    + " associati a questo proprietario");
+        }
+        if (utenteDAO.countByOwnerId(ownerId) > 0) {
+            throw new IllegalStateException("Impossibile eliminare: esiste un utente di accesso al portale "
+                    + "collegato a questo proprietario, eliminarlo prima da Utenti");
+        }
+
+        List<Property> immobili = propertyDAO.findByOwnerAndTenant(tenantId, ownerId);
+        for (Property p : immobili) {
+            propertyContractRuleDAO.deleteByPropertyId(p.getId());
+        }
+        propertyDAO.deleteByOwnerId(ownerId, tenantId);
+        ownerProfileDAO.deleteById(ownerId, tenantId);
+
+        auditService.log("owner.delete", "OwnerProfile", ownerId,
+                "Eliminato proprietario " + owner.getFirstName() + " " + owner.getLastName()
+                        + " (" + owner.getTaxCode() + ") con " + immobili.size() + " immobili");
+        log.info("OwnerService.eliminaProprietario() - tenant={} owner={} immobili={}", tenantId, ownerId, immobili.size());
     }
 
     private Map<Integer, String> buildRegimeMap() {

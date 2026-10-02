@@ -170,4 +170,11 @@ public class OwnerProfileDAO {
                 SELECT_COLS + " WHERE fk_tenant_id = ? AND last_name LIKE '%' || ? || '%' ORDER BY id",
                 ownerProfileRowMapper, tenantId, pattern);
     }
+
+    /** Cancellazione del proprietario vincolata al tenant: gli immobili vanno eliminati prima. */
+    public int deleteById(Integer id, Integer tenantId) {
+        int righe = jdbcTemplate.update("DELETE FROM owner_profile WHERE id = ? AND fk_tenant_id = ?", id, tenantId);
+        log.info("OwnerProfileDAO.deleteById() - id={} tenantId={} eliminati={}", id, tenantId, righe);
+        return righe;
+    }
 }

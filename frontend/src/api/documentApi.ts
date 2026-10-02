@@ -37,6 +37,8 @@ export interface DocumentListItem {
   fkOwnerId?: number;
   ownerName?: string;
   createdAt: string;
+  /** Fattura con una nota di credito attiva collegata. */
+  stornata?: boolean;
 }
 
 export interface DocumentRow {
@@ -69,12 +71,27 @@ export interface DocumentDetail extends DocumentListItem {
   tenantTaxCode?: string;
   tenantLegalAddress?: string;
   tenantPec?: string;
+  // Note di credito (migration 025)
+  /** NDC: numero della fattura stornata. */
+  documentoCollegatoNumber?: string;
+  /** Fattura: NDC collegate (annullate comprese). */
+  noteCredito?: {
+    id: number;
+    documentNumber: string;
+    statoDocumento: string;
+    dataEmissione: string;
+    importoTotale: number;
+  }[];
+  /** Fattura: 'parziale' | 'totale' se esiste una NDC attiva. */
+  statoStorno?: 'parziale' | 'totale';
 }
 
 export async function getDocuments(params?: {
   stato?: string;
   q?: string;
   ownerId?: number;
+  /** Filtro rapido sulle ricevute owner: da_liquidare | f24_non_pagato | senza_cu */
+  filtroFiscale?: string;
   page?: number;
   size?: number;
 }): Promise<DocumentListItem[]> {
@@ -85,9 +102,45 @@ export async function getDocuments(params?: {
   if (params.stato) qs.set('stato', params.stato);
   if (params.q) qs.set('q', params.q);
   if (params.ownerId !== undefined) qs.set('ownerId', String(params.ownerId));
+  if (params.filtroFiscale) qs.set('filtroFiscale', params.filtroFiscale);
   if (params.page !== undefined) qs.set('page', String(params.page));
   if (params.size !== undefined) qs.set('size', String(params.size));
   return get<DocumentListItem[]>(`/documents?${qs.toString()}`);
+}
+
+/**
+ * Stato fiscale di una ricevuta owner (GET /api/documents/{id}/stato-fiscale).
+ * Gli stati sono codici del DB: assente = ritenuta non in F24 / da liquidare / CU non generata.
+ */
+export interface StatoFiscaleRicevuta {
+  documentId: number;
+  documentNumber: string;
+  /** 'annullata' se la ricevuta è stata stornata con nota di credito. */
+  statoDocumento: string;
+  proprietarioNome: string;
+  canoneLocazione: number;
+  ritenutaAmount: number;
+  aliquotaRitenuta?: number;
+  /** withholding_ledger.stato: da_versare / versata / stornata / credito_imposta */
+  ritenutaStato?: string;
+  /** f24_record.stato: draft / ready / sent / paid / error */
+  f24Stato?: string;
+  f24Periodo?: string;
+  f24Id?: number;
+  f24Mese?: number;
+  f24Anno?: number;
+  /** settlement.stato: pending / calculated / approved / paid */
+  liquidazioneStato?: string;
+  liquidazionePeriodo?: string;
+  liquidazioneId?: number;
+  /** cu_record.stato: draft / generated / delivered / sent */
+  cuStato?: string;
+  cuAnno?: number;
+  cuId?: number;
+}
+
+export async function getStatoFiscaleRicevuta(id: number): Promise<StatoFiscaleRicevuta> {
+  return get<StatoFiscaleRicevuta>(`/documents/${id}/stato-fiscale`);
 }
 
 export async function getDocumentById(id: number): Promise<DocumentDetail> {
@@ -219,6 +272,11 @@ export async function downloadDocumentPdf(id: number, documentNumber: string): P
  */
 export async function downloadOwnerDocumentPdf(id: number, documentNumber: string): Promise<void> {
   return scaricaDocumentoPdf(`/owner/documents/${id}/pdf`, documentNumber);
+}
+
+/** PDF della nota di credito (GET /api/ndc/{id}/pdf). */
+export async function downloadNdcPdf(id: number, documentNumber: string): Promise<void> {
+  return scaricaDocumentoPdf(`/ndc/${id}/pdf`, documentNumber);
 }
 
 async function scaricaDocumentoPdf(path: string, documentNumber: string): Promise<void> {

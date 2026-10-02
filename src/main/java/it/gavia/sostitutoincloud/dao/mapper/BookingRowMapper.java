@@ -22,6 +22,7 @@ public class BookingRowMapper implements RowMapper<Booking> {
                 .fkOwnerId(rs.getObject("fk_owner_id", Integer.class))
                 .fkCanaleOtaId(rs.getObject("fk_canale_ota_id", Integer.class))
                 .fkRegimeFiscaleId(rs.getObject("fk_regime_fiscale_id", Integer.class))
+                .fkBookingOrigineId(rs.getObject("fk_booking_origine_id", Integer.class))
                 .externalBookingId(rs.getString("external_booking_id"))
                 .guestName(rs.getString("guest_name"))
                 .guestTaxCode(rs.getString("guest_tax_code"))

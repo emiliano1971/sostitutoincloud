@@ -167,8 +167,8 @@ test.describe('Fase 07 — Certificazione Unica', () => {
     await expect(riga).toContainText(String(ANNO));
     await expect(riga).toContainText(euro(cu.totalCompensi));
     await expect(riga).toContainText(euro(cu.totalRitenute));
-    // Il badge riporta il codice grezzo dello stato ('generated', 'sent', …)
-    await expect(riga.getByText(cu.stato).first()).toBeVisible();
+    // Il badge riporta l'etichetta dello stato (labelStatoCu): 'generated' → 'Generata'
+    await expect(riga.getByText('Generata').first()).toBeVisible();
 
     expect(cu.totalCompensi).toBeGreaterThan(0);
     expect(cu.totalRitenute).toBeGreaterThan(0);

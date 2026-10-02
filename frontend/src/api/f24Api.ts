@@ -11,6 +11,27 @@ export interface F24Record {
   deadlineDate: string;
   paymentDate?: string;
   codiceTributo: string;
+  // Crediti d'imposta da NDC compensati (riga 2 del modello)
+  importoCredito?: number;
+  codiceTributoCreditoImposta?: string;
+  annoCredito?: number;
+  /** totalAmount - importoCredito: importo da versare. */
+  saldoNetto?: number;
+}
+
+/** Credito d'imposta da nota di credito ancora compensabile. */
+export interface CreditoDisponibile {
+  ledgerId: number;
+  ndcDocumentNumber: string;
+  ndcDataEmissione: string;
+  /** Residuo disponibile. */
+  importoCredito: number;
+  annoRiferimento: number;
+}
+
+export interface CreditoCompensazione {
+  ledgerId: number;
+  importoUsato: number;
 }
 
 export interface WithholdingLedgerItem {
@@ -43,6 +64,13 @@ export interface F24GenerazioneResult {
   scadenza: string;
   stato: string;
   ritenute: WithholdingLedgerItem[];
+  /** Crediti ancora compensabili del tenant. */
+  crediti?: CreditoDisponibile[];
+  /** Crediti già compensati in questo F24. */
+  importoCredito?: number;
+  codiceTributoCreditoImposta?: string;
+  annoCredito?: number;
+  saldoNetto?: number;
 }
 
 export async function getF24List(): Promise<F24Record[]> {
@@ -55,6 +83,14 @@ export async function generaF24(anno: number, mese: number): Promise<F24Generazi
 
 export async function getF24Detail(id: number): Promise<F24GenerazioneResult> {
   return get<F24GenerazioneResult>(`/f24/${id}`);
+}
+
+/**
+ * Compensa crediti d'imposta nell'F24 (POST /api/f24/{id}/crediti). Sostituisce le
+ * compensazioni precedenti dello stesso F24: lista vuota = toglie i crediti.
+ */
+export async function applicaCrediti(f24Id: number, compensazioni: CreditoCompensazione[]): Promise<F24GenerazioneResult> {
+  return post<F24GenerazioneResult>(`/f24/${f24Id}/crediti`, compensazioni);
 }
 
 export async function marcaF24Pagato(id: number): Promise<F24Record> {

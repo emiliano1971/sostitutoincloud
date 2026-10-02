@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.controller;
 
+import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportPreviewResult;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportResult;
 import it.gavia.sostitutoincloud.dto.owner.OwnerCreateDTO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerDashboardDTO;
@@ -20,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.net.URI;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -41,18 +43,40 @@ public class OwnerController {
     }
 
     /**
+     * Preview dell'importazione massiva: stato di ogni riga, nessuna scrittura a DB.
+     * 400 file mancante/non valido (IllegalArgumentException → GlobalExceptionHandler).
+     */
+    @PostMapping("/import-bulk/preview")
+    public ResponseEntity<?> importBulkPreview(@RequestParam("file") MultipartFile file) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("OwnerController.importBulkPreview() - tenantId={} file={}", tenantId, file.getOriginalFilename());
+        try {
+            OwnerBulkImportPreviewResult result = ownerBulkImportService.preview(tenantId, file);
+            return ResponseEntity.ok(result);
+        } catch (IOException e) {
+            log.error("OwnerController.importBulkPreview() - errore lettura file: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Errore nella lettura del file: " + e.getMessage()));
+        }
+    }
+
+    /**
      * Importazione massiva proprietari e immobili dal template Excel.
+     * Il file va ricaricato insieme ai numeri di riga scelti nella preview
+     * (multipart: file + righe ripetuto); righe assente o vuoto = tutte le righe valide.
      * 400 file mancante/non valido (IllegalArgumentException → GlobalExceptionHandler),
      * 500 errore di lettura del file.
      */
     @PostMapping("/import-bulk")
-    public ResponseEntity<?> importBulk(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> importBulk(@RequestParam("file") MultipartFile file,
+                                        @RequestParam(value = "righe", required = false) List<Integer> righe) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         Integer utenteId = SecurityUtils.getCurrentUtenteId();
-        log.info("OwnerController.importBulk() - tenantId={} utenteId={} file={}",
-                tenantId, utenteId, file.getOriginalFilename());
+        log.info("OwnerController.importBulk() - tenantId={} utenteId={} file={} righe={}",
+                tenantId, utenteId, file.getOriginalFilename(), righe);
         try {
-            OwnerBulkImportResult result = ownerBulkImportService.importa(tenantId, utenteId, file);
+            OwnerBulkImportResult result = ownerBulkImportService.importa(tenantId, utenteId, file,
+                    righe != null ? new HashSet<>(righe) : null);
             return ResponseEntity.ok(result);
         } catch (IOException e) {
             log.error("OwnerController.importBulk() - errore lettura file: {}", e.getMessage(), e);
@@ -93,6 +117,22 @@ public class OwnerController {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         OwnerDetailDTO updated = ownerService.update(tenantId, id, dto);
         return ResponseEntity.ok(updated);
+    }
+
+    /** 204 eliminato; 400 prenotazioni o dati collegati; 404 non trovato. */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> elimina(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("OwnerController.elimina() - tenantId={} ownerId={}", tenantId, id);
+        try {
+            ownerService.eliminaProprietario(tenantId, id);
+            return ResponseEntity.noContent().build();
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", e.getMessage()));
+        } catch (IllegalStateException e) {
+            log.warn("OwnerController.elimina() - 400: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     @PatchMapping("/{id}/status")

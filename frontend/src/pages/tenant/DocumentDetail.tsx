@@ -5,8 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowLeft, Building2, User, Home, Calendar, Receipt, Download, Loader2, AlertCircle, ExternalLink, Send, CheckCircle2, XCircle, AlertTriangle, Landmark, FileCheck } from 'lucide-react';
-import { getDocumentById, downloadDocumentPdf, inviaSdi, downloadSdiXml, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
+import { ArrowLeft, Building2, User, Home, Calendar, Receipt, Download, Loader2, AlertCircle, ExternalLink, Send, CheckCircle2, XCircle, AlertTriangle, Landmark, FileCheck, Ban, RotateCcw } from 'lucide-react';
+import { getDocumentById, downloadDocumentPdf, downloadNdcPdf, inviaSdi, downloadSdiXml, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
+import { annullaNdc } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
 import { labelTipoDocumento } from '@/lib/statiLabels';
 
@@ -16,6 +17,7 @@ const statusColors: Record<string, string> = {
   sent_sdi: 'bg-warning/10 text-warning',
   accepted: 'bg-success/10 text-success',
   rejected: 'bg-destructive/10 text-destructive',
+  annullata: 'bg-muted text-muted-foreground line-through',
 };
 
 const statoDocLabels: Record<string, string> = {
@@ -25,6 +27,7 @@ const statoDocLabels: Record<string, string> = {
   accepted: 'Accettato',
   rejected: 'Rifiutato',
   error: 'Errore',
+  annullata: 'Annullato',
 };
 
 const fmt = (v?: number) => `€${Math.abs(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
@@ -74,6 +77,7 @@ const DocumentDetail = () => {
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSendingSdi, setIsSendingSdi] = useState(false);
+  const [isAnnullando, setIsAnnullando] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -90,7 +94,12 @@ const DocumentDetail = () => {
     if (!doc) return;
     setIsDownloading(true);
     try {
-      await downloadDocumentPdf(doc.id, doc.documentNumber);
+      // Nota di credito: PDF da /api/ndc/{id}/pdf (stesso layout della fattura)
+      if (doc.documentType === 'nota_credito') {
+        await downloadNdcPdf(doc.id, doc.documentNumber);
+      } else {
+        await downloadDocumentPdf(doc.id, doc.documentNumber);
+      }
     } catch (err) {
       toast({
         title: 'Errore download PDF',
@@ -135,6 +144,25 @@ const DocumentDetail = () => {
     }
   };
 
+  // Annullamento NDC: ammesso solo prima dell'invio SDI (il backend risponde 400 altrimenti)
+  const handleAnnullaNdc = async () => {
+    if (!doc || !window.confirm(`Annullare la nota di credito ${doc.documentNumber}?`)) return;
+    setIsAnnullando(true);
+    try {
+      await annullaNdc(doc.id);
+      toast({ title: 'Nota di credito annullata', description: doc.documentNumber });
+      setDoc(await getDocumentById(doc.id));
+    } catch (err) {
+      toast({
+        title: 'Annullamento non riuscito',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAnnullando(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
@@ -165,7 +193,8 @@ const DocumentDetail = () => {
   // Importi letti dal DTO, mai ricalcolati: imponibile, IVA e totale sono persistiti su
   // fiscal_document al momento dell'emissione ed è quello il valore fiscalmente valido.
   const imponibile = doc.imponibile ?? 0;
-  const showIva = (doc.vatAmount ?? 0) > 0;
+  // Math.abs: la nota di credito ha importi negativi (mostrati in valore assoluto da fmt)
+  const showIva = Math.abs(doc.vatAmount ?? 0) > 0;
   const showBollo = (doc.bolloAmount ?? 0) > 0;
 
   // Ricevuta owner (lookup tipo_documento.codice = 'ricevuta'): gli importi seguono
@@ -173,6 +202,12 @@ const DocumentDetail = () => {
   const isRicevutaOwner = doc.documentType === 'ricevuta';
   // Solo le fatture PM vanno allo SDI. Stati che implicano un file già trasmesso.
   const isFatturaPm = doc.documentType === 'fattura';
+  // Nota di credito: va allo SDI come la fattura (TD04), annullabile finché non è trasmessa
+  const isNotaCredito = doc.documentType === 'nota_credito';
+  const isTrasmissibile = isFatturaPm || isNotaCredito;
+  const ndcAnnullata = isNotaCredito && doc.statoDocumento === 'annullata';
+  const puoAnnullareNdc = isNotaCredito && !['sent_sdi', 'accepted', 'annullata'].includes(doc.statoDocumento);
+  const ndcAttive = (doc.noteCredito ?? []).filter(n => n.statoDocumento !== 'annullata');
   const sdiRifiutato = doc.statoDocumento === 'rejected';
   const sdiErrore = doc.statoDocumento === 'error';
   // La card mostra i dati di trasmissione appena esiste un progressivo, qualunque
@@ -184,8 +219,8 @@ const DocumentDetail = () => {
   const annoDocumento = doc.issueDate ? doc.issueDate.slice(0, 4) : null;
   // Nuovo invio ammesso finché lo SDI non ha confermato: dopo uno scarto o un
   // errore la fattura va corretta e ritrasmessa.
-  const puoInviareSdi = isFatturaPm && !['sent_sdi', 'accepted'].includes(doc.statoDocumento);
-  const puoRiprovareSdi = isFatturaPm && (sdiRifiutato || sdiErrore);
+  const puoInviareSdi = isTrasmissibile && !ndcAnnullata && !['sent_sdi', 'accepted'].includes(doc.statoDocumento);
+  const puoRiprovareSdi = isTrasmissibile && (sdiRifiutato || sdiErrore);
   const ritenuta = doc.ritenutaAmount ?? 0;
   // Netto = canone - ritenuta. Il bollo NON è scalato: coerente con il PDF
   // (ricevuta-owner.html) e con SettlementService (net = total - withholding).
@@ -239,7 +274,7 @@ const DocumentDetail = () => {
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-xl font-bold">Documento Fiscale</h1>
+          <h1 className="text-xl font-bold">{isNotaCredito ? 'Nota di Credito' : 'Documento Fiscale'}</h1>
           <p className="text-sm text-muted-foreground">{doc.recipientName}</p>
         </div>
       </div>
@@ -254,7 +289,40 @@ const DocumentDetail = () => {
               <Badge variant="outline" className={`text-xs ${statusColors[doc.statoDocumento] ?? ''}`}>
                 {statoDocLabels[doc.statoDocumento] ?? doc.statoDocumento}
               </Badge>
+              {/* Fattura con NDC attiva: storno parziale o totale, con link alle NDC */}
+              {isFatturaPm && doc.statoStorno && (
+                <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300">
+                  {doc.statoStorno === 'totale' ? 'Stornata totalmente' : 'Stornata parzialmente'}
+                </Badge>
+              )}
             </div>
+            {isNotaCredito && doc.fkDocumentoCollegatoId && (
+              <p className="text-sm text-muted-foreground">
+                A storno della fattura{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate(`/documents/${doc.fkDocumentoCollegatoId}`)}
+                  className="text-primary hover:underline font-mono"
+                >
+                  {doc.documentoCollegatoNumber ?? doc.fkDocumentoCollegatoId}
+                </button>
+              </p>
+            )}
+            {isFatturaPm && ndcAttive.length > 0 && (
+              <p className="text-sm text-muted-foreground">
+                Nota di credito:{' '}
+                {ndcAttive.map(n => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => navigate(`/documents/${n.id}`)}
+                    className="text-primary hover:underline font-mono mr-2"
+                  >
+                    {n.documentNumber}
+                  </button>
+                ))}
+              </p>
+            )}
           </div>
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Data emissione</p>
@@ -350,7 +418,7 @@ const DocumentDetail = () => {
               </div>
             </div>
           ) : (
-            /* Fattura PM (e altri tipi): voci invariate */
+            /* Fattura PM e nota di credito (importi della NDC mostrati in valore assoluto) */
             <div className="space-y-2">
               <div className="flex justify-between py-1.5">
                 <span className="text-sm text-muted-foreground">Imponibile</span>
@@ -371,7 +439,7 @@ const DocumentDetail = () => {
                 </div>
               )}
               <div className="flex justify-between border-t pt-2 font-semibold">
-                <span className="text-sm">Totale documento</span>
+                <span className="text-sm">{isNotaCredito ? 'Totale nota di credito' : 'Totale documento'}</span>
                 <span className="text-sm">{fmt(doc.totalAmount)}</span>
               </div>
             </div>
@@ -502,8 +570,8 @@ const DocumentDetail = () => {
         </Card>
       )}
 
-      {/* Card — Trasmissione SDI (solo fatture PM) */}
-      {isFatturaPm && (
+      {/* Card — Trasmissione SDI (fatture PM e note di credito) */}
+      {isTrasmissibile && !ndcAnnullata && (
         <Card>
           <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Send className="h-4 w-4" /> Trasmissione SDI</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -576,7 +644,7 @@ const DocumentDetail = () => {
               </>
             ) : (
               <>
-                <p className="text-muted-foreground">Fattura non ancora trasmessa allo SDI.</p>
+                <p className="text-muted-foreground">{isNotaCredito ? 'Nota di credito' : 'Fattura'} non ancora trasmessa allo SDI.</p>
                 {sdiErrore && doc.sdiErrorMsg && (
                   <div className="rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
                     <span className="font-medium">Dettaglio:</span> {doc.sdiErrorMsg}
@@ -600,6 +668,19 @@ const DocumentDetail = () => {
             : <Download className="h-4 w-4" />}
           {isDownloading ? 'Generazione…' : 'Scarica PDF'}
         </Button>
+        {puoAnnullareNdc && (
+          <Button variant="outline" className="gap-2 text-destructive" onClick={handleAnnullaNdc} disabled={isAnnullando}>
+            {isAnnullando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+            Annulla NDC
+          </Button>
+        )}
+        {isFatturaPm && doc.fkBookingId && !doc.statoStorno && !['rejected', 'error', 'draft'].includes(doc.statoDocumento) && (
+          // L'emissione avviene dal dettaglio prenotazione (dialog con le voci dello split)
+          <Button variant="outline" className="gap-2" onClick={() => navigate(`/bookings/${doc.fkBookingId}`)}>
+            <RotateCcw className="h-4 w-4" />
+            Emetti nota di credito
+          </Button>
+        )}
         {puoInviareSdi && (
           <Button variant="outline" className="gap-2" onClick={handleInviaSdi} disabled={isSendingSdi}>
             {isSendingSdi

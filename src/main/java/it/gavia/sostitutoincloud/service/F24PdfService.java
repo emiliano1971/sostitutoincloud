@@ -75,8 +75,12 @@ public class F24PdfService {
                 .map(CodiceTributo::getCodice)
                 .orElse("");
 
-        // 3. Costruzione DTO
+        // 3. Costruzione DTO. Riga 1 = ritenute a debito (1919); riga 2 = crediti d'imposta da NDC
+        //    compensati (migration 027). Saldo finale = debito - credito (saldo netto).
         BigDecimal totale = f24.getTotalAmount();
+        BigDecimal credito = f24.getImportoCredito() != null ? f24.getImportoCredito() : BigDecimal.ZERO;
+        boolean conCredito = credito.compareTo(BigDecimal.ZERO) > 0;
+        BigDecimal saldo = totale.subtract(credito);
 
         F24PdfDataDTO dto = F24PdfDataDTO.builder()
                 .contribuenteCf(tenant.getTaxCode())
@@ -95,8 +99,8 @@ public class F24PdfService {
                 .motivoAnnoRif(String.valueOf(f24.getPeriodoAnno()))
                 .motivoImportoDebito(formattaImporto(totale))
                 .motivoImportoCredito("")
-                .saldoFinaleEuro(formattaEuro(totale))
-                .saldoFinaleCent(formattaCent(totale))
+                .saldoFinaleEuro(formattaEuro(saldo))
+                .saldoFinaleCent(formattaCent(saldo))
                 .build();
 
         // 4. Template: storage esterno con fallback classpath
@@ -131,6 +135,16 @@ public class F24PdfService {
             campi.put("motivo_anno_rif_1", nz(dto.getMotivoAnnoRif()));
             campi.put("motivo_importo_debito_1", nz(dto.getMotivoImportoDebito()));
             campi.put("motivo_importo_credito_1", nz(dto.getMotivoImportoCredito()));
+            // Riga 2: credito compensato (vuota senza crediti)
+            campi.put("motivo_sezione_2", conCredito ? "Erario" : "");
+            campi.put("motivo_cod_tributo_2", conCredito ? nz(f24.getCodiceTributoCreditoImposta()) : "");
+            campi.put("motivo_codice_ente_2", "");
+            // Mese del credito = mese dell'F24 in cui viene compensato (non quello della NDC)
+            campi.put("motivo_mese_rif_2", conCredito ? String.format("%02d", f24.getPeriodoMese()) : "");
+            campi.put("motivo_anno_rif_2", conCredito && f24.getAnnoCredito() != null
+                    ? String.valueOf(f24.getAnnoCredito()) : "");
+            campi.put("motivo_importo_debito_2", "");
+            campi.put("motivo_importo_credito_2", conCredito ? formattaImporto(credito) : "");
             campi.put("saldo_finale_euro", nz(dto.getSaldoFinaleEuro()));
             campi.put("saldo_finale_cent", nz(dto.getSaldoFinaleCent()));
 

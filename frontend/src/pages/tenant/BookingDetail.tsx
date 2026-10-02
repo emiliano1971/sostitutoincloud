@@ -1,12 +1,12 @@
 import { useState, useEffect, Fragment } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { getContractRules, type ContractRule } from '@/api/contractApi';
 import { cn } from '@/lib/utils';
 import GuestEditDialog from '@/components/GuestEditDialog';
@@ -17,6 +17,7 @@ import {
   aggiungiVoceExtra,
   aggiornaVoceExtra,
   eliminaVoceExtra,
+  copiaBooking,
   type BookingSplitRiga,
   type BookingDetail as BookingDetailType,
   type BookingUpdateSplitRequest,
@@ -27,6 +28,7 @@ import { toast } from '@/hooks/use-toast';
 import { useLookup } from '@/contexts/LookupContext';
 import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
+import NdcDialog from '@/components/booking/NdcDialog';
 import { labelStatoPrenotazione } from '@/lib/statiLabels';
 
 const paymentLabels: Record<string, string> = {
@@ -295,6 +297,8 @@ const BookingDetail = () => {
   const { lookups, getLabelByCodice } = useLookup();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [ndcOpen, setNdcOpen] = useState(false);
+  const [copiando, setCopiando] = useState(false);
   const [guestEditOpen, setGuestEditOpen] = useState(false);
   const [booking, setBooking] = useState<BookingDetailType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -317,6 +321,25 @@ const BookingDetail = () => {
   const [editingRigaId, setEditingRigaId] = useState<number | null>(null);
   // Il PM inserisce l'imponibile (netto): il lordo lo calcola il backend
   const [voceForm, setVoceForm] = useState({ descrizione: '', imponibile: '', includeInFatturaPm: true });
+
+  // Booking stornato con NDC totale: la copia riparte dai dati originali con split ricalcolato
+  const handleCopia = async () => {
+    if (!booking) return;
+    setCopiando(true);
+    try {
+      const nuovoBooking = await copiaBooking(booking.id);
+      navigate(`/bookings/${nuovoBooking.id}`);
+      toast({ title: 'Prenotazione copiata', description: nuovoBooking.externalBookingId });
+    } catch (e) {
+      toast({
+        title: 'Copia non riuscita',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setCopiando(false);
+    }
+  };
 
   const reloadBooking = async () => {
     if (!id) return;
@@ -814,6 +837,15 @@ const BookingDetail = () => {
     booking.documenti?.find(d => d.tipoDocumento === tipo);
   const existingReceipt = getDocumento('ricevuta');
   const existingInvoice = getDocumento('fattura');
+  // Nota di credito attiva sulla fattura PM (una sola ammessa dal backend)
+  const ndcAttiva = existingInvoice
+    ? booking.documenti?.find(d => d.tipoDocumento === 'nota_credito'
+        && d.fkDocumentoCollegatoId === existingInvoice.id
+        && d.statoDocumento !== 'annullata')
+    : undefined;
+  // Fattura stornabile: emessa e non scartata dallo SDI (stessa regola di NdcService)
+  const fatturaStornabile = !!existingInvoice && !ndcAttiva
+    && !['rejected', 'error', 'draft'].includes(existingInvoice.statoDocumento);
 
   // Dati reali dal backend per i dialog (sostituiscono i mock hardcoded)
   const dialogOwner = {
@@ -860,6 +892,14 @@ const BookingDetail = () => {
         <Card>
           <CardHeader><CardTitle className="text-sm flex items-center gap-2"><Calendar className="h-4 w-4" /> Dettagli Soggiorno</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
+            {booking.fkBookingOrigineId && (
+              <div className="text-xs text-muted-foreground">
+                Copiata da:{' '}
+                <Link to={`/bookings/${booking.fkBookingOrigineId}`} className="text-primary hover:underline font-mono">
+                  {booking.bookingOrigineCodice ?? booking.fkBookingOrigineId}
+                </Link>
+              </div>
+            )}
             <div className="flex justify-between"><span className="text-muted-foreground">Check-in</span><span className="font-medium">{booking.checkinDate}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Check-out</span><span className="font-medium">{booking.checkoutDate}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Notti</span><span className="font-medium">{booking.nights}</span></div>
@@ -1172,6 +1212,23 @@ const BookingDetail = () => {
               )}
               </Fragment>
             ))}
+            {/* Righe delle note di credito attive, in coda allo split con segno +: solo
+                visualizzate, non ricalcolano costi PM né netto proprietario */}
+            {(booking.righeNdc ?? []).length > 0 && (
+              <div className="border-t pt-2 mt-1 space-y-1">
+                {booking.righeNdc!.map(r => (
+                  <div key={r.id} className={`${GRIGLIA_IVA} items-start text-sm py-1 text-green-600 dark:text-green-400`}>
+                    <div className={`flex flex-col min-w-0 ${ETICHETTA_IVA}`}>
+                      <span className="truncate" title={r.descrizione}>{r.descrizione}</span>
+                      <span className="text-xs text-muted-foreground">Storno NDC{r.documentNumber ? ` ${r.documentNumber}` : ''}</span>
+                    </div>
+                    <span className={`text-xs text-right pt-0.5 ${INIZIO_IMPORTI}`}>{fmt(r.imponibileStornato ?? r.importoStornato)}</span>
+                    <span className="text-xs text-right pt-0.5">+{fmt(r.importoStornato - (r.imponibileStornato ?? r.importoStornato))}</span>
+                    <span className="text-right font-medium">+{fmt(r.importoStornato)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1202,6 +1259,9 @@ const BookingDetail = () => {
               </Badge>
               {doc && (
                 <p className="mt-1 font-mono text-[11px] text-muted-foreground">{doc.documentNumber}</p>
+              )}
+              {sdi && ndcAttiva && (
+                <p className="mt-0.5 text-[11px] text-green-600 dark:text-green-400">Stornata da {ndcAttiva.documentNumber}</p>
               )}
             </CardContent>
           </Card>
@@ -1243,6 +1303,35 @@ const BookingDetail = () => {
           onEmetti={() => handleEmetti('fattura_pm', setSavingInvoice, setGeneratedInvoice)}
           onSent={reloadBooking}
         />
+        {booking.statoPrenotazione === 'stornata' && (
+          booking.fkBookingCopiaId ? (
+            <p className="text-xs text-muted-foreground self-center">
+              Copiata in:{' '}
+              <Link to={`/bookings/${booking.fkBookingCopiaId}`} className="text-primary hover:underline font-mono">
+                {booking.bookingCopiaCodice ?? booking.fkBookingCopiaId}
+              </Link>
+            </p>
+          ) : (
+            <Button onClick={handleCopia} variant="outline" size="sm" className="self-center" disabled={copiando}>
+              {copiando ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Copy className="h-4 w-4 mr-1" />}
+              Copia prenotazione
+            </Button>
+          )
+        )}
+        {fatturaStornabile && existingInvoice && (
+          <>
+            <Button variant="outline" className="w-full sm:w-auto gap-2" onClick={() => setNdcOpen(true)}>
+              <RotateCcw className="h-4 w-4" /> Emetti nota di credito
+            </Button>
+            <NdcDialog
+              booking={booking}
+              fattura={existingInvoice}
+              open={ndcOpen}
+              onClose={() => setNdcOpen(false)}
+              onSuccess={() => { setNdcOpen(false); reloadBooking(); }}
+            />
+          </>
+        )}
         <ReceiptOwnerDialog
           open={receiptOpen}
           onOpenChange={setReceiptOpen}

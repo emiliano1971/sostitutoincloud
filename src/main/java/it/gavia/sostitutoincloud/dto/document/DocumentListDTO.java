@@ -42,4 +42,6 @@ public class DocumentListDTO {
     // Liquidazione che include la prenotazione del documento (null se non ancora liquidata)
     private Integer settlementId;
     private String settlementStato;
+    // Fattura con una nota di credito attiva (non annullata) collegata
+    private Boolean stornata;
 }

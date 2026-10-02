@@ -135,6 +135,63 @@ export interface BookingDetail extends BookingListItem {
   tenantPec?: string;
   // Documenti fiscali associati alla prenotazione
   documenti: FiscalDocumentSummary[];
+  /** Righe delle note di credito attive: mostrate in coda allo split, non ricalcolano il netto. */
+  righeNdc?: RigaNdc[];
+  // Copia di un booking stornato (migration 026): link bidirezionale origine ↔ copia
+  fkBookingOrigineId?: number;
+  bookingOrigineCodice?: string;
+  fkBookingCopiaId?: number;
+  bookingCopiaCodice?: string;
+  /** Ritenuta già in un F24 pagato/inviato: la NDC registra un credito d'imposta. */
+  ritenutaVersata?: boolean;
+}
+
+// ── Note di credito (NDC) ────────────────────────────────────────────────────
+
+/** Riga di nota di credito: importi POSITIVI (il documento NDC ha totali negativi). */
+export interface RigaNdc {
+  id: number;
+  fkFiscalDocumentId?: number;
+  /** Numero della nota di credito (NC-YYYY-NNNN). */
+  documentNumber?: string;
+  fkSplitEconomicoId?: number;
+  descrizione: string;
+  importoStornato: number;
+  imponibileStornato?: number;
+  aliquotaIva: number;
+  ordinamento: number;
+}
+
+/** La NDC è sempre totale: le righe le ricava il backend dalle voci della fattura. */
+export interface EmettNdcRequest {
+  fkFiscalDocumentId: number;
+}
+
+/** fiscal_document della NDC creata/annullata (importi negativi). */
+export interface NotaCredito {
+  id: number;
+  documentNumber: string;
+  fkBookingId: number;
+  fkDocumentoCollegatoId: number;
+  totalAmount: number;
+  imponibile: number;
+  vatAmount: number;
+  issueDate: string;
+}
+
+/** POST /api/ndc — 400 validazione o NDC già presente, 404 fattura non trovata. */
+export async function emettiNdc(data: EmettNdcRequest): Promise<NotaCredito> {
+  return post<NotaCredito>('/ndc', data);
+}
+
+/** Copia un booking 'stornata' per riemetterne i documenti (POST /api/bookings/{id}/copia). */
+export async function copiaBooking(id: number): Promise<BookingDetail> {
+  return post<BookingDetail>(`/bookings/${id}/copia`, {});
+}
+
+/** DELETE /api/ndc/{id} — 400 se già inviata allo SDI o se il booking è già stato copiato. */
+export async function annullaNdc(id: number): Promise<NotaCredito> {
+  return del<NotaCredito>(`/ndc/${id}`);
 }
 
 export async function getBookings(params?: {

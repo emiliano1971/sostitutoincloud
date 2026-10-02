@@ -34,7 +34,7 @@ public class BookingDAO {
     public static final int STATO_CANCELLED  = 6;
 
     private static final String SELECT_ALL =
-            "SELECT b.id, b.fk_tenant_id, b.fk_property_id, b.fk_owner_id, b.fk_canale_ota_id, b.fk_regime_fiscale_id, " +
+            "SELECT b.id, b.fk_tenant_id, b.fk_property_id, b.fk_owner_id, b.fk_canale_ota_id, b.fk_regime_fiscale_id, b.fk_booking_origine_id, " +
             "b.external_booking_id, b.guest_name, b.guest_tax_code, " +
             "b.guest_birth_date, b.guest_sesso, b.guest_birth_place, b.guest_birth_belfiore, " +
             "b.guest_doc_type, b.guest_doc_number, b.guest_country, b.guest_address, b.guest_phone, " +
@@ -344,5 +344,36 @@ public class BookingDAO {
         } catch (IOException e) {
             throw new IllegalStateException("Impossibile caricare SQL: " + classpath, e);
         }
+    }
+
+    /** Prenotazioni sugli immobili del proprietario: blocca l'eliminazione del proprietario. */
+    public int countByOwnerProperties(Integer ownerId, Integer tenantId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM booking b JOIN property p ON p.id = b.fk_property_id " +
+                "WHERE p.fk_owner_id = ? AND p.fk_tenant_id = ?",
+                Integer.class, ownerId, tenantId);
+        log.debug("BookingDAO.countByOwnerProperties() - ownerId={} tenantId={} count={}", ownerId, tenantId, count);
+        return count != null ? count : 0;
+    }
+
+    /**
+     * Copia attiva (stato diverso da 'stornata') di un booking stornato.
+     * Il filtro sullo stato passa dalla lookup stato_prenotazione per codice.
+     */
+    public Optional<Booking> findByOrigine(Integer fkBookingOrigineId, Integer tenantId) {
+        log.debug("BookingDAO.findByOrigine() - origineId={} tenantId={}", fkBookingOrigineId, tenantId);
+        List<Booking> result = jdbcTemplate.query(
+                SELECT_ALL + " WHERE b.fk_booking_origine_id = ? AND b.fk_tenant_id = ? " +
+                "AND b.fk_stato_prenotazione_id <> (SELECT id FROM stato_prenotazione WHERE codice = 'stornata') " +
+                "ORDER BY b.id LIMIT 1",
+                bookingRowMapper, fkBookingOrigineId, tenantId);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /** Collega la copia al booking di origine (la copia nasce da createManuale). */
+    public void updateBookingOrigine(Integer bookingId, Integer fkBookingOrigineId) {
+        log.info("BookingDAO.updateBookingOrigine() - bookingId={} origineId={}", bookingId, fkBookingOrigineId);
+        jdbcTemplate.update("UPDATE booking SET fk_booking_origine_id = ?, updated_at = NOW() WHERE id = ?",
+                fkBookingOrigineId, bookingId);
     }
 }

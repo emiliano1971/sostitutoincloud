@@ -39,4 +39,6 @@ FROM withholding_ledger wl
          LEFT JOIN fiscal_document fd ON fd.id = wl.fk_fiscal_document_id
 WHERE wl.fk_f24_record_id = ?
   AND wl.fk_tenant_id = ?
+  -- migration 027: i crediti compensati nell'F24 non sono ritenute (vedi importo_credito)
+  AND wl.stato <> 'compensato'
 ORDER BY b.checkin_date, wl.id

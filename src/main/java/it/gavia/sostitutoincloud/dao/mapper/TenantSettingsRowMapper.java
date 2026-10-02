@@ -34,6 +34,7 @@ public class TenantSettingsRowMapper implements RowMapper<TenantSettings> {
                 .alertScadenzeF24(rs.getBoolean("alert_scadenze_f24"))
                 .notificheEmail(rs.getBoolean("notifiche_email"))
                 .fkCanaleOtaDefaultId(rs.getObject("fk_canale_ota_default_id", Integer.class))
+                .codiceTributoCreditoImposta(rs.getString("codice_tributo_credito"))
                 .createdAt(rs.getTimestamp("created_at") != null
                         ? rs.getTimestamp("created_at").toLocalDateTime() : null)
                 .updatedAt(rs.getTimestamp("updated_at") != null

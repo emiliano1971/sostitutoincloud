@@ -154,6 +154,10 @@ public class TenantSettingsService {
                         dto.getFkCanaleOtaDefaultId() == null
                                 ? existing.getFkCanaleOtaDefaultId()
                                 : dto.getFkCanaleOtaDefaultId() == 0 ? null : dto.getFkCanaleOtaDefaultId())
+                .codiceTributoCreditoImposta(
+                        dto.getCodiceTributoCreditoImposta() != null && !dto.getCodiceTributoCreditoImposta().isBlank()
+                                ? dto.getCodiceTributoCreditoImposta().trim()
+                                : existing.getCodiceTributoCreditoImposta())
                 .build();
 
         TenantSettings saved = tenantSettingsDAO.save(updated);
@@ -185,7 +189,7 @@ public class TenantSettingsService {
         return TenantSettings.builder()
                 .fkTenantId(tenantId)
                 .withholdingRatePrimary(new BigDecimal("21.00"))
-                .withholdingRateSecondary(new BigDecimal("26.00"))
+                .withholdingRateSecondary(new BigDecimal("21.00"))
                 .codiceTributoF24("1919")
                 .documentWindowDays(12)
                 .cedolareSeccaEnabled(true)
@@ -200,6 +204,7 @@ public class TenantSettingsService {
                 .alertScadenzeDocumenti(true)
                 .alertScadenzeF24(true)
                 .notificheEmail(true)
+                .codiceTributoCreditoImposta("6782")
                 .build();
     }
 
@@ -237,6 +242,7 @@ public class TenantSettingsService {
                 .alertScadenzeF24(s.getAlertScadenzeF24())
                 .notificheEmail(s.getNotificheEmail())
                 .fkCanaleOtaDefaultId(s.getFkCanaleOtaDefaultId())
+                .codiceTributoCreditoImposta(s.getCodiceTributoCreditoImposta())
                 .build();
     }
 }

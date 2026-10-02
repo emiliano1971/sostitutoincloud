@@ -76,4 +76,9 @@ public class DocumentDetailDTO {
     private String tenantTaxCode;
     private String tenantLegalAddress;
     private String tenantPec;
+
+    // Note di credito (migration 025)
+    private String documentoCollegatoNumber;          // NDC: numero della fattura stornata
+    private List<FiscalDocumentSummaryDTO> noteCredito; // fattura: NDC collegate (annullate comprese)
+    private String statoStorno;                       // fattura: 'parziale' / 'totale' / null
 }

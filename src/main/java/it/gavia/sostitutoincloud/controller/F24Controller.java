@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.controller;
 
+import it.gavia.sostitutoincloud.dto.fiscal.CreditoCompensazioneRequest;
 import it.gavia.sostitutoincloud.dto.fiscal.F24GeneraRequestDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.F24GenerazioneResultDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.F24RecordDTO;
@@ -85,6 +86,29 @@ public class F24Controller {
     public ResponseEntity<F24RecordDTO> marcaPagato(@PathVariable Integer id) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         return ResponseEntity.ok(f24Service.marcaPagato(tenantId, id));
+    }
+
+    /**
+     * Compensa crediti d'imposta da NDC nell'F24 (sostituisce le compensazioni precedenti).
+     * 200 dettaglio F24 aggiornato; 400 validazione o F24 già pagato/inviato; 404 non trovato.
+     */
+    @PostMapping("/{id}/crediti")
+    public ResponseEntity<?> applicaCrediti(@PathVariable Integer id,
+                                            @RequestBody java.util.List<CreditoCompensazioneRequest> compensazioni) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        Integer utenteId = SecurityUtils.getCurrentUtenteId();
+        log.info("F24Controller.applicaCrediti() - tenantId={} f24Id={} crediti={}", tenantId, id,
+                compensazioni != null ? compensazioni.size() : 0);
+        try {
+            return ResponseEntity.ok(f24Service.applicaCrediti(tenantId, utenteId, id, compensazioni));
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("F24Controller.applicaCrediti() - 400: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
     }
 
     @PatchMapping("/{id}/ricalcola")

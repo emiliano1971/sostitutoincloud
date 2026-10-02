@@ -528,6 +528,7 @@ CREATE TABLE booking (
     fk_owner_id                     INTEGER                 REFERENCES owner_profile(id) ON DELETE RESTRICT, -- proprietario, denormalizzato dalla catena booking→property per query dirette
     fk_canale_ota_id                INTEGER                 REFERENCES canale_ota(id) ON DELETE SET NULL,
     fk_regime_fiscale_id            INTEGER                 REFERENCES regime_fiscale(id) ON DELETE SET NULL, -- regime del proprietario fotografato all'inserimento (migration 017); la FK non vincola metadata='REGIME_FISCALE'
+    fk_booking_origine_id           INTEGER                 REFERENCES booking(id) ON DELETE SET NULL, -- migration 026: booking 'stornata' da cui questa prenotazione è stata copiata
     external_booking_id             VARCHAR(100),           -- ID prenotazione sul canale OTA
     guest_name                      VARCHAR(150)            NOT NULL,
     guest_tax_code                  VARCHAR(20),            -- VARCHAR perché può essere codice fiscale estero
@@ -683,6 +684,36 @@ CREATE TRIGGER trg_fiscal_document_updated_at
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
+-- Righe delle note di credito (migration 025). La NDC è un fiscal_document di tipo
+-- 'nota_credito' collegato alla fattura con fk_documento_collegato_id; numero NC-YYYY-NNNN.
+CREATE TABLE fiscal_document_riga_ndc (
+    id                      SERIAL          PRIMARY KEY,
+    fk_fiscal_document_id   INTEGER         NOT NULL REFERENCES fiscal_document(id) ON DELETE CASCADE,
+    fk_tenant_id            INTEGER         NOT NULL REFERENCES tenant(id) ON DELETE RESTRICT,
+    fk_split_economico_id   INTEGER         REFERENCES booking_split_economico(id) ON DELETE SET NULL,
+    descrizione             VARCHAR(255)    NOT NULL,
+    importo_stornato        DECIMAL(10,2)   NOT NULL,   -- positivo nel DB, negativo nel documento
+    imponibile_stornato     DECIMAL(10,2),
+    aliquota_iva            DECIMAL(5,2)    NOT NULL DEFAULT 0,
+    ordinamento             SMALLINT        NOT NULL DEFAULT 0,
+    created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
+    created_by              INTEGER
+);
+COMMENT ON TABLE fiscal_document_riga_ndc IS
+    'Righe della nota di credito. '
+    'importo_stornato è positivo nel DB e negativo nel documento fiscale. '
+    'fk_split_economico_id indica la riga di booking_split_economico stornata, '
+    'NULL per storno totale o riga libera.';
+
+CREATE INDEX idx_fdrndc_document ON fiscal_document_riga_ndc(fk_fiscal_document_id);
+CREATE INDEX idx_fdrndc_tenant   ON fiscal_document_riga_ndc(fk_tenant_id);
+
+CREATE TRIGGER trg_fdrndc_updated_at
+    BEFORE UPDATE ON fiscal_document_riga_ndc
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
 -- Progressivo invio SDI: contatore per tenant + anno usato nel ProgressivoInvio
 -- e nel nome file XML (IT{PIVA}_{PROGRESSIVO}.xml). Incrementato atomicamente
 -- con INSERT ... ON CONFLICT DO UPDATE ... RETURNING (SdiProgressivoDAO).
@@ -763,6 +794,11 @@ CREATE TABLE f24_record (
     periodo_mese        SMALLINT,                   -- mese di competenza (1-12), ridondante con period per query veloci
     periodo_anno        SMALLINT,                   -- anno di competenza
     reference_year      SMALLINT,                   -- anno di riferimento fiscale del versamento
+    -- migration 027: crediti d'imposta da NDC compensati (riga 2 del modello F24)
+    importo_credito         DECIMAL(10,2)   DEFAULT 0,      -- totale crediti compensati
+    codice_tributo_credito  VARCHAR(10),                    -- da tenant_settings.codice_tributo_credito
+    anno_credito            INTEGER,                        -- anno della NDC più recente compensata
+    saldo_netto             DECIMAL(10,2),                  -- total_amount - importo_credito: importo da versare
     created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_f24_tenant_period_tributo UNIQUE (fk_tenant_id, period, fk_codice_tributo_id),
@@ -791,12 +827,16 @@ CREATE TABLE withholding_ledger (
     aliquota_ritenuta       DECIMAL(5,2)    NOT NULL,   -- % applicata (21.00 / 26.00)
     ritenuta_amount         DECIMAL(10,2)   NOT NULL,   -- importo della ritenuta operata
     data_evento             DATE            NOT NULL,   -- data dell'evento che genera la ritenuta
-    stato                   VARCHAR(20)     NOT NULL DEFAULT 'da_versare',  -- da_versare / versata
+    stato                   VARCHAR(20)     NOT NULL DEFAULT 'da_versare',  -- da_versare / versata / stornata / credito_imposta (026) / compensato (027)
     fk_f24_record_id        INTEGER         REFERENCES f24_record(id) ON DELETE SET NULL,  -- F24 in cui è confluita
+    fk_ndc_id               INTEGER         REFERENCES fiscal_document(id) ON DELETE SET NULL,  -- migration 026: NDC che ha stornato la ritenuta / generato il credito
+    fk_ledger_origine_id    INTEGER         REFERENCES withholding_ledger(id) ON DELETE SET NULL,  -- migration 027: riga di credito da cui è stata spezzata la compensazione parziale
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
-    updated_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_withholding_per_document  UNIQUE (fk_fiscal_document_id)
+    updated_at              TIMESTAMP       NOT NULL DEFAULT NOW()
 );
+-- migration 027: indice univoco parziale (le righe nate da uno spezzamento condividono il documento NDC)
+CREATE UNIQUE INDEX uq_withholding_per_document ON withholding_ledger(fk_fiscal_document_id)
+    WHERE fk_ledger_origine_id IS NULL;
 COMMENT ON TABLE withholding_ledger IS
     'Registro analitico delle ritenute d acconto operate, una riga per documento fiscale. '
     'Collega la singola ritenuta (booking + documento) al versamento F24 in cui confluisce. '
@@ -867,7 +907,8 @@ INSERT INTO stato_prenotazione (codice, descrizione, finale) VALUES
     ('ready',      'Pronta per emissione documento',               FALSE),
     ('doc_issued', 'Documento fiscale emesso',                     FALSE),
     ('settled',    'Liquidata al proprietario',                    TRUE),
-    ('cancelled',  'Annullata',                                    TRUE);
+    ('cancelled',  'Annullata',                                    TRUE),
+    ('stornata',   'Fattura PM stornata con nota di credito',      FALSE);  -- migration 025
 
 INSERT INTO stato_documento (codice, descrizione, is_error, finale) VALUES
     ('draft',     'Bozza',                    FALSE, FALSE),
@@ -875,7 +916,8 @@ INSERT INTO stato_documento (codice, descrizione, is_error, finale) VALUES
     ('sent_sdi',  'Inviato a SDI',            FALSE, FALSE),
     ('accepted',  'Accettato da SDI',         FALSE, TRUE),
     ('rejected',  'Rifiutato da SDI',         TRUE,  TRUE),
-    ('error',     'Errore generico',          TRUE,  FALSE);
+    ('error',     'Errore generico',          TRUE,  FALSE),
+    ('annullata', 'Annullato',                FALSE, TRUE);   -- migration 025: NDC annullata prima dell'invio SDI
 
 INSERT INTO regime_fiscale (codice, descrizione, metadata) VALUES
     ('cedolare_secca', 'Cedolare secca',    'REGIME_FISCALE'),
@@ -1179,6 +1221,8 @@ CREATE TABLE tenant_settings (
     notifiche_email             BOOLEAN         NOT NULL DEFAULT TRUE,
     -- migration 024: canale OTA per le regole commissione_ota dell'import massivo proprietari
     fk_canale_ota_default_id    INTEGER         REFERENCES canale_ota(id) ON DELETE SET NULL,
+    -- migration 027: codice tributo per i crediti d'imposta da NDC nel modello F24
+    codice_tributo_credito      VARCHAR(10)     NOT NULL DEFAULT '6782',
     created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at                  TIMESTAMP       NOT NULL DEFAULT NOW()
 );

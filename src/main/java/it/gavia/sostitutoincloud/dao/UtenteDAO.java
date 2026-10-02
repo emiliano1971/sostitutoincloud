@@ -193,4 +193,11 @@ public class UtenteDAO {
                 "reset_token = NULL, reset_token_expires_at = NULL, updated_at = NOW() WHERE id = ?",
                 hashedPassword, id);
     }
+
+    /** Utenti di accesso al portale collegati al proprietario (utente.fk_owner_id). */
+    public int countByOwnerId(Integer ownerId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM utente WHERE fk_owner_id = ?", Integer.class, ownerId);
+        return count != null ? count : 0;
+    }
 }

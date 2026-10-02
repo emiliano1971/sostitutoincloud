@@ -4,6 +4,8 @@ import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
 import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
+import it.gavia.sostitutoincloud.dao.F24RecordDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyContractRuleDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
@@ -25,10 +27,12 @@ import it.gavia.sostitutoincloud.dto.booking.BookingVoceExtraDTO;
 import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
+import it.gavia.sostitutoincloud.dto.fiscal.RigaNdcDTO;
 import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.BookingSplitEconomico;
 import it.gavia.sostitutoincloud.model.CanaleOta;
+import it.gavia.sostitutoincloud.model.F24Record;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
@@ -62,7 +66,7 @@ import java.util.stream.Stream;
 public class BookingService {
 
     private static final Set<String> STATI_ESCLUSI_DA_COMPLETARE =
-            Set.of("doc_issued", "settled", "cancelled");
+            Set.of("doc_issued", "settled", "cancelled", "stornata");
 
     private final BookingDAO bookingDAO;
     private final PropertyDAO propertyDAO;
@@ -84,6 +88,8 @@ public class BookingService {
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
     private final TenantSettingsService tenantSettingsService;
     private final PropertyContractRuleDAO contractRuleDAO;
+    private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
+    private final F24RecordDAO f24RecordDAO;
 
     public BookingService(BookingDAO bookingDAO,
                           PropertyDAO propertyDAO,
@@ -104,7 +110,9 @@ public class BookingService {
                           AuditService auditService,
                           BookingSplitEconomicoDAO splitEconomicoDAO,
                           TenantSettingsService tenantSettingsService,
-                          PropertyContractRuleDAO contractRuleDAO) {
+                          PropertyContractRuleDAO contractRuleDAO,
+                          FiscalDocumentRigaNdcDAO rigaNdcDAO,
+                          F24RecordDAO f24RecordDAO) {
         this.bookingDAO = bookingDAO;
         this.propertyDAO = propertyDAO;
         this.ownerProfileDAO = ownerProfileDAO;
@@ -125,6 +133,8 @@ public class BookingService {
         this.splitEconomicoDAO = splitEconomicoDAO;
         this.tenantSettingsService = tenantSettingsService;
         this.contractRuleDAO = contractRuleDAO;
+        this.rigaNdcDAO = rigaNdcDAO;
+        this.f24RecordDAO = f24RecordDAO;
     }
 
     public List<BookingListDTO> findByTenantId(Integer tenantId, BookingFilterDTO filter) {
@@ -1492,6 +1502,9 @@ public class BookingService {
                 .tenantPec(tenant != null ? tenant.getPec() : null)
                 // documenti fiscali associati alla prenotazione
                 .documenti(mapDocumenti(documentiBooking, maps))
+                // righe delle note di credito attive: solo visualizzate in coda allo split,
+                // non ricalcolano costi PM né netto proprietario
+                .righeNdc(righeNdc(documentiBooking, b.getId()))
                 .build();
 
         // settlementStato/settlementId derivati dal settlement reale associato al booking
@@ -1503,7 +1516,141 @@ public class BookingService {
                 });
         log.debug("BookingService: settlementStato={} per bookingId={}", dto.getSettlementStato(), b.getId());
 
+        // Copia di un booking stornato (migration 026): link bidirezionale origine ↔ copia
+        if (b.getFkBookingOrigineId() != null) {
+            dto.setFkBookingOrigineId(b.getFkBookingOrigineId());
+            bookingDAO.findById(b.getFkBookingOrigineId())
+                    .ifPresent(o -> dto.setBookingOrigineCodice(o.getExternalBookingId()));
+        }
+        bookingDAO.findByOrigine(b.getId(), b.getFkTenantId()).ifPresent(c -> {
+            dto.setFkBookingCopiaId(c.getId());
+            dto.setBookingCopiaCodice(c.getExternalBookingId());
+        });
+        // Ritenuta già versata (F24 pagato o inviato): lo storno con NDC genera un credito d'imposta
+        dto.setRitenutaVersata(withholdingLedgerDAO.findByBookingId(b.getId()).stream()
+                .filter(w -> w.getFkNdcId() == null && w.getFkF24RecordId() != null)
+                .map(w -> f24RecordDAO.findById(w.getFkF24RecordId()).map(F24Record::getStato).orElse(null))
+                .anyMatch(s -> "paid".equals(s) || "sent".equals(s)));
+
         return dto;
+    }
+
+    /**
+     * Copia un booking stornato con NDC totale per riemetterne i documenti, preservandone gli
+     * importi: campi del booking e righe di booking_split_economico sono duplicati 1:1
+     * (commissione OTA dal file con source e importo_originale_file, override manuali, voci
+     * extra, tassa di soggiorno). Nessun ricalcolo dalle regole del contratto: la NDC non
+     * tocca le righe split dell'originale, che restano il dato fatturato.
+     * Nuovo ID esterno MAN-{timestamp}; netto e ritenuta da ricalcolaNettoDaSplit(), stato da
+     * aggiornaStato().
+     *
+     * @throws NoSuchElementException booking inesistente o di altro tenant (404)
+     * @throws IllegalStateException  booking non stornato o copia attiva già presente (400)
+     */
+    @Transactional
+    public BookingDetailDTO copiaBooking(Integer tenantId, Integer bookingId, Integer utenteId) {
+        Booking origine = bookingDAO.findById(bookingId)
+                .filter(b -> tenantId.equals(b.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Prenotazione non trovata: id=" + bookingId));
+        String statoOrigine = statoPrenotazioneDAO.findById(origine.getFkStatoPrenotazioneId())
+                .map(StatoPrenotazione::getCodice).orElse(null);
+        if (!"stornata".equals(statoOrigine)) {
+            throw new IllegalStateException("Solo i booking stornati possono essere copiati");
+        }
+        bookingDAO.findByOrigine(bookingId, tenantId).ifPresent(c -> {
+            throw new IllegalStateException("Esiste già una copia attiva: " + c.getExternalBookingId());
+        });
+
+        // 1. Booking con gli stessi dati e importi dell'originale
+        String extId = "MAN-" + System.currentTimeMillis();
+        Booking saved = bookingDAO.insert(Booking.builder()
+                .fkTenantId(tenantId)
+                .fkPropertyId(origine.getFkPropertyId())
+                .fkCanaleOtaId(origine.getFkCanaleOtaId())
+                .fkOwnerId(origine.getFkOwnerId())
+                .fkRegimeFiscaleId(origine.getFkRegimeFiscaleId())
+                .externalBookingId(extId)
+                .checkinDate(origine.getCheckinDate())
+                .checkoutDate(origine.getCheckoutDate())
+                .nights(origine.getNights())
+                .guests(origine.getGuests())
+                .grossAmount(origine.getGrossAmount())
+                .otaCommissionAmount(origine.getOtaCommissionAmount())
+                .cleaningAmount(origine.getCleaningAmount())
+                .pmFeeAmount(origine.getPmFeeAmount())
+                .ownerNetAmount(origine.getOwnerNetAmount())
+                .withholdingAmount(origine.getWithholdingAmount())
+                .aliquotaRitenuta(origine.getAliquotaRitenuta())
+                .touristTaxAmount(origine.getTouristTaxAmount())
+                .touristTaxIncludedInGross(origine.getTouristTaxIncludedInGross())
+                .touristTaxCollection(origine.getTouristTaxCollection())
+                .totalCostiPm(origine.getTotalCostiPm())
+                .guestName(origine.getGuestName())
+                .guestTaxCode(origine.getGuestTaxCode())
+                .guestBirthDate(origine.getGuestBirthDate())
+                .guestSesso(origine.getGuestSesso())
+                .guestBirthPlace(origine.getGuestBirthPlace())
+                .guestBirthBelfiore(origine.getGuestBirthBelfiore())
+                .guestDocType(origine.getGuestDocType())
+                .guestDocNumber(origine.getGuestDocNumber())
+                .guestCountry(origine.getGuestCountry())
+                .guestAddress(origine.getGuestAddress())
+                .guestPhone(origine.getGuestPhone())
+                .fkStatoPrenotazioneId(BookingDAO.STATO_IMPORTED)
+                .paymentStatus("pending")
+                .settlementStatus("pending")
+                .build());
+        bookingDAO.updateBookingOrigine(saved.getId(), bookingId);
+
+        // 2. Righe split duplicate 1:1 (stessi importi, source e valore originale dal file)
+        List<BookingSplitEconomico> righeOrigine = splitEconomicoDAO.findByBookingId(bookingId);
+        for (BookingSplitEconomico r : righeOrigine) {
+            splitEconomicoDAO.insert(BookingSplitEconomico.builder()
+                    .fkBookingId(saved.getId())
+                    .fkTenantId(tenantId)
+                    .fkPropertyContractRuleId(r.getFkPropertyContractRuleId())
+                    .tipoVoce(r.getTipoVoce())
+                    .descrizione(r.getDescrizione())
+                    .importo(r.getImporto())
+                    .imponibile(r.getImponibile())
+                    .importoOriginaleFile(r.getImportoOriginaleFile())
+                    .aliquotaIva(r.getAliquotaIva())
+                    .includeInFatturaPm(r.getIncludeInFatturaPm())
+                    .ordinamento(r.getOrdinamento())
+                    .source(r.getSource())
+                    .createdBy(utenteId)
+                    .updatedBy(utenteId)
+                    .build());
+        }
+
+        // 3-4. Netto/ritenuta/total_costi_pm dalle righe, poi stato reale dai dati
+        ricalcolaNettoDaSplit(saved.getId(), tenantId);
+        aggiornaStato(saved.getId());
+
+        auditService.log("booking.copy", "Booking", saved.getId(),
+                "Copia della prenotazione stornata " + origine.getExternalBookingId() + " → " + extId);
+        log.info("BookingService.copiaBooking() - origine={} nuovoId={} righeSplit={} utente={}",
+                bookingId, saved.getId(), righeOrigine.size(), utenteId);
+        return findById(tenantId, saved.getId()).orElseThrow();
+    }
+
+    /** Righe NDC non annullate del booking, con il numero della nota di credito. */
+    private List<RigaNdcDTO> righeNdc(List<FiscalDocument> documentiBooking, Integer bookingId) {
+        Map<Integer, String> numeri = documentiBooking.stream()
+                .collect(Collectors.toMap(FiscalDocument::getId, FiscalDocument::getDocumentNumber, (a, c) -> a));
+        return rigaNdcDAO.findByBookingId(bookingId).stream()
+                .map(r -> RigaNdcDTO.builder()
+                        .id(r.getId())
+                        .fkFiscalDocumentId(r.getFkFiscalDocumentId())
+                        .documentNumber(numeri.get(r.getFkFiscalDocumentId()))
+                        .fkSplitEconomicoId(r.getFkSplitEconomicoId())
+                        .descrizione(r.getDescrizione())
+                        .importoStornato(r.getImportoStornato())
+                        .imponibileStornato(r.getImponibileStornato())
+                        .aliquotaIva(r.getAliquotaIva())
+                        .ordinamento(r.getOrdinamento())
+                        .build())
+                .toList();
     }
 
     /** I documenti sono già stati letti da toDetailDTO(): qui si mappano soltanto. */

@@ -9,8 +9,8 @@ import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { ArrowLeft, User, Building2, CreditCard, Mail, Phone, FileText, PowerOff, Power, Edit, Loader2, AlertCircle } from 'lucide-react';
-import { getOwnerById, updateOwnerStatus, updateOwner, type OwnerDetail as OwnerDetailType } from '@/api/ownerApi';
+import { ArrowLeft, User, Building2, CreditCard, Mail, Phone, FileText, PowerOff, Power, Edit, Loader2, AlertCircle, Trash2 } from 'lucide-react';
+import { getOwnerById, updateOwnerStatus, updateOwner, eliminaProprietario, type OwnerDetail as OwnerDetailType } from '@/api/ownerApi';
 import { useLookup } from '@/contexts/LookupContext';
 import { getProperties, type PropertyListItem } from '@/api/propertyApi';
 import { getBookings, type BookingListItem } from '@/api/bookingApi';
@@ -38,6 +38,7 @@ const OwnerDetail = () => {
   const [error, setError] = useState<string | null>(null);
   const [showDeactivate, setShowDeactivate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
   const [editForm, setEditForm] = useState({
     firstName: '', lastName: '', legalName: '', taxCode: '',
     vatNumber: '', email: '', phone: '', iban: '', fiscalRegimeCodice: 'cedolare_secca',
@@ -122,6 +123,27 @@ const OwnerDetail = () => {
       </div>
     );
   }
+
+  // Eliminazione definitiva: il backend la blocca (400) se esistono prenotazioni o dati collegati
+  const handleElimina = async () => {
+    if (!owner) return;
+    const nome = [owner.lastName, owner.firstName].filter(Boolean).join(' ') || owner.legalName || '';
+    if (!window.confirm(`Eliminare il proprietario ${nome} e tutti i suoi immobili?\nQuesta operazione è irreversibile.`)) return;
+    setEliminando(true);
+    try {
+      await eliminaProprietario(owner.id);
+      toast({ title: 'Proprietario eliminato' });
+      navigate('/owners');
+    } catch (e) {
+      toast({
+        title: 'Impossibile eliminare',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setEliminando(false);
+    }
+  };
 
   const handleOpenEdit = () => {
     setEditForm({
@@ -344,6 +366,10 @@ const OwnerDetail = () => {
         <CardContent className="p-4 flex gap-3">
           <Button variant="outline" size="sm" className="gap-2" onClick={handleOpenEdit}>
             <Edit className="h-4 w-4" /> Modifica Dati
+          </Button>
+          <Button variant="destructive" size="sm" onClick={handleElimina} disabled={eliminando}>
+            {eliminando ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
+            Elimina
           </Button>
           <Button variant={owner.attivo ? 'destructive' : 'default'} size="sm" className="gap-2" onClick={() => setShowDeactivate(true)}>
             {owner.attivo ? <><PowerOff className="h-4 w-4" /> Disattiva Proprietario</> : <><Power className="h-4 w-4" /> Riattiva Proprietario</>}

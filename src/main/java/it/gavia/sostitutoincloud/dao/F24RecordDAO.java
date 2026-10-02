@@ -21,6 +21,7 @@ public class F24RecordDAO {
     private static final String SELECT_ALL =
             "SELECT id, fk_tenant_id, fk_codice_tributo_id, period, total_amount, withholdings_count, " +
             "stato, deadline_date, payment_date, periodo_mese, periodo_anno, reference_year, " +
+            "importo_credito, codice_tributo_credito, anno_credito, saldo_netto, " +
             "created_at, updated_at FROM f24_record";
 
     private final JdbcTemplate jdbcTemplate;
@@ -106,6 +107,21 @@ public class F24RecordDAO {
         log.info("F24RecordDAO.updateTotale() - id={} totale={} count={}", id, totalAmount, withholdingsCount);
     }
 
+    /**
+     * Ricalcola totale e numero ritenute dell'F24 dalle righe ancora agganciate,
+     * escluse le stornate (migration 026, storno da nota di credito).
+     */
+    public void ricalcolaTotale(Integer id) {
+        String sql = "UPDATE f24_record SET " +
+                "total_amount = (SELECT COALESCE(SUM(ritenuta_amount), 0) FROM withholding_ledger " +
+                "                WHERE fk_f24_record_id = ? AND stato NOT IN ('stornata', 'compensato', 'credito_imposta')), " +
+                "withholdings_count = (SELECT COUNT(*) FROM withholding_ledger " +
+                "                WHERE fk_f24_record_id = ? AND stato NOT IN ('stornata', 'compensato', 'credito_imposta')), " +
+                "updated_at = NOW() WHERE id = ?";
+        jdbcTemplate.update(sql, id, id, id);
+        log.info("F24RecordDAO.ricalcolaTotale() - id={}", id);
+    }
+
     public int deleteById(Integer id) {
         int righe = jdbcTemplate.update("DELETE FROM f24_record WHERE id = ?", id);
         log.info("F24RecordDAO.deleteById() - id={} righe={}", id, righe);
@@ -123,5 +139,14 @@ public class F24RecordDAO {
         });
         log.info("F24RecordDAO.updateStato() - id={} stato={} paymentDate={}", id, stato, paymentDate);
         return findById(id).orElseThrow(() -> new RuntimeException("F24 non trovato: id=" + id));
+    }
+
+    /** Crediti compensati e saldo da versare (migration 027). */
+    public void updateCredito(Integer id, java.math.BigDecimal importoCredito, String codiceTributoCredito,
+                              Integer annoCredito, java.math.BigDecimal saldoNetto) {
+        jdbcTemplate.update("UPDATE f24_record SET importo_credito = ?, codice_tributo_credito = ?, " +
+                        "anno_credito = ?, saldo_netto = ?, updated_at = NOW() WHERE id = ?",
+                importoCredito, codiceTributoCredito, annoCredito, saldoNetto, id);
+        log.info("F24RecordDAO.updateCredito() - id={} credito={} saldo={}", id, importoCredito, saldoNetto);
     }
 }

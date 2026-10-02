@@ -3,6 +3,7 @@ package it.gavia.sostitutoincloud.service;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.ComuneItalianoDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.SdiProgressivoDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
@@ -13,6 +14,7 @@ import it.gavia.sostitutoincloud.dto.sdi.SdiFileDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.ComuneItaliano;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
+import it.gavia.sostitutoincloud.model.FiscalDocumentRigaNdc;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.Tenant;
@@ -39,7 +41,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Generazione del file XML FatturaPA (FPR12) per le fatture PM da trasmettere allo SDI.
+ * Generazione del file XML FatturaPA (FPR12) per le fatture PM (TD01) e le relative note di
+ * credito (TD04) da trasmettere allo SDI.
  * Le ricevute owner NON vanno allo SDI: sono documenti interni tra PM e proprietario.
  *
  * Il file viene scritto in app.storage.sdi-outgoing-path; la trasmissione effettiva
@@ -52,6 +55,7 @@ public class SdiXmlService {
     // Codici della lookup tipo_documento: lo schema usa 'fattura'/'ricevuta',
     // i termini di dominio sono fattura_pm/ricevuta_owner.
     private static final String CODICE_FATTURA = "fattura";
+    private static final String CODICE_NOTA_CREDITO = "nota_credito";
     /**
      * Stati in cui lo SDI ha già preso in carico il file: nessuna ritrasmissione.
      * 'rejected' NON è incluso: una fattura scartata va corretta e ritrasmessa, ed è
@@ -97,6 +101,7 @@ public class SdiXmlService {
     private final ComuneItalianoDAO comuneItalianoDAO;
     private final AuditService auditService;
     private final VociFatturaPmService vociFatturaPmService;
+    private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
 
     public SdiXmlService(FiscalDocumentDAO fiscalDocumentDAO,
                          BookingDAO bookingDAO,
@@ -108,8 +113,10 @@ public class SdiXmlService {
                          StatoDocumentoDAO statoDocumentoDAO,
                          ComuneItalianoDAO comuneItalianoDAO,
                          AuditService auditService,
-                         VociFatturaPmService vociFatturaPmService) {
+                         VociFatturaPmService vociFatturaPmService,
+                         FiscalDocumentRigaNdcDAO rigaNdcDAO) {
         this.vociFatturaPmService = vociFatturaPmService;
+        this.rigaNdcDAO = rigaNdcDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.tenantDAO = tenantDAO;
@@ -137,16 +144,55 @@ public class SdiXmlService {
                 .map(TipoDocumento::getCodice)
                 .orElseThrow(() -> new IllegalStateException(
                         "Tipo documento non risolvibile per il documento id=" + fiscalDocumentId));
-        if (!CODICE_FATTURA.equals(codiceTipo)) {
+        if (!CODICE_FATTURA.equals(codiceTipo) && !CODICE_NOTA_CREDITO.equals(codiceTipo)) {
             throw new IllegalStateException(
-                    "Solo le fatture PM vanno trasmesse allo SDI: la ricevuta owner è un documento interno");
+                    "Solo le fatture PM e le note di credito vanno trasmesse allo SDI: la ricevuta owner è un documento interno");
         }
+        boolean notaCredito = CODICE_NOTA_CREDITO.equals(codiceTipo);
 
         String statoCodice = statoDocumentoDAO.findById(doc.getFkStatoDocumentoId())
                 .map(StatoDocumento::getCodice)
                 .orElse(null);
         if (STATI_GIA_INVIATI.contains(statoCodice)) {
-            throw new IllegalStateException("Fattura già inviata allo SDI");
+            throw new IllegalStateException(notaCredito ? "Nota di credito già inviata allo SDI" : "Fattura già inviata allo SDI");
+        }
+        if ("annullata".equals(statoCodice)) {
+            throw new IllegalStateException("Documento annullato: non trasmissibile allo SDI");
+        }
+        // Fattura stornata da una NDC attiva (non annullata): non va più trasmessa. Copre anche
+        // il booking 'stornata', che con la NDC sempre totale implica una NDC attiva.
+        if (!notaCredito) {
+            Integer tipoNdcId = tipoDocumentoDAO.findByCodice(CODICE_NOTA_CREDITO)
+                    .map(TipoDocumento::getId).orElse(null);
+            boolean ndcAttiva = doc.getFkBookingId() != null && tipoNdcId != null
+                    && fiscalDocumentDAO.findByBookingId(doc.getFkBookingId()).stream()
+                    .filter(d -> tipoNdcId.equals(d.getFkTipoDocumentoId()))
+                    .filter(d -> fiscalDocumentId.equals(d.getFkDocumentoCollegatoId()))
+                    .anyMatch(d -> !"annullata".equals(statoDocumentoDAO.findById(d.getFkStatoDocumentoId())
+                            .map(StatoDocumento::getCodice).orElse(null)));
+            if (ndcAttiva) {
+                throw new IllegalStateException(
+                        "Impossibile inviare allo SDI: esiste una nota di credito attiva per questa fattura");
+            }
+        }
+
+        // TD04: la fattura stornata va citata in DatiFattureCollegate
+        FiscalDocument fatturaCollegata = null;
+        if (notaCredito) {
+            fatturaCollegata = doc.getFkDocumentoCollegatoId() != null
+                    ? fiscalDocumentDAO.findById(doc.getFkDocumentoCollegatoId()).orElse(null)
+                    : null;
+            if (fatturaCollegata == null) {
+                throw new IllegalStateException("Nota di credito senza fattura collegata: id=" + fiscalDocumentId);
+            }
+            // Un TD04 storna una fattura trasmessa: se la fattura non è mai andata allo SDI
+            // la NDC resta interna (SETUP-NDC-TOTALE.md, punto 2B)
+            String statoFattura = statoDocumentoDAO.findById(fatturaCollegata.getFkStatoDocumentoId())
+                    .map(StatoDocumento::getCodice).orElse(null);
+            if (!STATI_GIA_INVIATI.contains(statoFattura)) {
+                throw new IllegalStateException("La fattura " + fatturaCollegata.getDocumentNumber()
+                        + " non è stata inviata allo SDI: la nota di credito non va trasmessa");
+            }
         }
 
         // 2. Dati collegati
@@ -175,7 +221,7 @@ public class SdiXmlService {
 
         try {
             // 5. XML
-            String xml = buildXml(doc, booking, tenant, settings, property, piva, progressivo);
+            String xml = buildXml(doc, fatturaCollegata, booking, tenant, settings, property, piva, progressivo);
 
             // 6-7. Directory e scrittura file in outgoing/ (lo legge il tunnel SDI)
             Path dir = Path.of(sdiOutgoingPath);
@@ -254,9 +300,15 @@ public class SdiXmlService {
 
     // ────────────────────────────── costruzione XML ──────────────────────────────
 
-    private String buildXml(FiscalDocument doc, Booking booking, Tenant tenant,
+    /**
+     * @param fatturaCollegata fattura stornata se doc è una nota di credito (TD04), altrimenti null.
+     *                         Nel TD04 tutti gli importi sono POSITIVI: è il tipo documento a
+     *                         indicare lo storno (nel DB la NDC ha importi negativi).
+     */
+    private String buildXml(FiscalDocument doc, FiscalDocument fatturaCollegata, Booking booking, Tenant tenant,
                             TenantSettings settings, Property property,
                             String piva, String progressivo) {
+        boolean notaCredito = fatturaCollegata != null;
         boolean ospiteItaliano = isOspiteItaliano(booking);
         BigDecimal aliquota = nz(doc.getAliquotaIva());
         String natura = settings != null && settings.getNaturaIvaEsente() != null
@@ -264,13 +316,15 @@ public class SdiXmlService {
         String regime = settings != null && settings.getRegimeFiscalePm() != null
                 ? settings.getRegimeFiscalePm() : REGIME_FISCALE_DEFAULT;
         Indirizzo sedeTenant = sedeTenant(tenant);
-        List<Linea> linee = buildLinee(doc, booking, aliquota);
+        List<Linea> linee = notaCredito ? buildLineeNdc(doc) : buildLinee(doc, booking, aliquota);
 
         BigDecimal totImponibile = linee.stream().map(l -> l.imponibile)
                 .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
         BigDecimal totImposta = linee.stream().map(l -> l.imposta)
                 .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
-        if (doc.getImponibile() != null && totImponibile.compareTo(doc.getImponibile()) != 0) {
+        // Importo documento sempre positivo (TD04 compreso)
+        BigDecimal totaleDocumento = nz(doc.getTotalAmount()).abs();
+        if (doc.getImponibile() != null && totImponibile.compareTo(doc.getImponibile().abs()) != 0) {
             log.warn("SdiXmlService - imponibile righe {} != imponibile documento {} (docId={})",
                     totImponibile, doc.getImponibile(), doc.getId());
         }
@@ -377,7 +431,7 @@ public class SdiXmlService {
         x.append("  <FatturaElettronicaBody xmlns=\"\">\n");
         x.append("    <DatiGenerali>\n");
         x.append("      <DatiGeneraliDocumento>\n");
-        x.append("        <TipoDocumento>TD01</TipoDocumento>\n");
+        x.append("        <TipoDocumento>").append(notaCredito ? "TD04" : "TD01").append("</TipoDocumento>\n");
         x.append("        <Divisa>EUR</Divisa>\n");
         x.append("        <Data>").append(doc.getIssueDate().format(DATA_SDI)).append("</Data>\n");
         x.append("        <Numero>").append(esc(doc.getDocumentNumber())).append("</Numero>\n");
@@ -387,9 +441,15 @@ public class SdiXmlService {
             x.append("          <ImportoBollo>").append(imp(doc.getBolloAmount())).append("</ImportoBollo>\n");
             x.append("        </DatiBollo>\n");
         }
-        x.append("        <ImportoTotaleDocumento>").append(imp(doc.getTotalAmount()))
+        x.append("        <ImportoTotaleDocumento>").append(imp(totaleDocumento))
                 .append("</ImportoTotaleDocumento>\n");
         x.append("      </DatiGeneraliDocumento>\n");
+        if (notaCredito) {
+            x.append("      <DatiFattureCollegate>\n");
+            x.append("        <IdDocumento>").append(esc(fatturaCollegata.getDocumentNumber())).append("</IdDocumento>\n");
+            x.append("        <Data>").append(fatturaCollegata.getIssueDate().format(DATA_SDI)).append("</Data>\n");
+            x.append("      </DatiFattureCollegate>\n");
+        }
         x.append("    </DatiGenerali>\n");
 
         x.append("    <DatiBeniServizi>\n");
@@ -418,13 +478,16 @@ public class SdiXmlService {
         x.append("      </DatiRiepilogo>\n");
         x.append("    </DatiBeniServizi>\n");
 
-        x.append("    <DatiPagamento>\n");
-        x.append("      <CondizioniPagamento>TP02</CondizioniPagamento>\n");
-        x.append("      <DettaglioPagamento>\n");
-        x.append("        <ModalitaPagamento>MP05</ModalitaPagamento>\n");
-        x.append("        <ImportoPagamento>").append(imp(doc.getTotalAmount())).append("</ImportoPagamento>\n");
-        x.append("      </DettaglioPagamento>\n");
-        x.append("    </DatiPagamento>\n");
+        // DatiPagamento è facoltativo: omesso nella nota di credito (nessun incasso)
+        if (!notaCredito) {
+            x.append("    <DatiPagamento>\n");
+            x.append("      <CondizioniPagamento>TP02</CondizioniPagamento>\n");
+            x.append("      <DettaglioPagamento>\n");
+            x.append("        <ModalitaPagamento>MP05</ModalitaPagamento>\n");
+            x.append("        <ImportoPagamento>").append(imp(totaleDocumento)).append("</ImportoPagamento>\n");
+            x.append("      </DettaglioPagamento>\n");
+            x.append("    </DatiPagamento>\n");
+        }
         x.append("  </FatturaElettronicaBody>\n");
         x.append("</FatturaElettronica>\n");
         return x.toString();
@@ -456,6 +519,24 @@ public class SdiXmlService {
             BigDecimal imponibile = nz(doc.getImponibile()).setScale(2, RoundingMode.HALF_UP);
             BigDecimal imposta = nz(doc.getVatAmount()).setScale(2, RoundingMode.HALF_UP);
             linee.add(new Linea("Servizi di gestione locazione turistica breve", imponibile, imposta));
+        }
+        return linee;
+    }
+
+    /**
+     * Righe della nota di credito da fiscal_document_riga_ndc: importi positivi, imponibile
+     * della riga (scorporato all'emissione) e imposta = lordo - imponibile.
+     */
+    private List<Linea> buildLineeNdc(FiscalDocument doc) {
+        List<Linea> linee = new ArrayList<>();
+        for (FiscalDocumentRigaNdc r : rigaNdcDAO.findByFiscalDocumentId(doc.getId())) {
+            BigDecimal lordo = nz(r.getImportoStornato()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal imponibile = r.getImponibileStornato() != null
+                    ? r.getImponibileStornato().setScale(2, RoundingMode.HALF_UP) : lordo;
+            linee.add(new Linea(r.getDescrizione(), imponibile, lordo.subtract(imponibile)));
+        }
+        if (linee.isEmpty()) {
+            throw new IllegalStateException("Nota di credito senza righe: id=" + doc.getId());
         }
         return linee;
     }

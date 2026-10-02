@@ -4,3 +4,5 @@ SELECT DISTINCT wl.fk_owner_id
 FROM withholding_ledger wl
 WHERE wl.fk_tenant_id = ?
   AND wl.periodo_anno = ?
+  -- migration 026: esclude ritenute stornate e crediti da nota di credito
+  AND wl.fk_ndc_id IS NULL

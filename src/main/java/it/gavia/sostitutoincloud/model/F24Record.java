@@ -31,6 +31,12 @@ public class F24Record {
     private Integer periodoMese;
     private Integer periodoAnno;
     private Integer referenceYear;
+    // Crediti d'imposta da NDC compensati (migration 027): riga 2 del modello F24
+    private BigDecimal importoCredito;
+    private String codiceTributoCreditoImposta;
+    private Integer annoCredito;
+    /** total_amount - importo_credito: importo effettivamente da versare. */
+    private BigDecimal saldoNetto;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

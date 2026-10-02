@@ -199,6 +199,16 @@ test.describe('Fase 06 — Liquidazione', () => {
         { settlementId, forzaSePagato: true });
       console.log(`cleanup liquidazione ${settlementId}: HTTP ${res.status} ${JSON.stringify(res.body)}`);
     }
+    // Rendiconti di altri proprietari con ritenute nel periodo: li crea il "Calcola" del
+    // test (il beforeAll ha già rimosso tutti quelli preesistenti del periodo). Senza
+    // forzaSePagato: un rendiconto pagato non viene toccato, solo segnalato nel log.
+    const altri = (await apiGet<SettlementListItem[]>(token, '/settlements')).body
+      .filter(s => s.period === PERIOD && s.id !== settlementId);
+    for (const s of altri) {
+      const res = await apiDelete(token, '/test/cleanup-settlement',
+        { settlementId: s.id, forzaSePagato: false });
+      console.log(`cleanup liquidazione ${s.id} di ${s.ownerName} (${PERIOD}): HTTP ${res.status}`);
+    }
     if (booking) {
       const res = await apiDelete(token, '/test/cleanup-documenti', { bookingId: booking.id });
       console.log(`cleanup documenti booking ${booking.id}: HTTP ${res.status} ${JSON.stringify(res.body)}`);
@@ -210,7 +220,10 @@ test.describe('Fase 06 — Liquidazione', () => {
   });
 
   /** Riga della lista liquidazioni relativa al periodo di test. */
-  const rigaSettlement = (page: Page) => page.getByRole('row').filter({ hasText: PERIOD });
+  // Riga del rendiconto del test: periodo + proprietario del booking di test. Altri
+  // proprietari con ritenute nello stesso periodo hanno righe proprie, da non contare.
+  const rigaSettlement = (page: Page) =>
+    page.getByRole('row').filter({ hasText: PERIOD }).filter({ hasText: ownerName });
 
   async function apriListaLiquidazioni(page: Page) {
     await login(page, 'tenantAdmin');
@@ -276,7 +289,8 @@ test.describe('Fase 06 — Liquidazione', () => {
     // Solo la liquidazione di questo test: nessun altro owner ha ritenute nel periodo
     // Con una regex exact non si applica: si esclude la live region (role="status")
     // che ripete il testo del toast, altrimenti il locator risolve due elementi.
-    await expect(page.getByText(/1 nuovi, \d+ aggiornati, \d+ saltati/)
+    // Almeno 1 nuovo: altri proprietari con ritenute nel periodo generano rendiconti propri
+    await expect(page.getByText(/[1-9]\d* nuovi, \d+ aggiornati, \d+ saltati/)
       .and(page.locator(':not([role="status"])'))).toBeVisible();
     await dialog.getByRole('button', { name: 'Chiudi' }).click();
 
@@ -450,8 +464,10 @@ test.describe('Fase 06 — Liquidazione', () => {
     await dialog.locator('input[type="number"]').fill(String(ANNO));
     await dialog.getByRole('button', { name: 'Calcola' }).click();
 
-    // Il backend salta gli owner con liquidazione già pagata: nessuna modifica
-    await expect(page.getByText(/0 nuovi, 0 aggiornati, 1 saltati/)).toBeVisible();
+    // Il backend salta gli owner con liquidazione già pagata: almeno 1 saltato (quello del
+    // test). Altri proprietari con ritenute nel periodo possono risultare nuovi o aggiornati:
+    // l'invarianza del rendiconto del test è verificata sotto con dettaglioSettlement().
+    await expect(page.getByText(/\d+ nuovi, \d+ aggiornati, [1-9]\d* saltati/)).toBeVisible();
 
     const dopo = await dettaglioSettlement();
     expect(dopo.stato).toBe('paid');

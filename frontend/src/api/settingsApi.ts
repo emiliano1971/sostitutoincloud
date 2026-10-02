@@ -40,6 +40,8 @@ export interface TenantSettingsDTO {
   notificheEmail: boolean;
   // import massivo proprietari: canale per la regola commissione OTA (in scrittura 0 = nessuno)
   fkCanaleOtaDefaultId?: number | null;
+  /** Codice tributo dei crediti d'imposta da NDC nel modello F24 (default 6782). */
+  codiceTributoCreditoImposta?: string;
 }
 
 export async function getSettings(): Promise<TenantSettingsDTO> {

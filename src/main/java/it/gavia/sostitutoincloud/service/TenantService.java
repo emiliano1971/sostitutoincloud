@@ -237,7 +237,7 @@ public class TenantService {
         return TenantSettings.builder()
                 .fkTenantId(tenantId)
                 .withholdingRatePrimary(new BigDecimal("21.00"))
-                .withholdingRateSecondary(new BigDecimal("26.00"))
+                .withholdingRateSecondary(new BigDecimal("21.00"))
                 .codiceTributoF24("1919")
                 .documentWindowDays(14)
                 .cedolareSeccaEnabled(true)

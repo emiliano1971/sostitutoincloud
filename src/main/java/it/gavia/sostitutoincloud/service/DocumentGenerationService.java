@@ -45,6 +45,7 @@ public class DocumentGenerationService {
     private static final String STATO_READY = "ready";
     private static final String STATO_SENT_SDI = "sent_sdi";
     private static final String STATO_DOC_ISSUED = "doc_issued";
+    private static final String STATO_STORNATA = "stornata";
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final BookingService bookingService;
@@ -98,6 +99,13 @@ public class DocumentGenerationService {
         BookingDetailDTO booking = bookingService.findById(tenantId, request.getBookingId())
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Prenotazione non trovata per questo tenant: id=" + request.getBookingId()));
+
+        // Booking stornato con NDC totale (migration 025/026): nessun nuovo documento, né
+        // fattura PM né ricevuta owner. Per riemetterli si copia la prenotazione
+        // (BookingService.copiaBooking) e si emettono i documenti sulla copia.
+        if (STATO_STORNATA.equals(booking.getStatoPrenotazione())) {
+            throw new IllegalStateException("Impossibile emettere documenti: la prenotazione è stata stornata");
+        }
 
         // Blocco fattura PM senza CF ospite (la ricevuta owner resta emettibile senza CF).
         if (TIPO_FATTURA_PM.equals(tipo)

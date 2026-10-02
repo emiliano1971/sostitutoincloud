@@ -23,4 +23,9 @@ public class F24RecordDTO {
     private LocalDate deadlineDate;
     private LocalDate paymentDate;
     private String codiceTributo;
+    // Crediti d'imposta da NDC compensati (migration 027)
+    private BigDecimal importoCredito;
+    private String codiceTributoCreditoImposta;
+    private Integer annoCredito;
+    private BigDecimal saldoNetto;
 }

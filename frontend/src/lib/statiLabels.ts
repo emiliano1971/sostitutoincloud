@@ -10,6 +10,7 @@ export const STATI_PRENOTAZIONE: Record<string, string> = {
   doc_issued: 'Doc. emesso',
   settled: 'Liquidata',
   cancelled: 'Annullata',
+  stornata: 'Stornata',     // fattura PM stornata interamente con nota di credito (migration 025)
 };
 
 /** enum cu_status */
@@ -36,6 +37,7 @@ export const STATI_DOCUMENTO: Record<string, string> = {
   accepted: 'Accettato',
   rejected: 'Rifiutato',
   error: 'Errore',
+  annullata: 'Annullato',   // nota di credito annullata prima dell'invio SDI (migration 025)
 };
 
 /** tipo_documento.codice */

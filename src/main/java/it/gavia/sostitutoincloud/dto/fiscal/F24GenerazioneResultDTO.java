@@ -23,4 +23,14 @@ public class F24GenerazioneResultDTO {
     private LocalDate scadenza;
     private String stato;
     private List<WithholdingLedgerDTO> ritenute;
+
+    // Crediti d'imposta da NDC (migration 027)
+    /** Crediti ancora compensabili del tenant (non ancora usati in nessun F24). */
+    private List<CreditoDisponibileDTO> crediti;
+    /** Crediti già compensati in questo F24. */
+    private BigDecimal importoCredito;
+    private String codiceTributoCreditoImposta;
+    private Integer annoCredito;
+    /** totaleRitenute - importoCredito: importo da versare. */
+    private BigDecimal saldoNetto;
 }

@@ -31,6 +31,7 @@ const statusColors: Record<string, string> = {
   doc_issued: 'bg-success/10 text-success',                                          // verde
   settled: 'bg-emerald-600/20 text-emerald-800 dark:text-emerald-300',               // verde scuro
   cancelled: 'bg-destructive/10 text-destructive',                                   // rosso
+  stornata: 'bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-300',  // fattura PM stornata (NDC)
 };
 
 // Label brevi per il badge stato (fallback alla descrizione lookup se codice ignoto)
@@ -42,6 +43,7 @@ const STATO_OPTIONS: { codice: string; label: string }[] = [
   { codice: 'doc_issued', label: 'Doc. emesso' },
   { codice: 'settled', label: 'Liquidata' },
   { codice: 'cancelled', label: 'Annullata' },
+  { codice: 'stornata', label: 'Stornata' },
 ];
 
 const channelColors: Record<string, string> = {
@@ -51,7 +53,7 @@ const channelColors: Record<string, string> = {
 };
 
 const isFinalStatus = (status: string) =>
-  ['doc_issued', 'settled', 'cancelled'].includes(status);
+  ['doc_issued', 'settled', 'cancelled', 'stornata'].includes(status);
 
 const BookingsList = () => {
   const navigate = useNavigate();
@@ -144,7 +146,7 @@ const BookingsList = () => {
       if (statiSelezionati.size === 0) return true;
       if (statiSelezionati.has('da_completare')) {
         const oggi = toLocalISO(new Date());
-        return b.checkoutDate <= oggi && !['doc_issued', 'settled', 'cancelled'].includes(b.statoPrenotazione);
+        return b.checkoutDate <= oggi && !['doc_issued', 'settled', 'cancelled', 'stornata'].includes(b.statoPrenotazione);
       }
       return statiSelezionati.has(b.statoPrenotazione);
     });
