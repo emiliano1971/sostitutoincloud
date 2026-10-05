@@ -63,5 +63,6 @@ EXPOSE 8080
 # Default: override a runtime dalle env di Coolify
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV JAVA_OPTS="-Xms512m -Xmx1024m"
+ENV JAVA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005"
 
 CMD ["catalina.sh", "run"]
