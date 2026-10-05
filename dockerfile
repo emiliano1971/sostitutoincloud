@@ -63,7 +63,8 @@ EXPOSE 8080
 # Default: override a runtime dalle env di Coolify
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV JAVA_OPTS="-Xms512m -Xmx1024m"
+
 ENV JPDA_ADDRESS="0.0.0.0:8005"
 ENV JPDA_TRANSPORT="dt_socket"
-ENV JPDA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:8005"
+EXPOSE 8005
 CMD ["catalina.sh", "jpda", "run"]
