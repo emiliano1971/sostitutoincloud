@@ -306,6 +306,36 @@ const OwnerBulkImport = () => {
             </Card>
           )}
 
+          {result.avvisi?.length > 0 && (
+            <Card className="border-amber-400">
+              <CardHeader>
+                <CardTitle className="text-sm text-amber-700">
+                  {result.avvisi.length} righe importate con avvisi
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="overflow-x-auto">
+                <table className="text-xs w-full">
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="py-1 pr-3 font-medium">Riga</th>
+                      <th className="py-1 pr-3 font-medium">Dati</th>
+                      <th className="py-1 font-medium">Avviso</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.avvisi.map(a => (
+                      <tr key={a.numeroRiga} className="border-t align-top">
+                        <td className="py-1 pr-3">{a.numeroRiga}</td>
+                        <td className="py-1 pr-3">{a.descrizioneRiga}</td>
+                        <td className="py-1 text-amber-700">{a.messaggio}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="flex gap-2">
             <Button variant="outline" onClick={reset}>Importa un altro file</Button>
             <Button onClick={() => navigate('/owners')}>Vai ai proprietari</Button>

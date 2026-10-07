@@ -7,7 +7,8 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ArrowLeft, Building2, User, Home, Calendar, Receipt, Download, Loader2, AlertCircle, ExternalLink, Send, CheckCircle2, XCircle, AlertTriangle, Landmark, FileCheck, Ban, RotateCcw } from 'lucide-react';
 import { getDocumentById, downloadDocumentPdf, downloadNdcPdf, inviaSdi, downloadSdiXml, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
-import { annullaNdc } from '@/api/bookingApi';
+import { annullaNdc, getBookingById, type BookingDetail, type FiscalDocumentSummary } from '@/api/bookingApi';
+import NdcDialog from '@/components/booking/NdcDialog';
 import { useToast } from '@/hooks/use-toast';
 import { labelTipoDocumento } from '@/lib/statiLabels';
 
@@ -78,6 +79,14 @@ const DocumentDetail = () => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSendingSdi, setIsSendingSdi] = useState(false);
   const [isAnnullando, setIsAnnullando] = useState(false);
+  // Emissione NDC: il dialog mostra le voci dello split, servono prenotazione e fattura
+  // nel formato del dettaglio prenotazione (caricati all'apertura).
+  const [ndcBooking, setNdcBooking] = useState<BookingDetail | null>(null);
+  const [ndcFattura, setNdcFattura] = useState<FiscalDocumentSummary | null>(null);
+  const [isAprendoNdc, setIsAprendoNdc] = useState(false);
+  // NDC: stato della fattura collegata (il dettaglio NDC espone solo id e numero). Il TD04 va
+  // allo SDI solo dopo la fattura, stessa regola del backend (SdiXmlService).
+  const [statoFatturaCollegata, setStatoFatturaCollegata] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -88,6 +97,14 @@ const DocumentDetail = () => {
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    setStatoFatturaCollegata(null);
+    if (doc?.documentType !== 'nota_credito' || !doc.fkDocumentoCollegatoId) return;
+    getDocumentById(doc.fkDocumentoCollegatoId)
+      .then(f => setStatoFatturaCollegata(f.statoDocumento))
+      .catch(() => setStatoFatturaCollegata(null));
+  }, [doc?.documentType, doc?.fkDocumentoCollegatoId]);
 
   // PDF generato server-side (GET /api/documents/{id}/pdf), non più window.print()
   const handleDownloadPdf = async () => {
@@ -123,6 +140,28 @@ const DocumentDetail = () => {
       });
     }
   };
+
+  const handleApriNdc = async () => {
+    if (!doc?.fkBookingId) return;
+    setIsAprendoNdc(true);
+    try {
+      const booking = await getBookingById(doc.fkBookingId);
+      const fattura = booking.documenti?.find(d => d.id === doc.id);
+      if (!fattura) throw new Error('Fattura non trovata tra i documenti della prenotazione');
+      setNdcBooking(booking);
+      setNdcFattura(fattura);
+    } catch (err) {
+      toast({
+        title: 'Errore apertura nota di credito',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAprendoNdc(false);
+    }
+  };
+
+  const chiudiNdc = () => { setNdcBooking(null); setNdcFattura(null); };
 
   // Invio SDI: solo fatture PM. Il backend rifiuta con 422 se già inviata.
   const handleInviaSdi = async () => {
@@ -219,7 +258,12 @@ const DocumentDetail = () => {
   const annoDocumento = doc.issueDate ? doc.issueDate.slice(0, 4) : null;
   // Nuovo invio ammesso finché lo SDI non ha confermato: dopo uno scarto o un
   // errore la fattura va corretta e ritrasmessa.
-  const puoInviareSdi = isTrasmissibile && !ndcAnnullata && !['sent_sdi', 'accepted'].includes(doc.statoDocumento);
+  const inviabileSdi = isTrasmissibile && !ndcAnnullata && !['sent_sdi', 'accepted'].includes(doc.statoDocumento);
+  // NDC: invio solo con la fattura collegata già trasmessa (finché lo stato non è caricato, nascosto)
+  const fatturaCollegataInviata = statoFatturaCollegata != null
+    && ['sent_sdi', 'accepted'].includes(statoFatturaCollegata);
+  const puoInviareSdi = inviabileSdi && (!isNotaCredito || fatturaCollegataInviata);
+  const ndcAttendeFattura = inviabileSdi && isNotaCredito && statoFatturaCollegata != null && !fatturaCollegataInviata;
   const puoRiprovareSdi = isTrasmissibile && (sdiRifiutato || sdiErrore);
   const ritenuta = doc.ritenutaAmount ?? 0;
   // Netto = canone - ritenuta. Il bollo NON è scalato: coerente con il PDF
@@ -675,11 +719,27 @@ const DocumentDetail = () => {
           </Button>
         )}
         {isFatturaPm && doc.fkBookingId && !doc.statoStorno && !['rejected', 'error', 'draft'].includes(doc.statoDocumento) && (
-          // L'emissione avviene dal dettaglio prenotazione (dialog con le voci dello split)
-          <Button variant="outline" className="gap-2" onClick={() => navigate(`/bookings/${doc.fkBookingId}`)}>
-            <RotateCcw className="h-4 w-4" />
+          <Button variant="outline" className="gap-2" onClick={handleApriNdc} disabled={isAprendoNdc}>
+            {isAprendoNdc ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
             Emetti nota di credito
           </Button>
+        )}
+        {ndcBooking && ndcFattura && (
+          <NdcDialog
+            booking={ndcBooking}
+            fattura={ndcFattura}
+            open
+            onClose={chiudiNdc}
+            onSuccess={async () => {
+              chiudiNdc();
+              setDoc(await getDocumentById(doc.id));
+            }}
+          />
+        )}
+        {ndcAttendeFattura && (
+          <p className="text-xs text-muted-foreground self-center">
+            La fattura originale non è ancora stata inviata allo SDI. Inviare prima la fattura.
+          </p>
         )}
         {puoInviareSdi && (
           <Button variant="outline" className="gap-2" onClick={handleInviaSdi} disabled={isSendingSdi}>

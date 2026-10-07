@@ -1,8 +1,10 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dto.sdi.SdiElaborazioneResultDTO;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
+import it.gavia.sostitutoincloud.model.StatoDocumento;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -33,8 +35,14 @@ import java.util.stream.Stream;
  * Elaborazione delle risposte SDI depositate in incoming/ dal tunnel.
  *
  * Per ogni risposta: aggiorna lo stato del documento fiscale, archivia la ricevuta in
- * elaborati/{piva}/{progressivo}/, rimuove la fattura da outgoing/ (il ciclo è chiuso)
- * e cancella la risposta da incoming/.
+ * elaborati/{piva}/{anno}/{progressivo}/, rimuove la fattura da outgoing/ (solo se la copia
+ * d'archivio esiste: il ciclo è chiuso) e cancella la risposta da incoming/.
+ *
+ * Esiti: RC → accepted; MC (mancata consegna) → accepted, la fattura è valida e consegnata
+ * nel cassetto fiscale del destinatario; NS → rejected; MT → solo archiviato.
+ * Le risposte non abbinabili (nome/XML non validi, progressivo sconosciuto, documento non più
+ * 'sent_sdi', es. esito tardivo dopo un "Riprova") vanno in elaborati/non_abbinati/: restando
+ * in incoming/ verrebbero rielaborate, e contate come errore, a ogni esecuzione.
  *
  * La firma digitale NON viene verificata: è già validata dal tunnel SDI a monte.
  */
@@ -51,6 +59,8 @@ public class SdiRispostaService {
     private static final String ESITO_SCARTO = "NS";
     private static final String ESITO_MANCATA_CONSEGNA = "MC";
     private static final String ESITO_METADATI = "MT";
+    private static final String STATO_SENT_SDI = "sent_sdi";
+    private static final String CARTELLA_NON_ABBINATI = "non_abbinati";
 
     @Value("${app.storage.sdi-incoming-path}")
     private String sdiIncomingPath;
@@ -62,10 +72,13 @@ public class SdiRispostaService {
     private String sdiElaboratiPath;
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
+    private final StatoDocumentoDAO statoDocumentoDAO;
     private final AuditService auditService;
 
-    public SdiRispostaService(FiscalDocumentDAO fiscalDocumentDAO, AuditService auditService) {
+    public SdiRispostaService(FiscalDocumentDAO fiscalDocumentDAO, StatoDocumentoDAO statoDocumentoDAO,
+                              AuditService auditService) {
         this.fiscalDocumentDAO = fiscalDocumentDAO;
+        this.statoDocumentoDAO = statoDocumentoDAO;
         this.auditService = auditService;
     }
 
@@ -115,22 +128,34 @@ public class SdiRispostaService {
 
             Matcher m = NOME_RISPOSTA.matcher(nomeRisposta);
             if (!m.matches()) {
-                log.warn("SdiRispostaService - nome file non riconosciuto, ignorato: {}", nomeRisposta);
-                dettagli.add(nomeRisposta + ": nome file non conforme a IT{PIVA}_{PROG}_{ESITO}_{N}.xml, ignorato");
+                String motivo = "nome file non conforme a IT{PIVA}_{PROG}_{ESITO}_{N}.xml";
+                dettagli.add(nomeRisposta + ": " + motivo + ", spostato in " + CARTELLA_NON_ABBINATI);
+                spostaInNonAbbinati(file, motivo);
                 errori++;
                 continue;
             }
             String esito = m.group(3).toUpperCase(Locale.ITALY);
 
+            Document doc;
             try {
-                Document doc = parse(file);
+                doc = parse(file);
+            } catch (Exception e) {
+                String motivo = "XML illeggibile: " + e.getMessage();
+                dettagli.add(nomeRisposta + ": " + motivo);
+                spostaInNonAbbinati(file, motivo);
+                errori++;
+                continue;
+            }
+
+            try {
 
                 // Il riferimento autorevole è il NomeFile della fattura contenuto nella
                 // risposta: il nome del file di risposta serve solo per l'esito.
                 String nomeFileFattura = testo(doc, "NomeFile");
                 if (nomeFileFattura == null || !nomeFileFattura.contains("_")) {
-                    log.warn("SdiRispostaService - NomeFile assente o non valido in {}", nomeRisposta);
-                    dettagli.add(nomeRisposta + ": elemento NomeFile assente o non valido");
+                    String motivo = "elemento NomeFile assente o non valido";
+                    dettagli.add(nomeRisposta + ": " + motivo);
+                    spostaInNonAbbinati(file, motivo);
                     errori++;
                     continue;
                 }
@@ -143,12 +168,30 @@ public class SdiRispostaService {
                         ? fiscalDocumentDAO.findBySdiProgressivo(progFattura)
                         : Optional.empty();
                 if (opt.isEmpty()) {
-                    log.warn("SdiRispostaService - fiscal_document non trovato per progressivo {}", progFattura);
-                    dettagli.add(nomeRisposta + ": nessun documento con progressivo " + progFattura);
+                    String motivo = "nessun documento con progressivo " + progFattura;
+                    dettagli.add(nomeRisposta + ": " + motivo);
+                    spostaInNonAbbinati(file, motivo);
                     errori++;
                     continue;
                 }
                 FiscalDocument fd = opt.get();
+
+                // Gli esiti che cambiano stato valgono solo per un documento in attesa di risposta
+                // ('sent_sdi'): altrimenti è un esito tardivo o duplicato (es. dopo un "Riprova").
+                // MT non cambia stato: si archivia sempre.
+                if (!ESITO_METADATI.equals(esito)) {
+                    String statoAttuale = statoDocumentoDAO.findById(fd.getFkStatoDocumentoId())
+                            .map(StatoDocumento::getCodice).orElse(null);
+                    if (!STATO_SENT_SDI.equals(statoAttuale)) {
+                        log.warn("SdiRispostaService - esito ignorato per documento {} in stato {}: "
+                                + "progressivo precedente a un Riprova", fd.getDocumentNumber(), statoAttuale);
+                        dettagli.add(nomeRisposta + ": esito ignorato, documento " + fd.getDocumentNumber()
+                                + " in stato " + statoAttuale);
+                        spostaInNonAbbinati(file, "documento " + fd.getDocumentNumber() + " in stato " + statoAttuale);
+                        errori++;
+                        continue;
+                    }
+                }
 
                 switch (esito) {
                     case ESITO_CONSEGNA -> {
@@ -167,10 +210,13 @@ public class SdiRispostaService {
                                 fd.getDocumentNumber(), msg);
                     }
                     case ESITO_MANCATA_CONSEGNA -> {
-                        fiscalDocumentDAO.updateSdiError(fd.getId(), "Mancata consegna SDI");
-                        errori++;
-                        dettagli.add(fd.getDocumentNumber() + ": mancata consegna SDI");
-                        log.warn("SdiRispostaService - MC: mancata consegna per {}", fd.getDocumentNumber());
+                        // La fattura è emessa e valida: lo SDI l'ha messa nel cassetto fiscale del
+                        // destinatario (esito tipico per i privati, CodiceDestinatario 0000000).
+                        // Non è un errore: un nuovo invio creerebbe una seconda fattura.
+                        fiscalDocumentDAO.updateSdiAccepted(fd.getId(), null);
+                        accettati++;
+                        log.info("SdiRispostaService - MC per {}: fattura consegnata nel cassetto fiscale "
+                                + "del destinatario", fd.getDocumentNumber());
                     }
                     case ESITO_METADATI -> {
                         metadati++;
@@ -184,7 +230,7 @@ public class SdiRispostaService {
                 String anno = fd.getIssueDate() != null
                         ? String.valueOf(fd.getIssueDate().getYear())
                         : null;
-                archivia(file, nomeFileFattura, pivaFattura, anno, progFattura, esito);
+                archivia(file, nomeFileFattura, pivaFattura, anno, progFattura, esito, fd.getSdiFilePath());
 
                 auditService.log("sdi.risposta." + esito.toLowerCase(Locale.ITALY),
                         "FiscalDocument", fd.getId(),
@@ -208,7 +254,7 @@ public class SdiRispostaService {
      * e la risposta viene rimossa da incoming/.
      */
     private void archivia(Path risposta, String nomeFileFattura, String piva, String anno,
-                          String progressivo, String esito) throws java.io.IOException {
+                          String progressivo, String esito, String sdiFilePath) throws java.io.IOException {
         Path elaboratiDir = anno != null
                 ? Path.of(sdiElaboratiPath, piva, anno, progressivo)
                 : Path.of(sdiElaboratiPath, piva, progressivo);
@@ -218,11 +264,38 @@ public class SdiRispostaService {
         if (!ESITO_METADATI.equals(esito)) {
             Path outgoingFile = Path.of(sdiOutgoingPath, nomeFileFattura);
             if (Files.exists(outgoingFile)) {
-                Files.delete(outgoingFile);
-                log.debug("SdiRispostaService - rimossa da outgoing: {}", outgoingFile);
+                // La copia in outgoing/ si cancella solo se l'archivio esiste: cartella calcolata
+                // o, in alternativa, il percorso registrato su fiscal_document.sdi_file_path.
+                Path archivio = elaboratiDir.resolve(nomeFileFattura);
+                boolean archiviato = Files.exists(archivio)
+                        || (sdiFilePath != null && !sdiFilePath.isBlank() && Files.exists(Path.of(sdiFilePath)));
+                if (archiviato) {
+                    Files.delete(outgoingFile);
+                    log.debug("SdiRispostaService - rimossa da outgoing: {}", outgoingFile);
+                } else {
+                    log.warn("SdiRispostaService - archivio non trovato per {}: il file in outgoing/ "
+                            + "non viene cancellato", nomeFileFattura);
+                }
             }
         }
         Files.delete(risposta);
+    }
+
+    /**
+     * Esito non abbinabile: spostato in elaborati/non_abbinati/ per non rielaborarlo a ogni
+     * esecuzione. Un errore nello spostamento lascia il file in incoming/ (solo log).
+     */
+    private void spostaInNonAbbinati(Path file, String motivo) {
+        String nomeFile = file.getFileName().toString();
+        try {
+            Path dir = Path.of(sdiElaboratiPath, CARTELLA_NON_ABBINATI);
+            Files.createDirectories(dir);
+            Files.move(file, dir.resolve(nomeFile), StandardCopyOption.REPLACE_EXISTING);
+            log.warn("SdiRispostaService - esito non abbinato spostato in non_abbinati: {} - motivo: {}",
+                    nomeFile, motivo);
+        } catch (java.io.IOException e) {
+            log.error("SdiRispostaService - impossibile spostare {} in non_abbinati: {}", nomeFile, e.getMessage(), e);
+        }
     }
 
     // ────────────────────────────── parsing XML ──────────────────────────────

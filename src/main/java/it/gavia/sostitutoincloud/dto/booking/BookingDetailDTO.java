@@ -74,6 +74,8 @@ public class BookingDetailDTO {
     // Dati proprietario (per dialog generazione documenti)
     private String ownerTaxCode;
     private String ownerIban;
+    /** "Cognome Nome" (ragione sociale per le società), come nel PDF della ricevuta owner. */
+    private String ownerCognomeNome;
     private String ownerEmail;
 
     // Dati tenant (per dialog fattura PM)

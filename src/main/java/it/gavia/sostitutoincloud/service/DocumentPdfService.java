@@ -277,12 +277,16 @@ public class DocumentPdfService {
         }
 
         Map<String, String> c = new LinkedHashMap<>();
+        // Emittente = tenant (PM), destinatario = proprietario
         c.put("OWNER_NAME", esc(nomeOwner(owner)));
+        c.put("OWNER_COGNOME_NOME", esc(cognomeNomeOwner(owner)));
         c.put("OWNER_TAX_CODE", esc(owner != null ? owner.getTaxCode() : null));
         c.put("TENANT_LEGAL_NAME", esc(tenant.getLegalName()));
         c.put("TENANT_VAT_NUMBER", esc(tenant.getVatNumber()));
         c.put("TENANT_TAX_CODE", esc(tenant.getTaxCode()));
         c.put("TENANT_LEGAL_ADDRESS", esc(TenantAddressUtils.indirizzoCompleto(tenant)));
+        c.put("TENANT_STREET", esc(tenant.getLegalAddress()));
+        c.put("TENANT_CAP_CITTA", esc(capCitta(tenant)));
         c.put("TENANT_PEC", esc(tenant.getPec()));
         c.put("DOCUMENT_NUMBER", esc(doc.getDocumentNumber()));
         c.put("ISSUE_DATE", data(doc.getIssueDate()));
@@ -365,6 +369,34 @@ public class DocumentPdfService {
         String nome = ((owner.getFirstName() != null ? owner.getFirstName() : "") + " "
                 + (owner.getLastName() != null ? owner.getLastName() : "")).trim();
         return nome.isEmpty() ? null : nome;
+    }
+
+    /** "Cognome Nome" del proprietario; per le società la ragione sociale. */
+    private String cognomeNomeOwner(OwnerProfile owner) {
+        if (owner == null) {
+            return null;
+        }
+        if (owner.getLegalName() != null && !owner.getLegalName().isBlank()) {
+            return owner.getLegalName();
+        }
+        String nome = ((owner.getLastName() != null ? owner.getLastName() : "") + " "
+                + (owner.getFirstName() != null ? owner.getFirstName() : "")).trim();
+        return nome.isEmpty() ? null : nome;
+    }
+
+    /** Seconda riga dell'indirizzo del tenant: "00100 Roma (RM)". null se manca tutto. */
+    private String capCitta(Tenant tenant) {
+        StringBuilder sb = new StringBuilder();
+        if (tenant.getCap() != null && !tenant.getCap().isBlank()) {
+            sb.append(tenant.getCap().trim());
+        }
+        if (tenant.getComune() != null && !tenant.getComune().isBlank()) {
+            sb.append(sb.length() > 0 ? " " : "").append(tenant.getComune().trim());
+        }
+        if (tenant.getProvincia() != null && !tenant.getProvincia().isBlank()) {
+            sb.append(sb.length() > 0 ? " " : "").append("(").append(tenant.getProvincia().trim()).append(")");
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     // ────────────────────────────── rendering ──────────────────────────────

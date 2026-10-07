@@ -37,4 +37,12 @@ public class BookingListDTO {
     private String documentStatus;
     private String settlementStatus;
     private LocalDateTime createdAt;
+
+    // Documenti non annullati della prenotazione, per il download PDF dalla lista
+    private Integer fatturaId;
+    private String fatturaNumber;
+    private Integer ricevutaId;
+    private String ricevutaNumber;
+    private Integer ndcId;          // nota di credito attiva
+    private String ndcNumber;
 }

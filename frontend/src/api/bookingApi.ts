@@ -86,6 +86,14 @@ export interface BookingListItem {
   documentStatus: string;
   settlementStatus: string;
   createdAt: string;
+  // Documenti non annullati, per il download PDF dalla lista (assenti se non emessi)
+  fatturaId?: number;
+  fatturaNumber?: string;
+  ricevutaId?: number;
+  ricevutaNumber?: string;
+  /** Nota di credito attiva. */
+  ndcId?: number;
+  ndcNumber?: string;
 }
 
 export interface BookingDetail extends BookingListItem {
@@ -126,6 +134,8 @@ export interface BookingDetail extends BookingListItem {
   // Dati proprietario per dialog
   ownerTaxCode?: string;
   ownerIban?: string;
+  /** "Cognome Nome" (ragione sociale per le società), come nel PDF della ricevuta owner. */
+  ownerCognomeNome?: string;
   ownerEmail?: string;
   // Dati tenant per dialog fattura PM
   tenantLegalName?: string;

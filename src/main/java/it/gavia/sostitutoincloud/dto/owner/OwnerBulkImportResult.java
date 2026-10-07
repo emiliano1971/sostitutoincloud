@@ -20,4 +20,6 @@ public class OwnerBulkImportResult {
     private int immobiliSaltati;
     private int righeInErrore;
     private List<OwnerBulkImportErrore> errori = new ArrayList<>();
+    /** Righe importate con segnalazioni non bloccanti (es. CIN fuori formato). */
+    private List<OwnerBulkImportErrore> avvisi = new ArrayList<>();
 }

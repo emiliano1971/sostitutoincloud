@@ -52,6 +52,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -146,7 +147,8 @@ public class BookingService {
         stream = applyChannelFilter(stream, filter.getChannel(), maps);
         stream = applySearchFilter(stream, filter.getQ());
 
-        List<BookingListDTO> result = stream.map(b -> toListDTO(b, maps)).toList();
+        Map<Integer, List<FiscalDocument>> docsByBooking = documentiPerBooking(tenantId);
+        List<BookingListDTO> result = stream.map(b -> toListDTO(b, maps, docsByBooking)).toList();
         log.info("BookingService.findByTenantId() - tenantId={}, filtro=[status={}, channel={}, q={}], {} booking trovati",
                 tenantId, filter.getStatus(), filter.getChannel(), filter.getQ(), result.size());
         return result;
@@ -161,8 +163,9 @@ public class BookingService {
      */
     public List<BookingListDTO> findByOwner(Integer tenantId, Integer ownerId) {
         LookupMaps maps = buildLookupMaps(tenantId);
+        Map<Integer, List<FiscalDocument>> docsByBooking = documentiPerBooking(tenantId);
         List<BookingListDTO> result = bookingDAO.findByOwnerAndTenant(tenantId, ownerId).stream()
-                .map(b -> toListDTO(b, maps))
+                .map(b -> toListDTO(b, maps, docsByBooking))
                 .toList();
         log.info("BookingService.findByOwner() - tenantId={} ownerId={} {} booking trovati",
                 tenantId, ownerId, result.size());
@@ -1185,7 +1188,10 @@ public class BookingService {
      * Priorità: accepted > sent_sdi > ready > draft. Nessun documento → "nessuno".
      */
     private String computeDocumentStatus(Integer bookingId, LookupMaps maps) {
-        List<FiscalDocument> docs = fiscalDocumentDAO.findByBookingId(bookingId);
+        return computeDocumentStatus(fiscalDocumentDAO.findByBookingId(bookingId), maps);
+    }
+
+    private String computeDocumentStatus(List<FiscalDocument> docs, LookupMaps maps) {
         if (docs.isEmpty()) {
             return "nessuno";
         }
@@ -1211,15 +1217,50 @@ public class BookingService {
         return o != null ? o.getFirstName() + " " + o.getLastName() : null;
     }
 
+    /** "Cognome Nome" del proprietario; per le società la ragione sociale (come DocumentPdfService). */
+    private String cognomeNomeOwner(OwnerProfile owner) {
+        if (owner == null) return null;
+        if (owner.getLegalName() != null && !owner.getLegalName().isBlank()) {
+            return owner.getLegalName();
+        }
+        String nome = ((owner.getLastName() != null ? owner.getLastName() : "") + " "
+                + (owner.getFirstName() != null ? owner.getFirstName() : "")).trim();
+        return nome.isEmpty() ? null : nome;
+    }
+
     private BigDecimal safeVal(BigDecimal v) {
         return v != null ? v : BigDecimal.ZERO;
     }
 
     // ── mapping ─────────────────────────────────────────────────────────────
 
-    private BookingListDTO toListDTO(Booking b, LookupMaps maps) {
+    /** Documenti del tenant per booking, in una query sola (la lista non interroga per riga). */
+    private Map<Integer, List<FiscalDocument>> documentiPerBooking(Integer tenantId) {
+        return fiscalDocumentDAO.findByTenantId(tenantId).stream()
+                .filter(d -> d.getFkBookingId() != null)
+                .collect(Collectors.groupingBy(FiscalDocument::getFkBookingId));
+    }
+
+    /** Primo documento del tipo indicato (codice lookup) non annullato. */
+    private Optional<FiscalDocument> documentoAttivo(List<FiscalDocument> docs, String codiceTipo, LookupMaps maps) {
+        return docs.stream()
+                .filter(d -> {
+                    TipoDocumento t = d.getFkTipoDocumentoId() != null
+                            ? maps.tipiDocumentoById.get(d.getFkTipoDocumentoId()) : null;
+                    return t != null && codiceTipo.equals(t.getCodice());
+                })
+                .filter(d -> !"annullata".equals(statoDocCodiceDa(d.getFkStatoDocumentoId(), maps.statiDocumentoById)))
+                .min(Comparator.comparing(FiscalDocument::getId));
+    }
+
+    private BookingListDTO toListDTO(Booking b, LookupMaps maps, Map<Integer, List<FiscalDocument>> docsByBooking) {
         Property prop = maps.propertiesById.get(b.getFkPropertyId());
         CanaleOta canale = maps.canaliById.get(b.getFkCanaleOtaId());
+        List<FiscalDocument> docs = docsByBooking.getOrDefault(b.getId(), List.of());
+        // Codici lookup tipo_documento: fattura (PM), ricevuta (owner), nota_credito
+        FiscalDocument fattura = documentoAttivo(docs, "fattura", maps).orElse(null);
+        FiscalDocument ricevuta = documentoAttivo(docs, "ricevuta", maps).orElse(null);
+        FiscalDocument ndc = documentoAttivo(docs, "nota_credito", maps).orElse(null);
         return BookingListDTO.builder()
                 .id(b.getId())
                 .externalBookingId(b.getExternalBookingId())
@@ -1238,9 +1279,15 @@ public class BookingService {
                 .touristTaxAmount(b.getTouristTaxAmount())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))
                 .paymentStatus(b.getPaymentStatus())
-                .documentStatus(computeDocumentStatus(b.getId(), maps))
+                .documentStatus(computeDocumentStatus(docs, maps))
                 .settlementStatus(b.getSettlementStatus())
                 .createdAt(b.getCreatedAt())
+                .fatturaId(fattura != null ? fattura.getId() : null)
+                .fatturaNumber(fattura != null ? fattura.getDocumentNumber() : null)
+                .ricevutaId(ricevuta != null ? ricevuta.getId() : null)
+                .ricevutaNumber(ricevuta != null ? ricevuta.getDocumentNumber() : null)
+                .ndcId(ndc != null ? ndc.getId() : null)
+                .ndcNumber(ndc != null ? ndc.getDocumentNumber() : null)
                 .build();
     }
 
@@ -1492,6 +1539,7 @@ public class BookingService {
                 // dati proprietario (per dialog)
                 .ownerTaxCode(owner != null ? owner.getTaxCode() : null)
                 .ownerIban(owner != null ? owner.getIban() : null)
+                .ownerCognomeNome(cognomeNomeOwner(owner))
                 .ownerEmail(owner != null ? owner.getEmail() : null)
                 // dati tenant (per dialog fattura PM)
                 .tenantLegalName(tenant != null ? tenant.getLegalName() : null)

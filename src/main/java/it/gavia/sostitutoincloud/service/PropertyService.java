@@ -21,8 +21,11 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -30,6 +33,9 @@ import java.util.stream.Collectors;
 @Service
 @Log4j2
 public class PropertyService {
+
+    // Lunghezza di property_ota_code.external_id
+    private static final int MAX_EXTERNAL_ID = 60;
 
     private final PropertyDAO propertyDAO;
     private final PropertyOtaCodeDAO propertyOtaCodeDAO;
@@ -141,18 +147,7 @@ public class PropertyService {
                 .primoImmobile(primoImmobile)
                 .build();
         Property saved = propertyDAO.insert(property);
-        if (dto.getOtaCodes() != null && !dto.getOtaCodes().isEmpty()) {
-            for (OtaCodeDTO ota : dto.getOtaCodes()) {
-                canaleOtaDAO.findByCodice(ota.getCanaleCodiceName()).ifPresent(canale -> {
-                    PropertyOtaCode otaCode = PropertyOtaCode.builder()
-                            .fkPropertyId(saved.getId())
-                            .fkCanaleOtaId(canale.getId())
-                            .externalId(ota.getExternalId())
-                            .build();
-                    propertyOtaCodeDAO.insert(otaCode);
-                });
-            }
-        }
+        salvaCodiciOta(saved.getId(), saved.getDisplayName(), dto.getOtaCodes(), "create");
         auditService.log("property.create", "Property", saved.getId(),
                 "Creato immobile " + saved.getDisplayName() + " (" + saved.getInternalCode() + ")");
         LookupMaps maps = buildLookupMaps(tenantId);
@@ -211,21 +206,9 @@ public class PropertyService {
                                                       : " marcato come secondo+ immobile (ritenuta secondaria)"));
         }
 
-        // codici OTA: cancella e reinserisci quelli non vuoti (stessa logica del create)
+        // codici OTA: cancella e reinserisci (stessa logica del create, vuoti → displayName)
         propertyOtaCodeDAO.deleteByPropertyId(propertyId);
-        if (dto.getOtaCodes() != null && !dto.getOtaCodes().isEmpty()) {
-            for (OtaCodeDTO ota : dto.getOtaCodes()) {
-                if (ota.getExternalId() == null || ota.getExternalId().isBlank()) continue;
-                canaleOtaDAO.findByCodice(ota.getCanaleCodiceName()).ifPresent(canale -> {
-                    PropertyOtaCode otaCode = PropertyOtaCode.builder()
-                            .fkPropertyId(propertyId)
-                            .fkCanaleOtaId(canale.getId())
-                            .externalId(ota.getExternalId())
-                            .build();
-                    propertyOtaCodeDAO.insert(otaCode);
-                });
-            }
-        }
+        salvaCodiciOta(propertyId, updated.getDisplayName(), dto.getOtaCodes(), "update");
 
         auditService.log("property.update", "Property", updated.getId(),
                 "Aggiornato immobile " + updated.getDisplayName() + " (" + updated.getInternalCode() + ")");
@@ -307,6 +290,54 @@ public class PropertyService {
         Map<Integer, OwnerProfile> ownerMap = ownerProfileDAO.findByTenantId(tenantId).stream()
                 .collect(Collectors.toMap(OwnerProfile::getId, o -> o));
         return new LookupMaps(tipoMap, canaleNomeMap, ownerMap);
+    }
+
+    /**
+     * Inserisce i codici OTA dell'immobile. Un codice indicato vale per il suo canale; un codice
+     * vuoto e ogni canale attivo non indicato ricevono il displayName, che è il valore che
+     * l'import prenotazioni confronta con la colonna STRUTTURA. Codici di canali inesistenti
+     * ignorati come prima. Un displayName oltre i 60 caratteri di external_id non viene usato
+     * come default (i canali senza codice restano senza mappatura).
+     */
+    private void salvaCodiciOta(Integer propertyId, String displayName, List<OtaCodeDTO> otaCodes, String metodo) {
+        String defaultId = displayName != null && !displayName.isBlank() ? displayName.trim() : null;
+        if (defaultId != null && defaultId.length() > MAX_EXTERNAL_ID) {
+            log.warn("PropertyService.{}() - property={} displayName oltre {} caratteri: nessun codice OTA di default",
+                    metodo, propertyId, MAX_EXTERNAL_ID);
+            defaultId = null;
+        }
+        // canale → external_id; una riga per canale (vincolo uq_property_per_canale)
+        Map<Integer, String> codici = new LinkedHashMap<>();
+        Set<String> canaliSpecificati = new HashSet<>();
+        if (otaCodes != null) {
+            for (OtaCodeDTO ota : otaCodes) {
+                if (ota.getCanaleCodiceName() == null) continue;
+                canaliSpecificati.add(ota.getCanaleCodiceName());
+                Optional<CanaleOta> canale = canaleOtaDAO.findByCodice(ota.getCanaleCodiceName());
+                if (canale.isEmpty()) continue;
+                String externalId = ota.getExternalId() == null || ota.getExternalId().isBlank()
+                        ? defaultId : ota.getExternalId().trim();
+                if (externalId != null) codici.putIfAbsent(canale.get().getId(), externalId);
+            }
+        }
+        int conDefault = 0;
+        if (defaultId != null) {
+            for (CanaleOta canale : canaleOtaDAO.findByAttivo(true)) {
+                if (!canaliSpecificati.contains(canale.getCodice()) && !codici.containsKey(canale.getId())) {
+                    codici.put(canale.getId(), defaultId);
+                    conDefault++;
+                }
+            }
+        }
+        codici.forEach((canaleId, externalId) -> propertyOtaCodeDAO.insert(PropertyOtaCode.builder()
+                .fkPropertyId(propertyId)
+                .fkCanaleOtaId(canaleId)
+                .externalId(externalId)
+                .build()));
+        if (conDefault > 0) {
+            log.info("PropertyService.{}() - property={} otaCodes creati con displayName={} per {} canali senza codice specificato",
+                    metodo, propertyId, defaultId, conDefault);
+        }
     }
 
     private List<OtaCodeDTO> resolveOtaCodes(Integer propertyId, Map<Integer, String> canaleNomeMap) {

@@ -221,7 +221,8 @@ const PropertyCreate = () => {
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Globe className="h-4 w-4" /> Codici OTA (Mappatura Import)</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-xs text-muted-foreground">Inserisci gli ID delle piattaforme OTA per associare automaticamente le prenotazioni importate a questo immobile.</p>
+              <p className="text-xs text-muted-foreground mb-2">I campi lasciati vuoti verranno compilati automaticamente con il nome dell'immobile.</p>
+              <p className="text-xs text-muted-foreground">Inserisci il nome con cui l'immobile è identificato su ogni canale OTA. Se lasciato vuoto verrà usato il nome dell'immobile.</p>
               <div className="space-y-3">
                 {lookups?.canaliOta.filter(c => c.attivo).map(canale => (
                   <div key={canale.codice} className="space-y-1">

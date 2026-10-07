@@ -4,12 +4,12 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2 } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getDocuments, elaboraRisposteSdi, getStatoFiscaleRicevuta, type DocumentListItem, type StatoFiscaleRicevuta } from '@/api/documentApi';
+import { getDocuments, downloadDocumentPdf, elaboraRisposteSdi, getStatoFiscaleRicevuta, type DocumentListItem, type StatoFiscaleRicevuta } from '@/api/documentApi';
 import { annullaNdc } from '@/api/bookingApi';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -65,7 +65,8 @@ const statusColors: Record<string, string> = {
 };
 
 // Nota di credito: badge tipo con colore distintivo
-const NDC_BADGE = 'bg-green-100 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300';
+// Nota di credito in rosso (storno); il badge "Stornata" della fattura resta verde
+const NDC_BADGE = 'text-destructive border-destructive';
 /** NDC annullabile finché non è presa in carico dallo SDI (stessa regola di NdcService). */
 const ndcAnnullabile = (d: DocumentListItem) =>
   d.documentType === 'nota_credito' && !['sent_sdi', 'accepted', 'annullata'].includes(d.statoDocumento);
@@ -262,12 +263,19 @@ const DocumentsList = () => {
     }
   };
 
+  // Ricerca anche sui riferimenti mostrati sotto il numero (prenotazione, NDC ↔ fattura):
+  // cercando un numero di fattura o NDC compaiono entrambe le righe collegate.
+  const q = search.trim().toLowerCase();
   const filtered = docs
     .filter(d =>
-      (search === '' ||
-        d.documentNumber.toLowerCase().includes(search.toLowerCase()) ||
-        d.recipientName.toLowerCase().includes(search.toLowerCase()) ||
-        (d.ownerName ?? '').toLowerCase().includes(search.toLowerCase()))
+      (q === '' || [
+        d.documentNumber,
+        d.recipientName,
+        d.ownerName,
+        d.externalBookingId,
+        d.ndcNumber,
+        d.fatturaCollegataNumber,
+      ].some(v => (v ?? '').toLowerCase().includes(q)))
       && (ownerIdFilter == null || d.fkOwnerId === ownerIdFilter)
     )
     // Filtro data emissione: confronto lessicografico su ISO yyyy-MM-dd
@@ -325,7 +333,7 @@ const DocumentsList = () => {
           <div className="flex flex-wrap gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Cerca numero, destinatario..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+              <Input placeholder="Cerca numero, destinatario, prenotazione..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
@@ -546,6 +554,25 @@ const DocumentsList = () => {
                             {d.externalBookingId}
                           </button>
                         )}
+                        {/* Collegamenti fattura ↔ nota di credito */}
+                        {d.ndcNumber && d.ndcId && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); navigate(`/documents/${d.ndcId}`); }}
+                            className="text-xs text-green-600 hover:text-green-700 hover:underline text-left block"
+                          >
+                            NDC: {d.ndcNumber}
+                          </button>
+                        )}
+                        {d.fatturaCollegataNumber && d.fatturaCollegataId && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); navigate(`/documents/${d.fatturaCollegataId}`); }}
+                            className="text-xs text-muted-foreground hover:text-foreground hover:underline text-left block"
+                          >
+                            Storno di: {d.fatturaCollegataNumber}
+                          </button>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -553,7 +580,7 @@ const DocumentsList = () => {
                         ? <Badge variant="outline" className={`text-xs ${NDC_BADGE}`}>NDC</Badge>
                         : <Badge variant="outline" className="text-xs">{labelTipoDocumento(d.documentType)}</Badge>}
                       {d.stornata && (
-                        <Badge variant="outline" className="text-destructive border-destructive text-xs ml-1">
+                        <Badge variant="outline" className="text-green-600 border-green-600 text-xs ml-1">
                           Stornata
                         </Badge>
                       )}
@@ -605,6 +632,23 @@ const DocumentsList = () => {
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>Dettaglio</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    aria-label="Scarica PDF"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      downloadDocumentPdf(d.id, d.documentNumber).catch(err => toast({
+                                        title: 'Errore download PDF',
+                                        description: err instanceof Error ? err.message : String(err),
+                                        variant: 'destructive',
+                                      }));
+                                    }}>
+                              <FileDown className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Scarica PDF</TooltipContent>
                         </Tooltip>
                         {d.documentType === 'ricevuta' && (
                           <Tooltip>

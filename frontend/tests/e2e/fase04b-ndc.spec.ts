@@ -104,7 +104,12 @@ test.describe('Fase 04b — Nota di Credito', () => {
 
   test('N.1 — Emetti NDC totale', async ({ page }) => {
     await login(page, 'tenantAdmin');
+    // La NDC si emette dal dettaglio della fattura PM, non dalla prenotazione
     await page.goto(`/bookings/${bookingId}`);
+    // pagina caricata prima di verificare l'assenza del pulsante (altrimenti passa a vuoto)
+    await expect(page.getByText(EXTERNAL_ID).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /emetti nota di credito/i })).toHaveCount(0);
+    await page.goto(`/documents/${fatturaId}`);
 
     await page.getByRole('button', { name: /emetti nota di credito/i }).click();
     const dialog = page.getByRole('dialog');
@@ -123,6 +128,7 @@ test.describe('Fase 04b — Nota di Credito', () => {
     await expect(dialog).not.toBeVisible();
 
     // Il numero compare nella card della fattura ("Stornata da …") e nelle righe dello split
+    await page.goto(`/bookings/${bookingId}`);
     await expect(page.getByText(/NC-\d{4}-\d{4}/).first()).toBeVisible();
 
     const dettaglio = await apiGet<BookingDetail>(token, `/bookings/${bookingId}`);

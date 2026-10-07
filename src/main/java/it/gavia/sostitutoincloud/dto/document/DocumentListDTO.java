@@ -44,4 +44,10 @@ public class DocumentListDTO {
     private String settlementStato;
     // Fattura con una nota di credito attiva (non annullata) collegata
     private Boolean stornata;
+    // Fattura stornata: NDC attiva collegata
+    private Integer ndcId;
+    private String ndcNumber;
+    // NDC: fattura originale stornata
+    private Integer fatturaCollegataId;
+    private String fatturaCollegataNumber;
 }

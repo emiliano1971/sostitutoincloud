@@ -268,8 +268,9 @@ public class FiscalDocumentService {
         java.util.function.Predicate<FiscalDocument> filtroRicevute = filtroFiscale(tenantId, filtroFiscale, lookup);
 
         List<FiscalDocument> docs = fiscalDocumentDAO.findByTenantId(tenantId);
-        // Fatture con una NDC attiva collegata: NDC (nota_credito) non annullate → documento collegato
-        Set<Integer> fattureStornate = docs.stream()
+        // Fatture con una NDC attiva collegata: id fattura → NDC (nota_credito) non annullata.
+        // Tutti i documenti del tenant sono già in memoria: link fattura ↔ NDC senza query per riga.
+        Map<Integer, FiscalDocument> ndcAttivaPerFattura = docs.stream()
                 .filter(d -> d.getFkDocumentoCollegatoId() != null)
                 .filter(d -> {
                     TipoDocumento t = lookup.tipiById().get(d.getFkTipoDocumentoId());
@@ -277,8 +278,9 @@ public class FiscalDocumentService {
                     return t != null && CODICE_NOTA_CREDITO.equals(t.getCodice())
                             && (st == null || !STATO_ANNULLATA.equals(st.getCodice()));
                 })
-                .map(FiscalDocument::getFkDocumentoCollegatoId)
-                .collect(Collectors.toSet());
+                .collect(Collectors.toMap(FiscalDocument::getFkDocumentoCollegatoId, d -> d, (a, b) -> a));
+        Map<Integer, FiscalDocument> docsById = docs.stream()
+                .collect(Collectors.toMap(FiscalDocument::getId, d -> d));
         List<Booking> bookings = bookingDAO.findByTenantId(tenantId);
         List<Property> properties = propertyDAO.findByTenantId(tenantId);
         List<CanaleOta> canali = canaleOtaDAO.findAll();
@@ -341,6 +343,10 @@ public class FiscalDocumentService {
                     Integer settlementId = d.getFkBookingId() != null
                             ? settlementIdByBookingId.get(d.getFkBookingId()) : null;
                     Settlement settlement = settlementId != null ? settlementsById.get(settlementId) : null;
+                    FiscalDocument ndcAttiva = ndcAttivaPerFattura.get(d.getId());
+                    boolean isNdc = tipo != null && CODICE_NOTA_CREDITO.equals(tipo.getCodice());
+                    FiscalDocument fatturaCollegata = isNdc && d.getFkDocumentoCollegatoId() != null
+                            ? docsById.get(d.getFkDocumentoCollegatoId()) : null;
 
                     return DocumentListDTO.builder()
                             .id(d.getId())
@@ -367,7 +373,11 @@ public class FiscalDocumentService {
                             .createdAt(d.getCreatedAt())
                             .settlementId(settlementId)
                             .settlementStato(settlement != null ? settlement.getStato() : null)
-                            .stornata(fattureStornate.contains(d.getId()))
+                            .stornata(ndcAttiva != null)
+                            .ndcId(ndcAttiva != null ? ndcAttiva.getId() : null)
+                            .ndcNumber(ndcAttiva != null ? ndcAttiva.getDocumentNumber() : null)
+                            .fatturaCollegataId(isNdc ? d.getFkDocumentoCollegatoId() : null)
+                            .fatturaCollegataNumber(fatturaCollegata != null ? fatturaCollegata.getDocumentNumber() : null)
                             .build();
                 })
                 .collect(Collectors.toList());

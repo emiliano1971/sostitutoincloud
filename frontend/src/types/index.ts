@@ -79,6 +79,8 @@ export interface Booking {
   property_id: string;
   property_name: string;
   owner_name: string;
+  /** "Cognome Nome" del proprietario (BookingDetail.ownerCognomeNome), per la ricevuta owner. */
+  owner_cognome_nome?: string;
   guest_name: string;
   external_booking_id: string;
   channel_name: string;
@@ -93,6 +95,8 @@ export interface Booking {
   pm_fee_amount: number;
   owner_net_amount: number;
   withholding_amount: number;
+  /** Aliquota ritenuta storicizzata sulla prenotazione (es. 21 o 26). */
+  aliquota_ritenuta?: number;
   tourist_tax_amount: number;
   tourist_tax_included_in_gross: boolean;
   tourist_tax_collection: 'contanti' | 'payment_link' | 'altro';

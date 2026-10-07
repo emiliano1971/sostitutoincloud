@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FileText, Printer, Send, Download, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
@@ -193,19 +193,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        {isDocIssued ? (
-          <Button variant="outline" className="w-full sm:w-auto gap-2">
-            <Download className="h-4 w-4" />
-            Scarica Fattura PM
-          </Button>
-        ) : (
-          <Button className="w-full sm:w-auto gap-2">
-            <FileText className="h-4 w-4" />
-            Emetti Fattura PM
-          </Button>
-        )}
-      </DialogTrigger>
+      {/* Aperto dalle card documento di BookingDetail (prop open) */}
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

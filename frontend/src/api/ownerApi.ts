@@ -149,6 +149,8 @@ export interface OwnerBulkImportResult {
   immobiliSaltati: number;
   righeInErrore: number;
   errori: OwnerBulkImportErrore[];
+  /** Righe importate con segnalazioni non bloccanti (es. CIN fuori formato). */
+  avvisi: OwnerBulkImportErrore[];
 }
 
 export interface OwnerImportRigaPreview {

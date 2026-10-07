@@ -39,6 +39,12 @@ export interface DocumentListItem {
   createdAt: string;
   /** Fattura con una nota di credito attiva collegata. */
   stornata?: boolean;
+  /** Fattura stornata: NDC attiva collegata. */
+  ndcId?: number;
+  ndcNumber?: string;
+  /** NDC: fattura originale stornata. */
+  fatturaCollegataId?: number;
+  fatturaCollegataNumber?: string;
 }
 
 export interface DocumentRow {

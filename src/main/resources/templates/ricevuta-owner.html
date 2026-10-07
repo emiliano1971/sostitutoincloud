@@ -8,8 +8,9 @@
 
   Differenze rispetto a fattura-pm.html:
   - titolo RICEVUTA
-  - intestazione = dati del proprietario (locatore), non del PM
-  - destinatario = dati del PM
+  - emittente (intestazione) = dati del tenant/PM: ragione sociale, P.IVA, C.F., indirizzo
+  - destinatario = dati del proprietario: cognome e nome, C.F.
+    (owner_profile non ha un indirizzo: non viene stampato)
   - nessuna colonna IVA (canone fuori campo IVA)
   - totali con ritenuta d'acconto
 
@@ -136,11 +137,14 @@
 </head>
 <body>
 
-<!-- INTESTAZIONE — dati del proprietario (locatore) -->
+<!-- INTESTAZIONE — emittente: dati del tenant (PM) -->
 <div class="header">
   <div class="header-left">
-    <div class="company-name">{OWNER_NAME}</div>
-    <div>C.F.: {OWNER_TAX_CODE}</div>
+    <div class="company-name">{TENANT_LEGAL_NAME}</div>
+    <div>P.IVA: {TENANT_VAT_NUMBER}</div>
+    <div>C.F.: {TENANT_TAX_CODE}</div>
+    <div>{TENANT_STREET}</div>
+    <div>{TENANT_CAP_CITTA}</div>
   </div>
   <div class="header-right">
     <div class="doc-title">RICEVUTA</div>
@@ -149,14 +153,12 @@
   </div>
 </div>
 
-<!-- DESTINATARIO (PM) + IMMOBILE + SOGGIORNO -->
+<!-- DESTINATARIO (proprietario) + IMMOBILE + SOGGIORNO -->
 <div class="cols">
   <div class="col">
     <div class="section-title">Destinatario</div>
-    <div><strong>{TENANT_LEGAL_NAME}</strong></div>
-    <div>P.IVA: {TENANT_VAT_NUMBER}</div>
-    <div>C.F.: {TENANT_TAX_CODE}</div>
-    <div>{TENANT_LEGAL_ADDRESS}</div>
+    <div><strong>{OWNER_COGNOME_NOME}</strong></div>
+    <div>C.F.: {OWNER_TAX_CODE}</div>
   </div>
   <div class="col">
     <div class="section-title">Immobile</div>

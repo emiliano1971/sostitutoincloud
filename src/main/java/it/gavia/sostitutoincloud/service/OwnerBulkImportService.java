@@ -4,15 +4,18 @@ import it.gavia.sostitutoincloud.dao.CanaleOtaDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyContractRuleDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
+import it.gavia.sostitutoincloud.dao.PropertyOtaCodeDAO;
 import it.gavia.sostitutoincloud.dao.RegimeFiscaleDAO;
 import it.gavia.sostitutoincloud.dao.TipoImmobileDAO;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportErrore;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportPreviewResult;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportResult;
 import it.gavia.sostitutoincloud.dto.owner.OwnerBulkImportRigaPreview;
+import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.PropertyContractRule;
+import it.gavia.sostitutoincloud.model.PropertyOtaCode;
 import it.gavia.sostitutoincloud.model.TipoImmobile;
 import it.gavia.sostitutoincloud.util.ExcelCellUtils;
 import lombok.extern.log4j.Log4j2;
@@ -32,6 +35,7 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -58,7 +62,8 @@ import java.util.Set;
 @Log4j2
 public class OwnerBulkImportService {
 
-    // Colonne del template (foglio "Importazione"), 0-based: A..P
+    // Campi della riga (indici logici in RigaFile.valori). Coincidono con le colonne A..P del
+    // template precedente alla colonna CIN; la posizione reale nel file si ricava dall'intestazione.
     private static final int COL_COGNOME = 0;
     private static final int COL_NOME = 1;
     private static final int COL_CF = 2;
@@ -75,10 +80,41 @@ public class OwnerBulkImportService {
     private static final int COL_CAMBIO_BIANCHERIA = 13;
     private static final int COL_COMMISSIONE_PM = 14;
     private static final int COL_TIPO_PM = 15;
-    private static final int NUM_COLONNE = 16;
+    private static final int COL_CIN = 16;
+    private static final int NUM_COLONNE = 17;
+
+    /**
+     * Intestazioni riconosciute (normalizzate con normalizzaIntestazione: minuscole, senza
+     * accenti, "*", simboli e testo tra parentesi) → campo. Più alias per campo.
+     */
+    private static final Map<String, Integer> INTESTAZIONI = Map.ofEntries(
+            Map.entry("cognome proprietario", COL_COGNOME), Map.entry("cognome", COL_COGNOME),
+            Map.entry("nome proprietario", COL_NOME), Map.entry("nome", COL_NOME),
+            Map.entry("codice fiscale", COL_CF), Map.entry("cf", COL_CF),
+            Map.entry("nome immobile", COL_NOME_IMMOBILE),
+            Map.entry("citta", COL_CITTA),
+            Map.entry("iban", COL_IBAN),
+            Map.entry("regime fiscale", COL_REGIME),
+            Map.entry("email proprietario", COL_EMAIL), Map.entry("email", COL_EMAIL),
+            Map.entry("telefono proprietario", COL_TELEFONO), Map.entry("telefono", COL_TELEFONO),
+            Map.entry("indirizzo immobile", COL_INDIRIZZO), Map.entry("indirizzo", COL_INDIRIZZO),
+            Map.entry("primo immobile", COL_PRIMO_IMMOBILE),
+            Map.entry("commissione ota", COL_COMMISSIONE_OTA),
+            Map.entry("pulizie", COL_PULIZIE),
+            Map.entry("cambio biancheria", COL_CAMBIO_BIANCHERIA),
+            Map.entry("commissione pm", COL_COMMISSIONE_PM),
+            Map.entry("tipo commissione pm", COL_TIPO_PM), Map.entry("tipo pm", COL_TIPO_PM),
+            Map.entry("cin", COL_CIN), Map.entry("codice identificativo nazionale", COL_CIN));
+
+    // CIN: IT + 6 cifre + 1 lettera + 9 alfanumerici. Fuori formato = solo avviso
+    private static final String CIN_FORMATO = "IT\\d{6}[A-Z][A-Z0-9]{9}";
+    private static final String AVVISO_CIN = "CIN non nel formato standard (IT + 6 cifre + lettera + 9 alfanumerici)";
 
     // Righe esaminate per trovare l'intestazione (titolo e legenda la precedono)
     private static final int MAX_RIGHE_RICERCA_INTESTAZIONE = 20;
+
+    // Lunghezza di property_ota_code.external_id
+    private static final int MAX_EXTERNAL_ID = 60;
 
     private static final String REGIME_DEFAULT = "cedolare_secca";
     private static final Set<String> REGIMI_VALIDI = Set.of("cedolare_secca", "ordinario", "iva_10");
@@ -86,6 +122,7 @@ public class OwnerBulkImportService {
     private final OwnerProfileDAO ownerProfileDAO;
     private final PropertyDAO propertyDAO;
     private final PropertyContractRuleDAO propertyContractRuleDAO;
+    private final PropertyOtaCodeDAO propertyOtaCodeDAO;
     private final TenantSettingsService tenantSettingsService;
     private final CanaleOtaDAO canaleOtaDAO;
     private final RegimeFiscaleDAO regimeFiscaleDAO;
@@ -96,6 +133,7 @@ public class OwnerBulkImportService {
     public OwnerBulkImportService(OwnerProfileDAO ownerProfileDAO,
                                   PropertyDAO propertyDAO,
                                   PropertyContractRuleDAO propertyContractRuleDAO,
+                                  PropertyOtaCodeDAO propertyOtaCodeDAO,
                                   TenantSettingsService tenantSettingsService,
                                   CanaleOtaDAO canaleOtaDAO,
                                   RegimeFiscaleDAO regimeFiscaleDAO,
@@ -105,6 +143,7 @@ public class OwnerBulkImportService {
         this.ownerProfileDAO = ownerProfileDAO;
         this.propertyDAO = propertyDAO;
         this.propertyContractRuleDAO = propertyContractRuleDAO;
+        this.propertyOtaCodeDAO = propertyOtaCodeDAO;
         this.tenantSettingsService = tenantSettingsService;
         this.canaleOtaDAO = canaleOtaDAO;
         this.regimeFiscaleDAO = regimeFiscaleDAO;
@@ -119,7 +158,13 @@ public class OwnerBulkImportService {
             String iban, String regimeFiscale, String email, String telefono, String indirizzo,
             Boolean primoImmobile,
             BigDecimal commissioneOtaPct, BigDecimal pulizieImporto,
-            BigDecimal cambioBiancheriaPersona, BigDecimal commissionePmPct, String commissionePmCalcMode) {
+            BigDecimal cambioBiancheriaPersona, BigDecimal commissionePmPct, String commissionePmCalcMode,
+            String cin) {
+
+        /** Avviso non bloccante sulla riga (CIN fuori formato), null se nessuno. */
+        String avviso() {
+            return cin != null && !cin.matches(CIN_FORMATO) ? AVVISO_CIN : null;
+        }
     }
 
     /** Esito di una riga importata senza errori. */
@@ -199,6 +244,9 @@ public class OwnerBulkImportService {
                 }
                 if ("ok".equals(stato)) {
                     immobiliFile.add(chiaveImmobile);
+                    if (riga.avviso() != null) {
+                        messaggio += " — Avviso: " + riga.avviso();
+                    }
                 }
             } catch (IllegalArgumentException e) {
                 stato = "errore";
@@ -271,6 +319,13 @@ public class OwnerBulkImportService {
                 }
                 if (esito.immobileCreato()) {
                     result.setImmobiliCreati(result.getImmobiliCreati() + 1);
+                    if (riga.avviso() != null) {
+                        result.getAvvisi().add(OwnerBulkImportErrore.builder()
+                                .numeroRiga(numeroRiga)
+                                .descrizioneRiga(descrizione)
+                                .messaggio(riga.avviso())
+                                .build());
+                    }
                 } else {
                     result.setImmobiliSaltati(result.getImmobiliSaltati() + 1);
                 }
@@ -336,6 +391,7 @@ public class OwnerBulkImportService {
                 .address(riga.indirizzo() != null ? riga.indirizzo() : "")
                 .city(riga.citta())
                 .region("")
+                .cinCode(riga.cin())
                 .attivo(true)
                 .primoImmobile(primoImmobile)
                 .build());
@@ -343,29 +399,66 @@ public class OwnerBulkImportService {
                 "Creato immobile " + property.getDisplayName() + " (" + property.getInternalCode() + ", import massivo)");
 
         creaRegole(tenantId, property.getId(), riga, canaleOtaDefaultId);
+        creaCodiciOta(property.getId(), riga.nomeImmobile());
         return new EsitoRiga(proprietarioCreato, true);
     }
 
     private void creaRegole(Integer tenantId, Integer propertyId, RigaImport riga, Integer canaleOtaDefaultId) {
+        int create = 0;
         if (positivo(riga.commissioneOtaPct()) && canaleOtaDefaultId != null) {
             inserisciRegola(tenantId, propertyId, canaleOtaDefaultId,
-                    "commissione_ota", "percentuale_lordo", riga.commissioneOtaPct(), 1);
+                    "commissione_ota", "percentuale_lordo", riga.commissioneOtaPct(), false, 1);
+            create++;
         }
         if (positivo(riga.pulizieImporto())) {
-            inserisciRegola(tenantId, propertyId, null, "pulizie", "fisso", riga.pulizieImporto(), 2);
+            inserisciRegola(tenantId, propertyId, null, "pulizie", "fisso", riga.pulizieImporto(), false, 2);
+            create++;
         }
         if (positivo(riga.cambioBiancheriaPersona())) {
             inserisciRegola(tenantId, propertyId, null,
-                    "cambio_biancheria", "fisso_per_persona", riga.cambioBiancheriaPersona(), 3);
+                    "cambio_biancheria", "fisso_per_persona", riga.cambioBiancheriaPersona(), false, 3);
+            create++;
         }
         if (positivo(riga.commissionePmPct())) {
             inserisciRegola(tenantId, propertyId, null,
-                    "commissione_pm", riga.commissionePmCalcMode(), riga.commissionePmPct(), 4);
+                    "commissione_pm", riga.commissionePmCalcMode(), riga.commissionePmPct(), false, 4);
+            create++;
+        }
+        // Con almeno una regola: voce rimanenza al proprietario (come le regole configurate a
+        // mano), altrimenti il calcolatore segnala "Nessuna voce impostata come rimanenza".
+        // Senza regole l'immobile resta nel fallback del calcolatore.
+        if (create > 0) {
+            inserisciRegola(tenantId, propertyId, null,
+                    "provvigione_proprietario", "rimanenza", BigDecimal.ZERO, true, 5);
         }
     }
 
+    /**
+     * Mappatura OTA: nome immobile come external_id su tutti i canali attivi (l'import
+     * prenotazioni lo confronta con la colonna STRUTTURA). Nome oltre i 60 caratteri di
+     * external_id: nessuna mappatura, va impostata a mano dalla scheda immobile.
+     */
+    private void creaCodiciOta(Integer propertyId, String nomeImmobile) {
+        if (nomeImmobile.length() > MAX_EXTERNAL_ID) {
+            log.warn("OwnerBulkImportService - property={} nome immobile oltre {} caratteri: codici OTA non creati",
+                    propertyId, MAX_EXTERNAL_ID);
+            return;
+        }
+        List<CanaleOta> canaliAttivi = canaleOtaDAO.findByAttivo(true);
+        for (CanaleOta canale : canaliAttivi) {
+            propertyOtaCodeDAO.insert(PropertyOtaCode.builder()
+                    .fkPropertyId(propertyId)
+                    .fkCanaleOtaId(canale.getId())
+                    .externalId(nomeImmobile)
+                    .build());
+        }
+        log.info("OwnerBulkImportService - property={} otaCodes creati per {} canali attivi con displayName={}",
+                propertyId, canaliAttivi.size(), nomeImmobile);
+    }
+
     private void inserisciRegola(Integer tenantId, Integer propertyId, Integer canaleOtaId,
-                                 String tipo, String calcMode, BigDecimal valore, int ordine) {
+                                 String tipo, String calcMode, BigDecimal valore,
+                                 boolean rimanenza, int ordine) {
         PropertyContractRule saved = propertyContractRuleDAO.insert(PropertyContractRule.builder()
                 .fkPropertyId(propertyId)
                 .fkTenantId(tenantId)
@@ -373,7 +466,7 @@ public class OwnerBulkImportService {
                 .tipo(tipo)
                 .calcMode(calcMode)
                 .valore(valore)
-                .isRemainder(false)
+                .isRemainder(rimanenza)
                 .ordine(ordine)
                 .attivo(true)
                 .build());
@@ -418,6 +511,12 @@ public class OwnerBulkImportService {
         maxLen(telefono, 20, "Telefono");
         maxLen(indirizzo, 200, "Indirizzo");
 
+        String cin = facoltativo(v[COL_CIN]);
+        if (cin != null) {
+            cin = cin.toUpperCase(Locale.ROOT);
+        }
+        maxLen(cin, 25, "CIN");
+
         String tipoPm = facoltativo(v[COL_TIPO_PM]);
         String calcModePm;
         if (tipoPm == null || tipoPm.equalsIgnoreCase("lordo")) {
@@ -435,7 +534,8 @@ public class OwnerBulkImportService {
                 parseNumero(v[COL_PULIZIE], "Pulizie €"),
                 parseNumero(v[COL_CAMBIO_BIANCHERIA], "Cambio Biancheria €"),
                 parseNumero(v[COL_COMMISSIONE_PM], "Commissione PM %"),
-                calcModePm);
+                calcModePm,
+                cin);
     }
 
     /** "Si"/"Sì"/"SI" → true, "No" → false, vuoto → null (decide importaRiga). */
@@ -516,8 +616,9 @@ public class OwnerBulkImportService {
                 throw new IllegalArgumentException(
                         "Intestazione non trovata: la prima colonna deve contenere \"Cognome Proprietario\"");
             }
+            int[] colonne = mappaColonne(sheet.getRow(rigaIntestazione), fmt);
             for (int r = rigaIntestazione + 1; r <= sheet.getLastRowNum(); r++) {
-                String[] valori = leggiRiga(sheet.getRow(r), fmt);
+                String[] valori = leggiRiga(sheet.getRow(r), fmt, colonne);
                 if (!rigaVuota(valori)) {
                     righe.add(new RigaFile(r + 1, valori));
                 }
@@ -560,10 +661,47 @@ public class OwnerBulkImportService {
         return -1;
     }
 
-    private String[] leggiRiga(Row row, DataFormatter fmt) {
+    /**
+     * Colonna del file per ogni campo (-1 = assente), ricavata dalle intestazioni: il template
+     * con la colonna CIN (F) e quello precedente si leggono allo stesso modo. Intestazioni non
+     * riconosciute ignorate; con un nome ripetuto vale la prima colonna. Se mancano intestazioni
+     * obbligatorie (file con intestazioni rinominate) si torna al layout posizionale A..P.
+     */
+    private int[] mappaColonne(Row intestazione, DataFormatter fmt) {
+        int[] colonne = new int[NUM_COLONNE];
+        Arrays.fill(colonne, -1);
+        for (int c = 0; c < intestazione.getLastCellNum(); c++) {
+            Integer campo = INTESTAZIONI.get(
+                    normalizzaIntestazione(ExcelCellUtils.getCellValue(intestazione.getCell(c), fmt)));
+            if (campo != null && colonne[campo] < 0) {
+                colonne[campo] = c;
+            }
+        }
+        boolean obbligatorieTrovate = colonne[COL_COGNOME] >= 0 && colonne[COL_NOME] >= 0
+                && colonne[COL_CF] >= 0 && colonne[COL_NOME_IMMOBILE] >= 0 && colonne[COL_CITTA] >= 0;
+        if (!obbligatorieTrovate) {
+            log.debug("OwnerBulkImportService - intestazioni non riconosciute, layout posizionale A..P");
+            for (int i = 0; i < COL_CIN; i++) {
+                colonne[i] = i;
+            }
+            colonne[COL_CIN] = -1;
+        }
+        return colonne;
+    }
+
+    /** "Città *" → "citta", "Pulizie € (fisso)" → "pulizie", "CIN (Codice ...)" → "cin". */
+    private String normalizzaIntestazione(String s) {
+        return senzaAccenti(s).toLowerCase(Locale.ROOT)
+                .replaceAll("\\(.*?\\)", " ")
+                .replaceAll("[^a-z0-9 ]", " ")
+                .trim().replaceAll("\\s+", " ");
+    }
+
+    private String[] leggiRiga(Row row, DataFormatter fmt, int[] colonne) {
         String[] valori = new String[NUM_COLONNE];
-        for (int c = 0; c < NUM_COLONNE; c++) {
-            valori[c] = row == null ? "" : ExcelCellUtils.getCellValue(row.getCell(c), fmt).trim();
+        for (int i = 0; i < NUM_COLONNE; i++) {
+            valori[i] = row == null || colonne[i] < 0
+                    ? "" : ExcelCellUtils.getCellValue(row.getCell(colonne[i]), fmt).trim();
         }
         return valori;
     }

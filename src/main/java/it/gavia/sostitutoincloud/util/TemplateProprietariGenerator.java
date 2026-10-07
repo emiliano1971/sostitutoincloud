@@ -75,22 +75,24 @@ public final class TemplateProprietariGenerator {
             String[] header = {
                 "Cognome Proprietario *", "Nome Proprietario *", "Codice Fiscale *",
                 "Nome Immobile *", "Città *",
+                "CIN (Codice Identificativo Nazionale)",
                 "IBAN", "Regime Fiscale", "Email Proprietario", "Telefono Proprietario",
                 "Indirizzo Immobile", "Primo Immobile",
                 "Commissione OTA %", "Pulizie € (fisso)", "Cambio Biancheria € (per persona)",
                 "Commissione PM %", "Tipo Commissione PM"
             };
             // 0 = obbligatoria, 1 = facoltativa, 2 = regola contratto
-            int[] categoria = {0,0,0,0,0, 1,1,1,1,1,1, 2,2,2,2,2};
-            int[] larghezza = {20,20,18,25,15, 28,18,25,15,25,14, 12,12,12,12,16};
+            int[] categoria = {0,0,0,0,0, 1,1,1,1,1,1,1, 2,2,2,2,2};
+            int[] larghezza = {20,20,18,25,15, 22,28,18,25,15,25,14, 12,12,12,12,16};
+            final int numColonne = header.length;   // 17: A..Q
             for (int c = 0; c < larghezza.length; c++) sh.setColumnWidth(c, larghezza[c] * 256);
 
-            // Riga 1: titolo su tutta la riga (A1:P1)
+            // Riga 1: titolo su tutta la riga (A1:Q1)
             Row r1 = sh.createRow(0);
             r1.setHeightInPoints(26);
-            for (int c = 0; c < 16; c++) r1.createCell(c).setCellStyle(titolo);
+            for (int c = 0; c < numColonne; c++) r1.createCell(c).setCellStyle(titolo);
             r1.getCell(0).setCellValue("Template Importazione Proprietari e Immobili");
-            sh.addMergedRegion(new CellRangeAddress(0, 0, 0, 15));
+            sh.addMergedRegion(new CellRangeAddress(0, 0, 0, numColonne - 1));
 
             // Riga 2: legenda colori
             Row r2 = sh.createRow(1);
@@ -106,20 +108,21 @@ public final class TemplateProprietariGenerator {
             // Commenti sulle intestazioni: default e significato (visibili al passaggio del mouse)
             XSSFDrawing draw = sh.createDrawingPatriarch();
             commento(wb, draw, r3.getCell(2), "16 caratteri. Identifica il proprietario: se esiste già, l'immobile viene associato a lui senza sovrascriverlo.");
-            commento(wb, draw, r3.getCell(6), "Valori: cedolare_secca / ordinario / iva_10. Se vuoto: cedolare_secca.");
-            commento(wb, draw, r3.getCell(10), "Valori: Si / No. Se vuoto: Si.");
-            commento(wb, draw, r3.getCell(11), "Percentuale sul lordo ospite, applicata al canale OTA di default del tenant. Es. 15 = 15%.");
-            commento(wb, draw, r3.getCell(12), "Importo fisso netto (senza IVA) per prenotazione.");
-            commento(wb, draw, r3.getCell(13), "Importo netto (senza IVA) per ospite.");
-            commento(wb, draw, r3.getCell(14), "Percentuale della commissione PM. Es. 10 = 10%.");
-            commento(wb, draw, r3.getCell(15), "lordo = sul lordo ospite; netto = sul lordo meno le spese.");
+            commento(wb, draw, r3.getCell(5), "Formato: IT + 6 cifre + 1 lettera + 9 caratteri alfanumerici (18 caratteri). Es. IT058091C1A2B3C4D5. Facoltativo, ma necessario per la CU.");
+            commento(wb, draw, r3.getCell(7), "Valori: cedolare_secca / ordinario / iva_10. Se vuoto: cedolare_secca.");
+            commento(wb, draw, r3.getCell(11), "Valori: Si / No. Se vuoto: Si.");
+            commento(wb, draw, r3.getCell(12), "Percentuale sul lordo ospite, applicata al canale OTA di default del tenant. Es. 15 = 15%.");
+            commento(wb, draw, r3.getCell(13), "Importo fisso netto (senza IVA) per prenotazione.");
+            commento(wb, draw, r3.getCell(14), "Importo netto (senza IVA) per ospite.");
+            commento(wb, draw, r3.getCell(15), "Percentuale della commissione PM. Es. 10 = 10%.");
+            commento(wb, draw, r3.getCell(16), "lordo = sul lordo ospite; netto = sul lordo meno le spese.");
 
             // Righe dati 4..1000: celle vuote già colorate per categoria
             for (int r = 3; r < ULTIMA_RIGA; r++) {
                 Row row = sh.createRow(r);
-                for (int c = 0; c < 16; c++) {
+                for (int c = 0; c < numColonne; c++) {
                     Cell cell = row.createCell(c);
-                    boolean numerica = c >= 11 && c <= 14;
+                    boolean numerica = c >= 12 && c <= 15;
                     cell.setCellStyle(switch (categoria[c]) {
                         case 0 -> datObblTesto;
                         case 1 -> datFacTesto;
@@ -131,21 +134,21 @@ public final class TemplateProprietariGenerator {
             // Riga 4: esempio con dati fittizi
             Row r4 = sh.getRow(3);
             String[] esempioTesto = {"Rossi", "Mario", "RSSMRA80A01H501Z", "Appartamento Centro", "Roma",
-                    "IT60X0542811101000000123456", "cedolare_secca", "mario.rossi@email.it",
+                    "IT058091C1A2B3C4D5", "IT60X0542811101000000123456", "cedolare_secca", "mario.rossi@email.it",
                     "3331234567", "Via Roma 1", "Si"};
             for (int c = 0; c < esempioTesto.length; c++) r4.getCell(c).setCellValue(esempioTesto[c]);
-            r4.getCell(11).setCellValue(15);
-            r4.getCell(12).setCellValue(60);
-            r4.getCell(13).setCellValue(20);
-            r4.getCell(14).setCellValue(10);
-            r4.getCell(15).setCellValue("netto");
+            r4.getCell(12).setCellValue(15);
+            r4.getCell(13).setCellValue(60);
+            r4.getCell(14).setCellValue(20);
+            r4.getCell(15).setCellValue(10);
+            r4.getCell(16).setCellValue("netto");
             commento(wb, draw, r4.getCell(0), "Riga di esempio con dati fittizi: cancellarla o sostituirla prima dell'importazione.");
 
-            // Dropdown su G, K, P per le righe 5:1000
+            // Dropdown su H, L, Q per le righe 5:1000
             DataValidationHelper dvh = sh.getDataValidationHelper();
-            dropdown(sh, dvh, 6,  new String[]{"cedolare_secca", "ordinario", "iva_10"});
-            dropdown(sh, dvh, 10, new String[]{"Si", "No"});
-            dropdown(sh, dvh, 15, new String[]{"lordo", "netto"});
+            dropdown(sh, dvh, 7,  new String[]{"cedolare_secca", "ordinario", "iva_10"});
+            dropdown(sh, dvh, 11, new String[]{"Si", "No"});
+            dropdown(sh, dvh, 16, new String[]{"lordo", "netto"});
 
             // Blocca le prime tre righe (titolo, legenda, intestazioni)
             sh.createFreezePane(0, 3);
@@ -177,25 +180,30 @@ public final class TemplateProprietariGenerator {
                 {"", "- Nome Immobile: nome display dell'immobile"},
                 {"", "- Città: comune dell'immobile"},
                 {"", ""},
-                {"S", "2. PROPRIETARIO CON PIÙ IMMOBILI:"},
-                {"", "Ripetere le colonne del proprietario (A-I) su ogni riga, una per immobile. Il sistema riconosce lo stesso proprietario tramite il Codice Fiscale."},
+                {"S", "2. CIN (sfondo azzurro, facoltativo):"},
+                {"", "CIN: Codice Identificativo Nazionale obbligatorio per locazioni brevi dal 2024. Formato: IT + 6 cifre + 1 lettera + 9 caratteri alfanumerici (18 caratteri totali). Facoltativo nel template ma necessario per la CU."},
+                {"", "Un CIN in formato diverso viene importato comunque e segnalato come avviso."},
                 {"", ""},
-                {"S", "3. DUPLICATI:"},
+                {"S", "3. PROPRIETARIO CON PIÙ IMMOBILI:"},
+                {"", "Ripetere le colonne del proprietario (A-C, G-J) su ogni riga, una per immobile. Il sistema riconosce lo stesso proprietario tramite il Codice Fiscale."},
+                {"", ""},
+                {"S", "4. DUPLICATI:"},
                 {"", "Se un proprietario o un immobile esiste già nel sistema, la riga viene saltata senza errori."},
                 {"", ""},
-                {"S", "4. REGIME FISCALE:"},
+                {"S", "5. REGIME FISCALE:"},
                 {"", "- cedolare_secca: default, locazioni brevi persone fisiche"},
                 {"", "- ordinario: con IVA"},
                 {"", "- iva_10: IVA agevolata"},
                 {"", ""},
-                {"S", "5. REGOLE CONTRATTO (sfondo verde):"},
+                {"S", "6. REGOLE CONTRATTO (sfondo verde):"},
                 {"", "- Commissione OTA %: percentuale applicata al canale OTA default configurato nel sistema"},
                 {"", "- Pulizie €: importo fisso netto (senza IVA)"},
                 {"", "- Cambio Biancheria €/persona: importo per ospite netto (senza IVA)"},
                 {"", "- Commissione PM %: percentuale netto o sul lordo"},
                 {"", "- Tipo PM: 'lordo' = sul lordo ospite; 'netto' = sul lordo meno le spese"},
+                {"", "- Rimanenza: se la riga ha almeno una regola contratto, il sistema aggiunge automaticamente la voce 'Provvigione proprietario' come rimanenza: al proprietario va quanto resta del lordo ospite dopo le altre voci. Non va indicata nel file. Senza regole contratto l'immobile viene creato senza regole (nemmeno la rimanenza) e le regole si configurano poi dalla scheda dell'immobile."},
                 {"", ""},
-                {"S", "6. ERRORI:"},
+                {"S", "7. ERRORI:"},
                 {"", "Le righe con errori vengono saltate. Al termine dell'import viene mostrato un report con le righe importate, saltate e gli errori."},
             };
             for (int i = 0; i < righe.length; i++) {

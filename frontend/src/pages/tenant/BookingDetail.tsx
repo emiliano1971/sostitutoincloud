@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Copy } from 'lucide-react';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Copy, FileDown } from 'lucide-react';
 import { getContractRules, type ContractRule } from '@/api/contractApi';
 import { cn } from '@/lib/utils';
 import GuestEditDialog from '@/components/GuestEditDialog';
@@ -22,14 +22,14 @@ import {
   type BookingDetail as BookingDetailType,
   type BookingUpdateSplitRequest,
 } from '@/api/bookingApi';
-import { generateDocument, type DocumentGenerateResponse } from '@/api/documentApi';
+import { generateDocument, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { toast } from '@/hooks/use-toast';
 import { useLookup } from '@/contexts/LookupContext';
 import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
-import NdcDialog from '@/components/booking/NdcDialog';
 import { labelStatoPrenotazione } from '@/lib/statiLabels';
+import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 
 const paymentLabels: Record<string, string> = {
   pending: 'In attesa',
@@ -71,6 +71,7 @@ function toDialogBooking(b: BookingDetailType): Booking {
     property_id: String(b.fkPropertyId),
     property_name: b.propertyName,
     owner_name: b.ownerName,
+    owner_cognome_nome: b.ownerCognomeNome,
     guest_name: b.guestName,
     external_booking_id: b.externalBookingId,
     channel_name: b.channelName ?? '',
@@ -85,6 +86,7 @@ function toDialogBooking(b: BookingDetailType): Booking {
     pm_fee_amount: s.pmFeeAmount,
     owner_net_amount: s.ownerNetAmount,
     withholding_amount: s.withholdingAmount,
+    aliquota_ritenuta: s.aliquotaRitenuta,
     tourist_tax_amount: s.touristTaxAmount,
     tourist_tax_included_in_gross: s.touristTaxIncludedInGross,
     tourist_tax_collection: (b.touristTaxCollection as Booking['tourist_tax_collection']) ?? 'altro',
@@ -158,7 +160,8 @@ const EditorImporto = ({
     base > 0 ? ((importo / base) * 100).toFixed(2) : '0.00';
   const importoDaPct = (pct: number) => ((pct / 100) * base).toFixed(2);
 
-  const [mode, setMode] = useState<'pct' | 'eur'>('pct');
+  // Default in euro: l'importo è il dato che si corregge di solito; la % resta col toggle
+  const [mode, setMode] = useState<'pct' | 'eur'>('eur');
   const [valore, setValore] = useState(String(importoIniziale));
   const [pct, setPct] = useState(pctDaImporto(importoIniziale));
 
@@ -297,7 +300,6 @@ const BookingDetail = () => {
   const { lookups, getLabelByCodice } = useLookup();
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
-  const [ndcOpen, setNdcOpen] = useState(false);
   const [copiando, setCopiando] = useState(false);
   const [guestEditOpen, setGuestEditOpen] = useState(false);
   const [booking, setBooking] = useState<BookingDetailType | null>(null);
@@ -305,6 +307,8 @@ const BookingDetail = () => {
   const [error, setError] = useState<string | null>(null);
   const [generatedReceipt, setGeneratedReceipt] = useState<DocumentGenerateResponse | null>(null);
   const [generatedInvoice, setGeneratedInvoice] = useState<DocumentGenerateResponse | null>(null);
+  // Soglia e importo del bollo per l'anteprima della ricevuta (default nel dialog se non caricati)
+  const [tenantSettings, setTenantSettings] = useState<TenantSettingsDTO | null>(null);
   const [savingReceipt, setSavingReceipt] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [isUpdatingSplit, setIsUpdatingSplit] = useState(false);
@@ -504,6 +508,10 @@ const BookingDetail = () => {
   };
 
   useEffect(() => {
+    getSettings().then(setTenantSettings).catch(() => { /* default del dialog */ });
+  }, []);
+
+  useEffect(() => {
     if (!id) return;
     // Navigando da una prenotazione all'altra il componente resta montato: le regole
     // caricate appartengono all'immobile precedente, si ripartisce da card chiusa e vuota.
@@ -683,7 +691,8 @@ const BookingDetail = () => {
 
   // Tassa di soggiorno modificabile: % sul lordo ospite (non sulla base di calcolo, che ne è
   // già al netto) e origine dell'importo dalla riga split.
-  const tassaScorporata = !!split.touristTaxIncludedInGross && split.touristTaxAmount > 0;
+  // Con il flag attivo lo scorporo si mostra sempre, anche a 0 (comune senza tassa)
+  const tassaScorporata = !!split.touristTaxIncludedInGross;
   const pctLordo = (v: number) =>
     split.grossAmount > 0 ? ((v / split.grossAmount) * 100).toFixed(2) : '0.00';
   const editorTassa = {
@@ -716,8 +725,9 @@ const BookingDetail = () => {
     // mai su entrambe, un solo editingVoce === 'tassa' le aprirebbe insieme.
     ...(tassaScorporata
       ? [
-          { label: 'Tassa soggiorno (scorporata dal lordo)', value: -split.touristTaxAmount, ...editorTassa },
-          { label: 'Base di calcolo', value: split.grossAmount - split.touristTaxAmount, bold: true },
+          { label: 'Tassa soggiorno (scorporata dal lordo)', value: -(split.touristTaxAmount ?? 0), ...editorTassa,
+            ...((split.touristTaxAmount ?? 0) > 0 ? {} : { descrizione: '(non applicabile per questo comune)' }) },
+          { label: 'Base di calcolo', value: split.grossAmount - (split.touristTaxAmount ?? 0), bold: true },
         ]
       : []),
     ...vociCosto,
@@ -729,8 +739,11 @@ const BookingDetail = () => {
     { label: 'Netto proprietario', value: split.ownerNetAmount, bold: true },
     { label: `Ritenuta ${aliquotaRitenuta}%`, value: -split.withholdingAmount },
     { label: 'Liquidazione proprietario', value: split.liquidazioneOwner, bold: true },
-    { label: `Tassa di Soggiorno ${split.touristTaxIncludedInGross ? '(incl. nel lordo)' : '(extra)'}`, value: split.touristTaxAmount, highlight: true,
-      ...(tassaScorporata ? {} : editorTassa) },
+    // Tassa extra (non inclusa nel lordo): riga informativa in fondo, sempre presente perché è
+    // l'unico punto in cui modificarla. Con il flag attivo la sostituisce lo scorporo in alto.
+    ...(tassaScorporata
+      ? []
+      : [{ label: 'Tassa di Soggiorno (extra)', value: split.touristTaxAmount ?? 0, highlight: true, ...editorTassa }]),
   ];
 
   const fmt = (v: number) => `€${Math.abs(v).toLocaleString('it-IT', { minimumFractionDigits: 2 })}`;
@@ -843,9 +856,6 @@ const BookingDetail = () => {
         && d.fkDocumentoCollegatoId === existingInvoice.id
         && d.statoDocumento !== 'annullata')
     : undefined;
-  // Fattura stornabile: emessa e non scartata dallo SDI (stessa regola di NdcService)
-  const fatturaStornabile = !!existingInvoice && !ndcAttiva
-    && !['rejected', 'error', 'draft'].includes(existingInvoice.statoDocumento);
 
   // Dati reali dal backend per i dialog (sostituiscono i mock hardcoded)
   const dialogOwner = {
@@ -1238,13 +1248,18 @@ const BookingDetail = () => {
         {/* Un riquadro per documento fiscale: cliccabile se il documento è stato emesso.
             Stesso pattern della card Liquidazione. */}
         {[
-          { label: 'Fattura PM', doc: existingInvoice, icon: FileText, sdi: true },
-          { label: 'Ricevuta Owner', doc: existingReceipt, icon: ReceiptText, sdi: false },
-        ].map(({ label, doc, icon: Icon, sdi }) => (
+          { label: 'Fattura PM', doc: existingInvoice, icon: FileText, sdi: true,
+            vuoto: 'Nessuna fattura emessa', emetti: 'Emetti Fattura PM', onEmetti: () => setInvoiceOpen(true) },
+          { label: 'Ricevuta Owner', doc: existingReceipt, icon: ReceiptText, sdi: false,
+            vuoto: 'Nessuna ricevuta emessa', emetti: 'Emetti Ricevuta', onEmetti: () => setReceiptOpen(true) },
+        ].map(({ label, doc, icon: Icon, sdi, vuoto, emetti, onEmetti }) => {
+          // Fattura stornata da una NDC attiva: niente navigazione al dettaglio dalla card
+          const navigabile = !!doc && !(sdi && ndcAttiva);
+          return (
           <Card
             key={label}
-            className={doc ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
-            onClick={doc ? () => navigate(`/documents/${doc.id}`) : undefined}
+            className={navigabile ? 'cursor-pointer transition-colors hover:bg-accent' : undefined}
+            onClick={navigabile ? () => navigate(`/documents/${doc.id}`) : undefined}
           >
             <CardContent className="p-4 text-center">
               <Icon className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
@@ -1257,15 +1272,46 @@ const BookingDetail = () => {
                     : statoRicevutaLabels[doc.statoDocumento]
                       ?? getLabelByCodice(lookups?.statiDocumento ?? [], doc.statoDocumento)}
               </Badge>
-              {doc && (
-                <p className="mt-1 font-mono text-[11px] text-muted-foreground">{doc.documentNumber}</p>
+              {doc ? (
+                <div className="mt-2 space-y-1">
+                  <p className="text-sm font-medium text-center truncate">{doc.documentNumber}</p>
+                  <div className="flex items-center justify-center gap-2">
+                    {/* Fattura: totale servizi PM. Ricevuta: netto a pagare al proprietario
+                        (canone − ritenuta; il bollo è solo informativo, come nel PDF) */}
+                    <span className="text-sm text-muted-foreground">
+                      {fmt(sdi ? (doc.importoTotale ?? 0) : (doc.importoTotale ?? 0) - (doc.ritenutaAmount ?? 0))}
+                    </span>
+                    {/* Card cliccabile (dettaglio documento): il download non deve navigare */}
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        downloadDocumentPdf(doc.id, doc.documentNumber).catch(err => toast({
+                          title: 'Errore download PDF',
+                          description: err instanceof Error ? err.message : 'Errore imprevisto',
+                          variant: 'destructive',
+                        }));
+                      }}
+                      className="flex-shrink-0 text-muted-foreground hover:text-foreground"
+                      title={`Scarica PDF ${label}`}
+                    >
+                      <FileDown className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-2 text-sm text-muted-foreground">{vuoto}</div>
+                  {/* Apre l'anteprima: l'emissione (irreversibile) si conferma nel dialog */}
+                  <Button onClick={onEmetti} size="sm" className="mt-2">{emetti}</Button>
+                </>
               )}
               {sdi && ndcAttiva && (
                 <p className="mt-0.5 text-[11px] text-green-600 dark:text-green-400">Stornata da {ndcAttiva.documentNumber}</p>
               )}
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
         <Card>
           <CardContent className="p-4 text-center">
             <CreditCard className="h-5 w-5 mx-auto text-muted-foreground mb-2" />
@@ -1318,30 +1364,20 @@ const BookingDetail = () => {
             </Button>
           )
         )}
-        {fatturaStornabile && existingInvoice && (
-          <>
-            <Button variant="outline" className="w-full sm:w-auto gap-2" onClick={() => setNdcOpen(true)}>
-              <RotateCcw className="h-4 w-4" /> Emetti nota di credito
-            </Button>
-            <NdcDialog
-              booking={booking}
-              fattura={existingInvoice}
-              open={ndcOpen}
-              onClose={() => setNdcOpen(false)}
-              onSuccess={() => { setNdcOpen(false); reloadBooking(); }}
-            />
-          </>
-        )}
+        {/* Nota di credito: si emette dal dettaglio della fattura PM (DocumentDetail) */}
         <ReceiptOwnerDialog
           open={receiptOpen}
           onOpenChange={setReceiptOpen}
           booking={dialogBooking}
           owner={dialogOwner}
           property={dialogProperty}
+          tenantData={tenantData}
           generatedDoc={generatedReceipt}
           existingDoc={existingReceipt}
           isSaving={savingReceipt}
           onEmetti={() => handleEmetti('ricevuta_owner', setSavingReceipt, setGeneratedReceipt)}
+          sogliaBollo={tenantSettings?.bolloSoglia ?? 77.47}
+          importoBollo={tenantSettings?.bolloImporto ?? 2.00}
         />
 
         <GuestEditDialog

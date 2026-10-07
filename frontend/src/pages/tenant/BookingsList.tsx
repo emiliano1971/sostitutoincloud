@@ -7,7 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Search, Filter, Eye, Upload, Plus, AlertTriangle, Trash2, X, ChevronDown } from 'lucide-react';
+import { Search, Filter, Eye, Upload, Plus, AlertTriangle, Trash2, X, ChevronDown, FileText, Receipt, FileX } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { downloadDocumentPdf } from '@/api/documentApi';
 import { getBookings, deleteBooking, type BookingListItem } from '@/api/bookingApi';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -453,6 +455,7 @@ const BookingsList = () => {
                   <TableHead className="text-right">Lordo €</TableHead>
                   <TableHead>Stato</TableHead>
                   <TableHead className="w-10"></TableHead>
+                  <TableHead className="text-xs text-muted-foreground font-normal">PDF</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -530,6 +533,36 @@ const BookingsList = () => {
                         <Button variant="ghost" size="icon" className="h-7 w-7">
                           <Eye className="h-3.5 w-3.5" />
                         </Button>
+                      </TableCell>
+                      {/* Download PDF dei documenti emessi (non annullati); il clic non apre il booking */}
+                      <TableCell onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          {([
+                            { id: b.fatturaId, numero: b.fatturaNumber, Icon: FileText, cls: 'text-muted-foreground hover:text-foreground' },
+                            { id: b.ricevutaId, numero: b.ricevutaNumber, Icon: Receipt, cls: 'text-muted-foreground hover:text-foreground' },
+                            { id: b.ndcId, numero: b.ndcNumber, Icon: FileX, cls: 'text-destructive hover:text-destructive/80' },
+                          ]).filter(d => d.id != null).map(({ id, numero, Icon, cls }) => (
+                            <Tooltip key={id}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label={`Scarica PDF ${numero ?? ''}`}
+                                  onClick={() => {
+                                    downloadDocumentPdf(id!, numero ?? String(id)).catch(err => toast({
+                                      title: 'Errore download PDF',
+                                      description: err instanceof Error ? err.message : 'Errore imprevisto',
+                                      variant: 'destructive',
+                                    }));
+                                  }}
+                                  className={cls}
+                                >
+                                  <Icon className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>{numero}</TooltipContent>
+                            </Tooltip>
+                          ))}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
