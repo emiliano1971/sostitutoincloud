@@ -82,15 +82,15 @@ const OwnerDetail = () => {
     getOwnerById(Number(id))
       .then(ownerData => {
         setOwner(ownerData);
-        const fullName = `${ownerData.firstName} ${ownerData.lastName}`;
         return Promise.all([
           // Immobili filtrati dal backend sull'id del proprietario: il confronto per
           // nome sbaglierebbe con due proprietari omonimi nello stesso tenant.
           getProperties(undefined, ownerData.id),
-          getBookings({ page: 0, size: 5 }),
+          // Ultime 5 prenotazioni del proprietario, filtrate per id lato server
+          getBookings({ ownerId: ownerData.id, page: 0, size: 5 }),
         ]).then(([ownerProps, allBookings]) => {
           setProperties(ownerProps);
-          setRecentBookings(allBookings.filter(b => b.ownerName === fullName));
+          setRecentBookings(allBookings.content);
         });
       })
       .catch(err => setError(err.message))

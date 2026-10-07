@@ -20,6 +20,7 @@ import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
 import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingPageDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingSplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
@@ -50,10 +51,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.Collator;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -88,6 +93,9 @@ public class BookingService {
     private final AuditService auditService;
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
     private final TenantSettingsService tenantSettingsService;
+
+    // Limite di sicurezza sul parametro size della lista prenotazioni
+    private static final int MAX_PAGE_SIZE = 1000;
     private final PropertyContractRuleDAO contractRuleDAO;
     private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
     private final F24RecordDAO f24RecordDAO;
@@ -138,20 +146,88 @@ public class BookingService {
         this.f24RecordDAO = f24RecordDAO;
     }
 
-    public List<BookingListDTO> findByTenantId(Integer tenantId, BookingFilterDTO filter) {
+    /**
+     * Lista prenotazioni paginata (GET /api/bookings), stesso schema della lista documenti:
+     * filtri, ordinamento e paginazione in memoria sui booking del tenant; totalElements conta
+     * le prenotazioni filtrate, non la sola pagina. size <= 0 → tenant_settings.page_size.
+     */
+    public BookingPageDTO findPage(Integer tenantId, BookingFilterDTO filter, int page, int size) {
+        int effectiveSize = size > 0 ? Math.min(size, MAX_PAGE_SIZE) : tenantSettingsService.getPageSize(tenantId);
+        int pageNum = Math.max(page, 0);
         LookupMaps maps = buildLookupMaps(tenantId);
-        List<Booking> all = bookingDAO.findByTenantId(tenantId);
 
-        Stream<Booking> stream = all.stream();
+        Stream<Booking> stream = bookingDAO.findByTenantId(tenantId).stream();
         stream = applyStatusFilter(stream, filter.getStatus(), maps);
         stream = applyChannelFilter(stream, filter.getChannel(), maps);
-        stream = applySearchFilter(stream, filter.getQ());
+        if (filter.getPropertyId() != null) {
+            stream = stream.filter(b -> filter.getPropertyId().equals(b.getFkPropertyId()));
+        }
+        if (filter.getOwnerId() != null) {
+            stream = stream.filter(b -> filter.getOwnerId().equals(b.getFkOwnerId()));
+        }
+        // Filtro date sul solo check-in (come la UI): il booking rientra se l'arrivo cade nel range
+        if (filter.getDataFrom() != null) {
+            stream = stream.filter(b -> b.getCheckinDate() != null && !b.getCheckinDate().isBefore(filter.getDataFrom()));
+        }
+        if (filter.getDataTo() != null) {
+            stream = stream.filter(b -> b.getCheckinDate() != null && !b.getCheckinDate().isAfter(filter.getDataTo()));
+        }
 
         Map<Integer, List<FiscalDocument>> docsByBooking = documentiPerBooking(tenantId);
-        List<BookingListDTO> result = stream.map(b -> toListDTO(b, maps, docsByBooking)).toList();
-        log.info("BookingService.findByTenantId() - tenantId={}, filtro=[status={}, channel={}, q={}], {} booking trovati",
-                tenantId, filter.getStatus(), filter.getChannel(), filter.getQ(), result.size());
-        return result;
+        // Ricerca sui campi mostrati in lista (nomi risolti): dopo il mapping in DTO
+        List<BookingListDTO> tutti = stream
+                .map(b -> toListDTO(b, maps, docsByBooking))
+                .filter(dto -> corrispondeRicerca(dto, filter.getQ()))
+                .sorted(ordinamento(filter.getSort(), filter.getDir()))
+                .toList();
+
+        int totalPages = (int) Math.ceil(tutti.size() / (double) effectiveSize);
+        int from = (int) Math.min((long) pageNum * effectiveSize, tutti.size());
+        int to = Math.min(from + effectiveSize, tutti.size());
+        log.info("BookingService.findPage() - tenantId={} filtro={} page={} size={} totale={}",
+                tenantId, filter, pageNum, effectiveSize, tutti.size());
+        return BookingPageDTO.builder()
+                .content(new ArrayList<>(tutti.subList(from, to)))
+                .page(pageNum)
+                .size(effectiveSize)
+                .totalElements(tutti.size())
+                .totalPages(totalPages)
+                .build();
+    }
+
+    private boolean corrispondeRicerca(BookingListDTO b, String search) {
+        if (search == null || search.isBlank()) return true;
+        String q = search.trim().toLowerCase(Locale.ROOT);
+        return Stream.of(b.getExternalBookingId(), b.getGuestName(), b.getPropertyName(),
+                        b.getOwnerName(), b.getChannelName())
+                .anyMatch(v -> v != null && v.toLowerCase(Locale.ROOT).contains(q));
+    }
+
+    /**
+     * Ordinamento: campo richiesto, valori nulli sempre in fondo, poi id decrescente per un
+     * ordine stabile tra le pagine. Campo sconosciuto → data check-in (default decrescente).
+     */
+    private Comparator<BookingListDTO> ordinamento(String sort, String dir) {
+        boolean asc = "asc".equalsIgnoreCase(dir);
+        Collator collator = Collator.getInstance(Locale.ITALIAN);
+        collator.setStrength(Collator.SECONDARY);   // ignora maiuscole/minuscole
+        Comparator<String> testo = asc ? collator::compare : (a, b) -> collator.compare(b, a);
+        Comparator<LocalDate> data = asc ? Comparator.naturalOrder() : Comparator.reverseOrder();
+        Comparator<BookingListDTO> primario = switch (sort == null ? "" : sort) {
+            case "externalBookingId" -> Comparator.comparing(BookingListDTO::getExternalBookingId, Comparator.nullsLast(testo));
+            case "guestName" -> Comparator.comparing(BookingListDTO::getGuestName, Comparator.nullsLast(testo));
+            case "propertyName" -> Comparator.comparing(BookingListDTO::getPropertyName, Comparator.nullsLast(testo));
+            case "ownerName" -> Comparator.comparing(BookingListDTO::getOwnerName, Comparator.nullsLast(testo));
+            case "channelName" -> Comparator.comparing(BookingListDTO::getChannelName, Comparator.nullsLast(testo));
+            case "statoPrenotazione" -> Comparator.comparing(BookingListDTO::getStatoPrenotazione, Comparator.nullsLast(testo));
+            case "checkoutDate" -> Comparator.comparing(BookingListDTO::getCheckoutDate, Comparator.nullsLast(data));
+            case "nights" -> Comparator.comparing(BookingListDTO::getNights,
+                    Comparator.nullsLast(asc ? Comparator.<Integer>naturalOrder() : Comparator.<Integer>reverseOrder()));
+            case "grossAmount" -> Comparator.comparing(BookingListDTO::getGrossAmount,
+                    Comparator.nullsLast(asc ? Comparator.<BigDecimal>naturalOrder() : Comparator.<BigDecimal>reverseOrder()));
+            default -> Comparator.comparing(BookingListDTO::getCheckinDate, Comparator.nullsLast(data));
+        };
+        return primario.thenComparing(BookingListDTO::getId, Comparator.nullsLast(Comparator.<Integer>reverseOrder()));
     }
 
     /**
@@ -1118,9 +1194,12 @@ public class BookingService {
 
     // ── filtri ──────────────────────────────────────────────────────────────
 
+    /** status: uno o più codici separati da virgola; 'da_completare' vince sugli altri. */
     private Stream<Booking> applyStatusFilter(Stream<Booking> stream, String status, LookupMaps maps) {
-        if (status == null) return stream;
-        if ("da_completare".equals(status)) {
+        if (status == null || status.isBlank()) return stream;
+        Set<String> stati = Arrays.stream(status.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
+        if (stati.contains("da_completare")) {
             LocalDate oggi = LocalDate.now();
             return stream.filter(b -> {
                 boolean scaduto = b.getCheckoutDate() != null && !b.getCheckoutDate().isAfter(oggi);
@@ -1129,7 +1208,7 @@ public class BookingService {
             });
         }
         return stream.filter(b ->
-                status.equals(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById)));
+                stati.contains(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById)));
     }
 
     private Stream<Booking> applyChannelFilter(Stream<Booking> stream, String channel, LookupMaps maps) {
@@ -1138,14 +1217,6 @@ public class BookingService {
             CanaleOta c = maps.canaliById.get(b.getFkCanaleOtaId());
             return c != null && channel.equals(c.getCodice());
         });
-    }
-
-    private Stream<Booking> applySearchFilter(Stream<Booking> stream, String q) {
-        if (q == null || q.isBlank()) return stream;
-        String lower = q.toLowerCase();
-        return stream.filter(b ->
-                (b.getGuestName() != null && b.getGuestName().toLowerCase().contains(lower))
-                || (b.getExternalBookingId() != null && b.getExternalBookingId().toLowerCase().contains(lower)));
     }
 
     // ── lookup helpers ───────────────────────────────────────────────────────

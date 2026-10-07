@@ -143,12 +143,13 @@ test.describe('Fase 06 — Liquidazione', () => {
     }
 
     // 2. Prenotazione di lavoro: 'ready' e di un owner senza liquidazioni nel periodo.
-    const bookings = await apiGet<BookingListItem[]>(token, '/bookings');
+    // Lista paginata: size alto per avere tutte le prenotazioni in una pagina
+    const bookings = await apiGet<{ content: BookingListItem[] }>(token, '/bookings?size=1000');
     const ownerConSettlement = new Set(
       settlements.body.filter(s => s.period === PERIOD).map(s => s.ownerName));
     // Esclusa la SEED- con i servizi PM a zero: su quella la fattura è bloccata di
     // proposito (vedi 4.13) e non si arriverebbe mai alla liquidazione.
-    let scelto = bookings.body.find(
+    let scelto = bookings.body.content.find(
       b => b.statoPrenotazione === 'ready'
         && !b.externalBookingId.startsWith('SEED-')
         && !ownerConSettlement.has(b.ownerName));
@@ -161,8 +162,8 @@ test.describe('Fase 06 — Liquidazione', () => {
       expect(residuo, "serve una prenotazione 'ready' o un residuo da ripulire").toBeTruthy();
       const res = await apiDelete(token, '/test/cleanup-documenti', { bookingId: residuo!.bookingId });
       console.log(`residuo: ripuliti i documenti del booking ${residuo!.bookingId} — HTTP ${res.status}`);
-      scelto = (await apiGet<BookingListItem[]>(token, '/bookings')).body
-        .find(b => b.id === residuo!.bookingId);
+      scelto = (await apiGet<{ content: BookingListItem[] }>(token, '/bookings?size=1000')).body
+        .content.find(b => b.id === residuo!.bookingId);
     }
     expect(scelto, 'nessuna prenotazione utilizzabile per la fase 06').toBeTruthy();
 

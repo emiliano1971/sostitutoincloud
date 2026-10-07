@@ -92,26 +92,48 @@ export interface DocumentDetail extends DocumentListItem {
   statoStorno?: 'parziale' | 'totale';
 }
 
-export async function getDocuments(params?: {
+/** Pagina della lista documenti (GET /api/documents). */
+export interface DocumentPage {
+  content: DocumentListItem[];
+  /** Pagina corrente, 0-based. */
+  page: number;
+  /** Dimensione pagina effettiva (parametro size o impostazione del tenant). */
+  size: number;
+  /** Documenti che soddisfano i filtri, su tutte le pagine. */
+  totalElements: number;
+  totalPages: number;
+}
+
+/**
+ * Lista documenti paginata: filtri, ordinamento e paginazione sono applicati dal backend
+ * su tutti i documenti del tenant. size 0/assente = dimensione pagina del tenant.
+ */
+export async function getDocuments(params: {
   stato?: string;
-  q?: string;
-  ownerId?: number;
+  /** Codice tipo_documento: fattura | ricevuta | nota_credito */
+  tipo?: string;
+  /** Numero, destinatario, proprietario, prenotazione, NDC / fattura collegata */
+  search?: string;
   /** Filtro rapido sulle ricevute owner: da_liquidare | f24_non_pagato | senza_cu */
   filtroFiscale?: string;
+  /** Data emissione (yyyy-MM-dd), estremi inclusi */
+  dataFrom?: string;
+  dataTo?: string;
+  ownerId?: number;
+  /** Stato liquidazione (pending | calculated | approved | paid) o 'none' = non liquidato */
+  liquidazione?: string;
+  /** Campo di ordinamento (colonne della lista); default data emissione */
+  sort?: string;
+  dir?: 'asc' | 'desc';
   page?: number;
   size?: number;
-}): Promise<DocumentListItem[]> {
-  if (!params || Object.keys(params).length === 0) {
-    return get<DocumentListItem[]>('/documents');
-  }
+} = {}): Promise<DocumentPage> {
   const qs = new URLSearchParams();
-  if (params.stato) qs.set('stato', params.stato);
-  if (params.q) qs.set('q', params.q);
-  if (params.ownerId !== undefined) qs.set('ownerId', String(params.ownerId));
-  if (params.filtroFiscale) qs.set('filtroFiscale', params.filtroFiscale);
-  if (params.page !== undefined) qs.set('page', String(params.page));
-  if (params.size !== undefined) qs.set('size', String(params.size));
-  return get<DocumentListItem[]>(`/documents?${qs.toString()}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  }
+  const query = qs.toString();
+  return get<DocumentPage>(query ? `/documents?${query}` : '/documents');
 }
 
 /**

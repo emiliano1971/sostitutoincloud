@@ -204,23 +204,45 @@ export async function annullaNdc(id: number): Promise<NotaCredito> {
   return del<NotaCredito>(`/ndc/${id}`);
 }
 
-export async function getBookings(params?: {
-  status?: string;
+/** Pagina della lista prenotazioni (GET /api/bookings). */
+export interface BookingPage {
+  content: BookingListItem[];
+  /** Pagina corrente, 0-based. */
+  page: number;
+  /** Dimensione pagina effettiva (parametro size o impostazione del tenant). */
+  size: number;
+  /** Prenotazioni che soddisfano i filtri, su tutte le pagine. */
+  totalElements: number;
+  totalPages: number;
+}
+
+/**
+ * Lista prenotazioni paginata: filtri, ordinamento e paginazione sono applicati dal backend.
+ * size 0/assente = dimensione pagina del tenant. Ordine di default: check-in decrescente.
+ */
+export async function getBookings(params: {
+  /** Codici stato separati da virgola, oppure 'da_completare' */
+  stato?: string;
+  /** Codice canale OTA */
   channel?: string;
-  q?: string;
+  /** ID prenotazione, ospite, immobile, proprietario, canale */
+  search?: string;
+  /** Data check-in (yyyy-MM-dd), estremi inclusi */
+  dataFrom?: string;
+  dataTo?: string;
+  propertyId?: number;
+  ownerId?: number;
+  sort?: string;
+  dir?: 'asc' | 'desc';
   page?: number;
   size?: number;
-}): Promise<BookingListItem[]> {
-  if (!params || Object.keys(params).length === 0) {
-    return get<BookingListItem[]>('/bookings');
-  }
+} = {}): Promise<BookingPage> {
   const qs = new URLSearchParams();
-  if (params.status) qs.set('status', params.status);
-  if (params.channel) qs.set('channel', params.channel);
-  if (params.q) qs.set('q', params.q);
-  if (params.page !== undefined) qs.set('page', String(params.page));
-  if (params.size !== undefined) qs.set('size', String(params.size));
-  return get<BookingListItem[]>(`/bookings?${qs.toString()}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  }
+  const query = qs.toString();
+  return get<BookingPage>(query ? `/bookings?${query}` : '/bookings');
 }
 
 export async function getBookingById(id: number): Promise<BookingDetail> {

@@ -21,8 +21,11 @@ public class TenantSettingsDAO {
             "data_nascita, sesso, comune_nascita, provincia_nascita, " +
             "sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
-            "fk_canale_ota_default_id, codice_tributo_credito, " +
+            "fk_canale_ota_default_id, codice_tributo_credito, page_size, " +
             "created_at, updated_at FROM tenant_settings";
+
+    /** Default di tenant_settings.page_size (migration 028). */
+    public static final int DEFAULT_PAGE_SIZE = 50;
 
     private final JdbcTemplate jdbcTemplate;
     private final TenantSettingsRowMapper rowMapper = new TenantSettingsRowMapper();
@@ -49,8 +52,8 @@ public class TenantSettingsDAO {
             "  data_nascita, sesso, comune_nascita, provincia_nascita, " +
             "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
-            "  fk_canale_ota_default_id, codice_tributo_credito" +
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+            "  fk_canale_ota_default_id, codice_tributo_credito, page_size" +
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
             " ON CONFLICT (fk_tenant_id) DO UPDATE SET" +
             "  withholding_rate_primary    = EXCLUDED.withholding_rate_primary," +
             "  withholding_rate_secondary  = EXCLUDED.withholding_rate_secondary," +
@@ -74,6 +77,7 @@ public class TenantSettingsDAO {
             "  notifiche_email             = EXCLUDED.notifiche_email," +
             "  fk_canale_ota_default_id    = EXCLUDED.fk_canale_ota_default_id," +
             "  codice_tributo_credito      = EXCLUDED.codice_tributo_credito," +
+            "  page_size                   = EXCLUDED.page_size," +
             "  updated_at                  = NOW()" +
             " RETURNING " +
             "  id, fk_tenant_id, withholding_rate_primary, withholding_rate_secondary, " +
@@ -83,7 +87,7 @@ public class TenantSettingsDAO {
             "  data_nascita, sesso, comune_nascita, provincia_nascita, " +
             "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
-            "  fk_canale_ota_default_id, codice_tributo_credito, " +
+            "  fk_canale_ota_default_id, codice_tributo_credito, page_size, " +
             "  created_at, updated_at";
 
         return jdbcTemplate.queryForObject(sql, rowMapper,
@@ -100,7 +104,8 @@ public class TenantSettingsDAO {
                 s.getNotificheEmail(),
                 s.getFkCanaleOtaDefaultId(),
                 // NOT NULL con default a DB: un null esplicito non attiverebbe il DEFAULT
-                s.getCodiceTributoCreditoImposta() != null ? s.getCodiceTributoCreditoImposta() : "6782");
+                s.getCodiceTributoCreditoImposta() != null ? s.getCodiceTributoCreditoImposta() : "6782",
+                s.getPageSize() != null ? s.getPageSize() : DEFAULT_PAGE_SIZE);
     }
 
     /**

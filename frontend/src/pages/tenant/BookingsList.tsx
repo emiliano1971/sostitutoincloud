@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { downloadDocumentPdf } from '@/api/documentApi';
 import { getBookings, deleteBooking, type BookingListItem } from '@/api/bookingApi';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
+import Paginazione from '@/components/Paginazione';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLookup } from '@/contexts/LookupContext';
 import { useToast } from '@/hooks/use-toast';
@@ -77,7 +78,12 @@ const BookingsList = () => {
   // mentre l'utente digita l'anno a mano, azzerando il campo. L'URL si aggiorna onBlur.
   const [dateFromInput, setDateFromInput] = useState(dateFrom);
   const [dateToInput, setDateToInput] = useState(dateTo);
-  const [allBookings, setAllBookings] = useState<BookingListItem[]>([]);
+  const [bookings, setBookings] = useState<BookingListItem[]>([]);
+  // Paginazione lato server (dimensione pagina dalle impostazioni del tenant)
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<TenantSettingsDTO | null>(null);
@@ -93,9 +99,9 @@ const BookingsList = () => {
     }, { replace: true });
   }, [setSearchParams]);
 
-  // Ricerca testuale: input locale fluido + debounce 400ms verso l'URL.
+  // Ricerca testuale: input locale fluido + debounce 300ms verso l'URL (e quindi il backend).
   useEffect(() => {
-    const t = setTimeout(() => updateFilter('q', qInput || null), 400);
+    const t = setTimeout(() => updateFilter('q', qInput.trim() || null), 300);
     return () => clearTimeout(t);
   }, [qInput, updateFilter]);
 
@@ -114,46 +120,42 @@ const BookingsList = () => {
 
   const penaltyThreshold = settings?.documentWindowDays ?? 12;
 
-  const loadBookings = useCallback(() => {
+  // Filtri, ordinamento (check-in decrescente) e paginazione sono tutti lato server. Al cambio
+  // di un filtro si riparte da pagina 0: se si è su un'altra pagina si azzera e il caricamento
+  // parte dal render successivo, senza una richiesta inutile sulla pagina vecchia.
+  const statiParam = [...statiSelezionati].sort().join(',');
+  const filterKey = JSON.stringify([search, channelFilter, statiParam, dateFrom, dateTo]);
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current !== filterKey) {
+      prevFilterKey.current = filterKey;
+      if (page !== 0) { setPage(0); return; }
+    }
+    let annullato = false;   // risposta superata da una richiesta più recente
     setLoading(true);
     setError(null);
-    const params: Parameters<typeof getBookings>[0] = {};
-    if (channelFilter !== 'all') params.channel = channelFilter;
-    // Lo stato è filtrato client-side (multi-check): carichiamo tutti gli stati.
-    return getBookings(params)
-      .then(data => setAllBookings(data))
-      .catch(err => setError(err.message ?? 'Errore nel caricamento'))
-      .finally(() => setLoading(false));
-  }, [channelFilter]);
-
-  useEffect(() => { loadBookings(); }, [loadBookings]);
-
-  const filtered = allBookings
-    .filter(b =>
-      search === '' ||
-      (b.guestName ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (b.propertyName ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (b.externalBookingId ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (b.ownerName ?? '').toLowerCase().includes(search.toLowerCase())
-    )
-    // Filtro date sul solo check-in: include il booking se la data di arrivo cade nel range.
-    .filter(b => {
-      if (!dateFrom && !dateTo) return true;
-      const from = dateFrom || '0000-01-01';
-      const to = dateTo || '9999-12-31';
-      return b.checkinDate >= from && b.checkinDate <= to;
+    getBookings({
+      stato: statiParam || undefined,
+      channel: channelFilter !== 'all' ? channelFilter : undefined,
+      search: search || undefined,
+      dataFrom: dateFrom || undefined,
+      dataTo: dateTo || undefined,
+      page,
+      size: 0,   // dimensione pagina del tenant
     })
-    // Filtro stato multi-check ("da_completare" è una combinazione, gestito a parte)
-    .filter(b => {
-      if (statiSelezionati.size === 0) return true;
-      if (statiSelezionati.has('da_completare')) {
-        const oggi = toLocalISO(new Date());
-        return b.checkoutDate <= oggi && !['doc_issued', 'settled', 'cancelled', 'stornata'].includes(b.statoPrenotazione);
-      }
-      return statiSelezionati.has(b.statoPrenotazione);
-    });
+      .then(r => {
+        if (annullato) return;
+        setBookings(r.content);
+        setTotalPages(r.totalPages);
+        setTotalElements(r.totalElements);
+      })
+      .catch(err => { if (!annullato) setError(err.message ?? 'Errore nel caricamento'); })
+      .finally(() => { if (!annullato) setLoading(false); });
+    return () => { annullato = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- i filtri sono tutti in filterKey
+  }, [filterKey, page, reloadKey]);
 
-  const visible = filtered;
+  const visible = bookings;
   const allSelected = visible.length > 0 && visible.every(b => selectedIds.has(b.id));
 
   const toggleId = (id: number) => {
@@ -231,7 +233,7 @@ const BookingsList = () => {
     }
     if (ok > 0) toast({ title: 'Eliminazione completata', description: `${ok} booking eliminati` });
     setSelectedIds(new Set());
-    await loadBookings();
+    setReloadKey(k => k + 1);
   };
 
   return (
@@ -239,7 +241,7 @@ const BookingsList = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Prenotazioni</h1>
-          <p className="text-sm text-muted-foreground">{filtered.length} prenotazioni trovate</p>
+          <p className="text-sm text-muted-foreground">{loading ? 'Caricamento…' : `${totalElements} prenotazioni trovate`}</p>
         </div>
         <div className="flex items-center gap-2">
           {searchParams.toString() !== '' && (
@@ -569,6 +571,10 @@ const BookingsList = () => {
                 })}
               </TableBody>
             </Table>
+          )}
+          {!loading && !error && (
+            <Paginazione page={page} totalPages={totalPages} totalElements={totalElements}
+              etichetta="prenotazioni" onPageChange={setPage} />
           )}
         </CardContent>
       </Card>

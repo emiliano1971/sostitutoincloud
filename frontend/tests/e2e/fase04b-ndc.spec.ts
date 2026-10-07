@@ -156,9 +156,12 @@ test.describe('Fase 04b — Nota di Credito', () => {
     await page.goto('/documents');
     await page.getByPlaceholder(/cerca/i).fill(ndcNumero!);
 
-    const riga = page.getByRole('row').filter({ hasText: ndcNumero! });
+    // La ricerca trova anche la fattura stornata ("NDC: NC-…"): si prende la riga col badge NDC
+    const riga = page.getByRole('row').filter({ hasText: ndcNumero! })
+      .filter({ has: page.getByText('NDC', { exact: true }) });
     await expect(riga).toBeVisible();
-    await expect(riga.getByText('NDC', { exact: true })).toBeVisible();
+    // ...e la fattura collegata compare con il link alla NDC
+    await expect(page.getByRole('row').filter({ hasText: `NDC: ${ndcNumero}` })).toBeVisible();
   });
 
   test('N.4 — Righe NDC nello split', async ({ page }) => {
@@ -224,6 +227,7 @@ test.describe('Fase 04b — Nota di Credito', () => {
     // La conferma è un window.confirm() del browser, non un dialog della pagina
     page.once('dialog', d => d.accept());
     await page.getByRole('row').filter({ hasText: ndcNumero! })
+      .filter({ has: page.getByText('NDC', { exact: true }) })
       .getByRole('button', { name: /annulla/i }).click();
     await expect(page.getByText('Nota di credito annullata', { exact: true })).toBeVisible();
     ndcAnnullata = true;

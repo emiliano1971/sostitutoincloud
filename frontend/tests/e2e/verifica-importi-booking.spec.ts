@@ -156,8 +156,8 @@ test.describe.serial(`Verifica importi booking ${bookingIdParam || '(auto)'}`, (
     if (bookingIdParam > 0) {
       bookingId = bookingIdParam;
     } else {
-      const lista = await apiGet<BookingListItem[]>(token, '/bookings');
-      const candidato = (lista.body ?? []).find(
+      const lista = await apiGet<{ content: BookingListItem[] }>(token, '/bookings?size=1000');
+      const candidato = (lista.body?.content ?? []).find(
         b => b.statoPrenotazione === 'doc_issued' || b.statoPrenotazione === 'settled',
       );
       if (!candidato) {

@@ -1,9 +1,10 @@
 package it.gavia.sostitutoincloud.controller;
 
 import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentFilterDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
-import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentPageDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
 import it.gavia.sostitutoincloud.service.DocumentGenerationService;
@@ -12,12 +13,14 @@ import it.gavia.sostitutoincloud.service.FiscalDocumentService;
 import it.gavia.sostitutoincloud.service.SdiXmlService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -41,19 +44,33 @@ public class DocumentController {
         this.sdiXmlService = sdiXmlService;
     }
 
+    /**
+     * Lista documenti paginata. size=0 (default) → dimensione pagina del tenant
+     * (tenant_settings.page_size). Filtri e ordinamento valgono su tutti i documenti, non solo
+     * sulla pagina. filtroFiscale (da_liquidare | f24_non_pagato | senza_cu): solo ricevute
+     * owner attive; valore non valido → 400 via GlobalExceptionHandler.
+     */
     @GetMapping
-    public ResponseEntity<List<DocumentListDTO>> findAll(
+    public ResponseEntity<DocumentPageDTO> findAll(
             @RequestParam(required = false) String stato,
-            @RequestParam(required = false) String q,
-            @RequestParam(required = false) Integer ownerId,
+            @RequestParam(required = false) String tipo,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) String filtroFiscale,
-            @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size) {
-        // filtroFiscale (da_liquidare | f24_non_pagato | senza_cu): solo ricevute owner attive;
-        // valore non valido → 400 via GlobalExceptionHandler
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataTo,
+            @RequestParam(required = false) Integer ownerId,
+            @RequestParam(required = false) String liquidazione,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String dir,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "0") int size) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        return ResponseEntity.ok(fiscalDocumentService.findByTenantId(
-                tenantId, stato, q, ownerId, filtroFiscale, page, size));
+        DocumentFilterDTO filtro = DocumentFilterDTO.builder()
+                .stato(stato).tipo(tipo).search(search).filtroFiscale(filtroFiscale)
+                .dataFrom(dataFrom).dataTo(dataTo).ownerId(ownerId)
+                .liquidazione(liquidazione).sort(sort).dir(dir)
+                .build();
+        return ResponseEntity.ok(fiscalDocumentService.findPage(tenantId, filtro, page, size));
     }
 
     /** Stato fiscale di una ricevuta owner: ritenuta/F24, liquidazione, CU. 404 se non è una ricevuta. */

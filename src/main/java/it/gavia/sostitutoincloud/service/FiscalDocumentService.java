@@ -16,7 +16,9 @@ import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentFilterDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentListDTO;
+import it.gavia.sostitutoincloud.dto.document.DocumentPageDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentRowDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.CanaleOta;
@@ -39,14 +41,18 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.Collator;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @Log4j2
@@ -77,6 +83,10 @@ public class FiscalDocumentService {
     private final SettlementDAO settlementDAO;
     private final VociFatturaPmService vociFatturaPmService;
     private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
+    private final TenantSettingsService tenantSettingsService;
+
+    // Limite di sicurezza sul parametro size della lista documenti
+    private static final int MAX_PAGE_SIZE = 1000;
 
     public FiscalDocumentService(FiscalDocumentDAO fiscalDocumentDAO,
                                   BookingDAO bookingDAO,
@@ -93,7 +103,9 @@ public class FiscalDocumentService {
                                   SettlementBookingDAO settlementBookingDAO,
                                   SettlementDAO settlementDAO,
                                   VociFatturaPmService vociFatturaPmService,
-                                  FiscalDocumentRigaNdcDAO rigaNdcDAO) {
+                                  FiscalDocumentRigaNdcDAO rigaNdcDAO,
+                                  TenantSettingsService tenantSettingsService) {
+        this.tenantSettingsService = tenantSettingsService;
         this.vociFatturaPmService = vociFatturaPmService;
         this.rigaNdcDAO = rigaNdcDAO;
         this.withholdingLedgerDAO = withholdingLedgerDAO;
@@ -250,22 +262,51 @@ public class FiscalDocumentService {
         return BigDecimal.ZERO;
     }
 
+    /**
+     * Lista documenti paginata (GET /api/documents). Filtri, ordinamento e paginazione sono
+     * applicati qui, sui documenti del tenant già caricati in memoria: totalElements conta i
+     * documenti filtrati, non la sola pagina. size <= 0 → tenant_settings.page_size.
+     *
+     * @throws IllegalArgumentException filtroFiscale non valido (→ 400)
+     */
+    public DocumentPageDTO findPage(Integer tenantId, DocumentFilterDTO filtro, int page, int size) {
+        int effectiveSize = size > 0 ? Math.min(size, MAX_PAGE_SIZE) : tenantSettingsService.getPageSize(tenantId);
+        int pageNum = Math.max(page, 0);
+        List<DocumentListDTO> tutti = elenco(tenantId, filtro);
+        int totalPages = (int) Math.ceil(tutti.size() / (double) effectiveSize);
+        int from = (int) Math.min((long) pageNum * effectiveSize, tutti.size());
+        int to = Math.min(from + effectiveSize, tutti.size());
+        log.info("FiscalDocumentService.findPage() - tenantId={} filtro={} page={} size={} totale={}",
+                tenantId, filtro, pageNum, effectiveSize, tutti.size());
+        return DocumentPageDTO.builder()
+                .content(new ArrayList<>(tutti.subList(from, to)))
+                .page(pageNum)
+                .size(effectiveSize)
+                .totalElements(tutti.size())
+                .totalPages(totalPages)
+                .build();
+    }
+
+    /** Lista non paginata in formato DTO (portale owner): stessi filtri di findPage(). */
     public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
                                                   Integer ownerId, Integer page, Integer size) {
-        return findByTenantId(tenantId, statoFilter, q, ownerId, null, page, size);
+        List<DocumentListDTO> tutti = elenco(tenantId, DocumentFilterDTO.builder()
+                .stato(statoFilter).search(q).ownerId(ownerId).build());
+        int pageSize = size != null && size > 0 ? size : Integer.MAX_VALUE;
+        long skip = (long) (page != null ? page : 0) * pageSize;
+        return tutti.stream().skip(skip).limit(pageSize).collect(Collectors.toList());
     }
 
     /**
-     * Come sopra, con il filtro rapido sullo stato fiscale delle ricevute owner
-     * (filtroFiscale: da_liquidare | f24_non_pagato | senza_cu). Con il filtro si vedono solo
-     * ricevute attive: quelle annullate da una nota di credito non vanno né liquidate né
-     * certificate. Il filtro precede la paginazione.
+     * Documenti del tenant filtrati e ordinati, già mappati in DocumentListDTO.
+     * Con filtroFiscale (da_liquidare | f24_non_pagato | senza_cu) si vedono solo ricevute
+     * attive: quelle annullate da una nota di credito non vanno né liquidate né certificate.
      */
-    public List<DocumentListDTO> findByTenantId(Integer tenantId, String statoFilter, String q,
-                                                  Integer ownerId, String filtroFiscale,
-                                                  Integer page, Integer size) {
+    private List<DocumentListDTO> elenco(Integer tenantId, DocumentFilterDTO f) {
+        String statoFilter = f.getStato();
+        Integer ownerId = f.getOwnerId();
         LookupMaps lookup = buildLookupMaps(tenantId);
-        java.util.function.Predicate<FiscalDocument> filtroRicevute = filtroFiscale(tenantId, filtroFiscale, lookup);
+        java.util.function.Predicate<FiscalDocument> filtroRicevute = filtroFiscale(tenantId, f.getFiltroFiscale(), lookup);
 
         List<FiscalDocument> docs = fiscalDocumentDAO.findByTenantId(tenantId);
         // Fatture con una NDC attiva collegata: id fattura → NDC (nota_credito) non annullata.
@@ -298,9 +339,6 @@ public class FiscalDocumentService {
         Map<Integer, Settlement> settlementsById = settlementDAO.findByTenantId(tenantId).stream()
                 .collect(Collectors.toMap(Settlement::getId, s -> s));
 
-        int pageNum = page != null ? page : 0;
-        int pageSize = size != null ? size : 20;
-
         List<DocumentListDTO> result = docs.stream()
                 .filter(d -> {
                     if (statoFilter != null) {
@@ -310,26 +348,20 @@ public class FiscalDocumentService {
                     return true;
                 })
                 .filter(d -> {
-                    if (q != null && !q.isBlank()) {
-                        String ql = q.toLowerCase();
-                        boolean matchNum = d.getDocumentNumber() != null
-                                && d.getDocumentNumber().toLowerCase().contains(ql);
-                        boolean matchName = d.getRecipientName() != null
-                                && d.getRecipientName().toLowerCase().contains(ql);
-                        String ownerName = ownerDisplayName(lookup.ownersById().get(d.getFkOwnerId()));
-                        boolean matchOwner = ownerName != null && ownerName.toLowerCase().contains(ql);
-                        return matchNum || matchName || matchOwner;
-                    }
-                    return true;
-                })
-                .filter(d -> {
                     if (ownerId == null) return true;
                     // Filtro diretto sul campo denormalizzato fk_owner_id del documento.
                     return ownerId.equals(d.getFkOwnerId());
                 })
+                .filter(d -> {
+                    if (f.getTipo() == null || f.getTipo().isBlank()) return true;
+                    TipoDocumento t = lookup.tipiById().get(d.getFkTipoDocumentoId());
+                    return t != null && f.getTipo().equals(t.getCodice());
+                })
+                .filter(d -> f.getDataFrom() == null
+                        || (d.getIssueDate() != null && !d.getIssueDate().isBefore(f.getDataFrom())))
+                .filter(d -> f.getDataTo() == null
+                        || (d.getIssueDate() != null && !d.getIssueDate().isAfter(f.getDataTo())))
                 .filter(filtroRicevute)
-                .skip((long) pageNum * pageSize)
-                .limit(pageSize)
                 .map(d -> {
                     Booking booking = d.getFkBookingId() != null ? bookingsById.get(d.getFkBookingId()) : null;
                     Property property = booking != null ? propertiesById.get(booking.getFkPropertyId()) : null;
@@ -380,11 +412,59 @@ public class FiscalDocumentService {
                             .fatturaCollegataNumber(fatturaCollegata != null ? fatturaCollegata.getDocumentNumber() : null)
                             .build();
                 })
+                // Ricerca anche sui riferimenti mostrati in lista (prenotazione, NDC ↔ fattura):
+                // cercando un numero di fattura o NDC escono entrambe le righe collegate.
+                .filter(dto -> corrispondeRicerca(dto, f.getSearch()))
+                .filter(dto -> corrispondeLiquidazione(dto, f.getLiquidazione()))
+                .sorted(ordinamento(f.getSort(), f.getDir()))
                 .collect(Collectors.toList());
 
-        log.info("FiscalDocumentService.findByTenantId() - tenantId={}, ownerId={}, risultati={}",
+        log.debug("FiscalDocumentService.elenco() - tenantId={}, ownerId={}, risultati={}",
                 tenantId, ownerId, result.size());
         return result;
+    }
+
+    private boolean corrispondeRicerca(DocumentListDTO d, String search) {
+        if (search == null || search.isBlank()) return true;
+        String q = search.trim().toLowerCase(Locale.ROOT);
+        return Stream.of(d.getDocumentNumber(), d.getRecipientName(), d.getOwnerName(),
+                        d.getExternalBookingId(), d.getNdcNumber(), d.getFatturaCollegataNumber())
+                .anyMatch(v -> v != null && v.toLowerCase(Locale.ROOT).contains(q));
+    }
+
+    /** 'none' = documento non ancora in una liquidazione; altrimenti stato del settlement. */
+    private boolean corrispondeLiquidazione(DocumentListDTO d, String liquidazione) {
+        if (liquidazione == null || liquidazione.isBlank()) return true;
+        if ("none".equals(liquidazione)) return d.getSettlementId() == null;
+        return liquidazione.equals(d.getSettlementStato());
+    }
+
+    /**
+     * Ordinamento della lista: campo richiesto (colonne ordinabili della UI), valori nulli
+     * sempre in fondo, poi data emissione e id decrescenti per un ordine stabile tra le pagine.
+     * Campo sconosciuto → data emissione.
+     */
+    private Comparator<DocumentListDTO> ordinamento(String sort, String dir) {
+        boolean asc = "asc".equalsIgnoreCase(dir);
+        Collator collator = Collator.getInstance(Locale.ITALIAN);
+        collator.setStrength(Collator.SECONDARY);   // ignora maiuscole/minuscole
+        Comparator<String> testo = asc ? collator::compare : (a, b) -> collator.compare(b, a);
+        Comparator<DocumentListDTO> primario = switch (sort == null ? "" : sort) {
+            case "documentNumber" -> Comparator.comparing(DocumentListDTO::getDocumentNumber, Comparator.nullsLast(testo));
+            case "documentType" -> Comparator.comparing(DocumentListDTO::getDocumentType, Comparator.nullsLast(testo));
+            case "recipientName" -> Comparator.comparing(DocumentListDTO::getRecipientName, Comparator.nullsLast(testo));
+            case "ownerName" -> Comparator.comparing(DocumentListDTO::getOwnerName, Comparator.nullsLast(testo));
+            case "propertyName" -> Comparator.comparing(DocumentListDTO::getPropertyName, Comparator.nullsLast(testo));
+            case "statoDocumento" -> Comparator.comparing(DocumentListDTO::getStatoDocumento, Comparator.nullsLast(testo));
+            case "settlementStato" -> Comparator.comparing(DocumentListDTO::getSettlementStato, Comparator.nullsLast(testo));
+            case "totalAmount" -> Comparator.comparing(DocumentListDTO::getTotalAmount,
+                    Comparator.nullsLast(asc ? Comparator.<BigDecimal>naturalOrder() : Comparator.<BigDecimal>reverseOrder()));
+            default -> Comparator.comparing(DocumentListDTO::getIssueDate,
+                    Comparator.nullsLast(asc ? Comparator.<LocalDate>naturalOrder() : Comparator.<LocalDate>reverseOrder()));
+        };
+        return primario
+                .thenComparing(DocumentListDTO::getIssueDate, Comparator.nullsLast(Comparator.<LocalDate>reverseOrder()))
+                .thenComparing(DocumentListDTO::getId, Comparator.nullsLast(Comparator.<Integer>reverseOrder()));
     }
 
     /**

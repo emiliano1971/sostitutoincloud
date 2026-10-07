@@ -51,11 +51,12 @@ const PropertyDetail = () => {
         return Promise.all([
           propData.fkOwnerId ? getOwnerById(propData.fkOwnerId) : Promise.resolve(null),
           getOwners(true),
-          getBookings({ page: 0, size: 5 }),
+          // Ultime 5 prenotazioni dell'immobile (filtro e ordine check-in decrescente lato server)
+          getBookings({ propertyId: propData.id, page: 0, size: 5 }),
         ]).then(([ownerData, allOwners, allBookings]) => {
           setOwner(ownerData);
           setTenantOwners(allOwners);
-          setPropertyBookings(allBookings.filter(b => b.fkPropertyId === propData.id));
+          setPropertyBookings(allBookings.content);
         });
       })
       .catch(err => setError(err.message))

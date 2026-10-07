@@ -15,6 +15,10 @@ import java.math.BigDecimal;
 @Log4j2
 public class TenantSettingsService {
 
+    // Limiti della dimensione pagina impostabile dal tenant
+    private static final int PAGE_SIZE_MIN = 10;
+    private static final int PAGE_SIZE_MAX = 200;
+
     private final TenantSettingsDAO tenantSettingsDAO;
     private final TenantDAO tenantDAO;
 
@@ -158,6 +162,7 @@ public class TenantSettingsService {
                         dto.getCodiceTributoCreditoImposta() != null && !dto.getCodiceTributoCreditoImposta().isBlank()
                                 ? dto.getCodiceTributoCreditoImposta().trim()
                                 : existing.getCodiceTributoCreditoImposta())
+                .pageSize(validaPageSize(dto.getPageSize(), existing.getPageSize()))
                 .build();
 
         TenantSettings saved = tenantSettingsDAO.save(updated);
@@ -205,6 +210,7 @@ public class TenantSettingsService {
                 .alertScadenzeF24(true)
                 .notificheEmail(true)
                 .codiceTributoCreditoImposta("6782")
+                .pageSize(TenantSettingsDAO.DEFAULT_PAGE_SIZE)
                 .build();
     }
 
@@ -243,6 +249,27 @@ public class TenantSettingsService {
                 .notificheEmail(s.getNotificheEmail())
                 .fkCanaleOtaDefaultId(s.getFkCanaleOtaDefaultId())
                 .codiceTributoCreditoImposta(s.getCodiceTributoCreditoImposta())
+                .pageSize(s.getPageSize())
                 .build();
+    }
+
+    /** Dimensione pagina delle liste del tenant (default 50 se le impostazioni mancano). */
+    public int getPageSize(Integer tenantId) {
+        return tenantSettingsDAO.findByTenantId(tenantId)
+                .map(TenantSettings::getPageSize)
+                .filter(p -> p != null && p > 0)
+                .orElse(TenantSettingsDAO.DEFAULT_PAGE_SIZE);
+    }
+
+    /** null = non modificare; fuori da 10..200 → 400. */
+    private Integer validaPageSize(Integer richiesto, Integer attuale) {
+        if (richiesto == null) {
+            return attuale;
+        }
+        if (richiesto < PAGE_SIZE_MIN || richiesto > PAGE_SIZE_MAX) {
+            throw new IllegalArgumentException("Dimensione pagina non valida: " + richiesto
+                    + " (ammessa da " + PAGE_SIZE_MIN + " a " + PAGE_SIZE_MAX + ")");
+        }
+        return richiesto;
     }
 }

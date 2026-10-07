@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getDocuments, downloadDocumentPdf, elaboraRisposteSdi, getStatoFiscaleRicevuta, type DocumentListItem, type StatoFiscaleRicevuta } from '@/api/documentApi';
 import { annullaNdc } from '@/api/bookingApi';
+import Paginazione from '@/components/Paginazione';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { labelStatoDocumento, labelTipoDocumento, labelStatoCu } from '@/lib/statiLabels';
@@ -117,6 +118,12 @@ const DocumentsList = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [docs, setDocs] = useState<DocumentListItem[]>([]);
+  // Paginazione lato server (dimensione pagina dalle impostazioni del tenant)
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  // Ricerca inviata al backend con un breve ritardo: niente richiesta a ogni tasto
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string>('issueDate');
@@ -136,7 +143,7 @@ const DocumentsList = () => {
   // Filtro per tipo documento: i valori sono i codice della lookup tipo_documento
   // ('fattura' | 'ricevuta' | 'nota_credito'), come restituiti da documentType.
   const tipoFilter = searchParams.get('tipo') ?? '';
-  // Filtro stato liquidazione: in memoria (il backend non lo espone come parametro),
+  // Filtro stato liquidazione: parametro 'liquidazione' del backend,
   // persistito nell'URL (?liquidazione=paid). 'none' = documenti non ancora liquidati.
   const settlementFilter = searchParams.get('liquidazione') ?? '';
   // Input date locali: scrivere l'URL a ogni keystroke rimonterebbe il valore
@@ -164,16 +171,49 @@ const DocumentsList = () => {
   const filtroFiscaleAttivo = filtriFiscaliVisibili ? filtroFiscale : '';
 
   useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Filtri, ordinamento e paginazione sono tutti lato server. Al cambio di un filtro (o
+  // dell'ordinamento) si riparte da pagina 0: se si è su un'altra pagina si azzera e il
+  // caricamento parte dal render successivo, senza una richiesta inutile sulla pagina vecchia.
+  const filterKey = JSON.stringify([statusFilter, tipoFilter, searchQuery, filtroFiscaleAttivo,
+    dateFrom, dateTo, ownerIdFilter, settlementFilter, sortKey, sortDir]);
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current !== filterKey) {
+      prevFilterKey.current = filterKey;
+      if (page !== 0) { setPage(0); return; }
+    }
+    let annullato = false;   // risposta superata da una richiesta più recente
     setIsLoading(true);
     setError(null);
     getDocuments({
-      ...(statusFilter !== 'all' ? { stato: statusFilter } : {}),
-      ...(filtroFiscaleAttivo ? { filtroFiscale: filtroFiscaleAttivo } : {}),
+      stato: statusFilter !== 'all' ? statusFilter : undefined,
+      tipo: tipoFilter || undefined,
+      search: searchQuery || undefined,
+      filtroFiscale: filtroFiscaleAttivo || undefined,
+      dataFrom: dateFrom || undefined,
+      dataTo: dateTo || undefined,
+      ownerId: ownerIdFilter ?? undefined,
+      liquidazione: settlementFilter || undefined,
+      sort: sortKey,
+      dir: sortDir,
+      page,
+      size: 0,   // dimensione pagina del tenant
     })
-      .then(setDocs)
-      .catch(err => setError(err.message))
-      .finally(() => setIsLoading(false));
-  }, [statusFilter, filtroFiscaleAttivo, reloadKey]);
+      .then(r => {
+        if (annullato) return;
+        setDocs(r.content);
+        setTotalPages(r.totalPages);
+        setTotalElements(r.totalElements);
+      })
+      .catch(err => { if (!annullato) setError(err.message); })
+      .finally(() => { if (!annullato) setIsLoading(false); });
+    return () => { annullato = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- i filtri sono tutti in filterKey
+  }, [filterKey, page, reloadKey]);
 
   // Pannello laterale "Stato fiscale" della ricevuta
   const [statoFiscaleDocId, setStatoFiscaleDocId] = useState<number | null>(null);
@@ -263,63 +303,17 @@ const DocumentsList = () => {
     }
   };
 
-  // Ricerca anche sui riferimenti mostrati sotto il numero (prenotazione, NDC ↔ fattura):
-  // cercando un numero di fattura o NDC compaiono entrambe le righe collegate.
-  const q = search.trim().toLowerCase();
-  const filtered = docs
-    .filter(d =>
-      (q === '' || [
-        d.documentNumber,
-        d.recipientName,
-        d.ownerName,
-        d.externalBookingId,
-        d.ndcNumber,
-        d.fatturaCollegataNumber,
-      ].some(v => (v ?? '').toLowerCase().includes(q)))
-      && (ownerIdFilter == null || d.fkOwnerId === ownerIdFilter)
-    )
-    // Filtro data emissione: confronto lessicografico su ISO yyyy-MM-dd
-    .filter(d => {
-      if (!dateFrom && !dateTo) return true;
-      const from = dateFrom || '0000-01-01';
-      const to = dateTo || '9999-12-31';
-      return d.issueDate >= from && d.issueDate <= to;
-    })
-    .filter(d => {
-      if (!tipoFilter) return true;
-      return d.documentType === tipoFilter;
-    })
-    .filter(d => {
-      if (!settlementFilter) return true;
-      if (settlementFilter === 'none') return !d.settlementId;
-      return d.settlementStato === settlementFilter;
-    });
-
   const ownerFilterName = ownerIdFilter != null
     ? (docs.find(d => d.fkOwnerId === ownerIdFilter)?.ownerName ?? `owner #${ownerIdFilter}`)
     : null;
 
-  const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      // Indicizzazione con keyof: DocumentListItem è una interface e quindi non ha
-      // index signature implicita — il cast a Record<string, unknown> darebbe TS2352
-      // sui type checker che applicano l'assegnabilità (es. servizio TS di IntelliJ).
-      const valA = a[sortKey as keyof DocumentListItem];
-      const valB = b[sortKey as keyof DocumentListItem];
-      const dir = sortDir === 'asc' ? 1 : -1;
-      if (valA == null) return 1;
-      if (valB == null) return -1;
-      if (typeof valA === 'number' && typeof valB === 'number') return (valA - valB) * dir;
-      return String(valA).localeCompare(String(valB), 'it') * dir;
-    });
-  }, [filtered, sortKey, sortDir]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Documenti Fiscali</h1>
         <p className="text-sm text-muted-foreground">
-          {isLoading ? 'Caricamento…' : `${filtered.length} documenti`}
+          {isLoading ? 'Caricamento…' : `${totalElements} documenti`}
         </p>
         {/* Nota informativa: la conservazione sostitutiva non è gestita dall'applicazione */}
         <p className="text-xs text-muted-foreground mt-2">
@@ -346,13 +340,19 @@ const DocumentsList = () => {
                 <SelectItem value="rejected">Rifiutato</SelectItem>
               </SelectContent>
             </Select>
-            {/* Filtro stato liquidazione: in memoria, persistito nell'URL (?liquidazione=paid).
+            {/* Filtro stato liquidazione: lato server, persistito nell'URL (?liquidazione=paid).
                 Il Select non accetta value="" — 'all' fa da valore neutro e non finisce nell'URL. */}
             <Select
               value={settlementFilter || 'all'}
               onValueChange={v => updateFilter('liquidazione', v === 'all' ? '' : v)}
             >
-              <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
+              {/* Tooltip sul trigger: Select (Root) non è un elemento DOM, asChild va sul trigger */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue placeholder="Liquidazione" /></SelectTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Filtra le prenotazioni in base allo stato della liquidazione al proprietario</TooltipContent>
+              </Tooltip>
               <SelectContent>
                 <SelectItem value="all">Liquidazione</SelectItem>
                 <SelectItem value="pending">In attesa</SelectItem>
@@ -362,7 +362,7 @@ const DocumentsList = () => {
                 <SelectItem value="none">Non liquidata</SelectItem>
               </SelectContent>
             </Select>
-            {/* Filtro tipo documento: in memoria, persistito nell'URL (?tipo=fattura).
+            {/* Filtro tipo documento: lato server, persistito nell'URL (?tipo=fattura).
                 Stesso stile pill dei preset date. "Tutti" include anche le note di credito. */}
             <div className="flex items-center gap-2">
               {[
@@ -516,7 +516,7 @@ const DocumentsList = () => {
               <AlertCircle className="h-5 w-5" />
               <span>{error}</span>
             </div>
-          ) : filtered.length === 0 ? (
+          ) : docs.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">
               Nessun documento
             </div>
@@ -537,7 +537,7 @@ const DocumentsList = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sorted.slice(0, 20).map(d => (
+                {docs.map(d => (
                   <TableRow key={d.id}>
                     <TableCell>
                       {/* Numero documento + id prenotazione collegata, cliccabile.
@@ -674,6 +674,10 @@ const DocumentsList = () => {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {!isLoading && !error && (
+            <Paginazione page={page} totalPages={totalPages} totalElements={totalElements}
+              etichetta="documenti" onPageChange={setPage} />
           )}
         </CardContent>
       </Card>

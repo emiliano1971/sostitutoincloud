@@ -42,6 +42,8 @@ export interface TenantSettingsDTO {
   fkCanaleOtaDefaultId?: number | null;
   /** Codice tributo dei crediti d'imposta da NDC nel modello F24 (default 6782). */
   codiceTributoCreditoImposta?: string;
+  /** Dimensione pagina delle liste paginate (10..200, default 50). */
+  pageSize?: number;
 }
 
 export async function getSettings(): Promise<TenantSettingsDTO> {

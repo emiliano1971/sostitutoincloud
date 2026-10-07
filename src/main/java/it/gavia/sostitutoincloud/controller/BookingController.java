@@ -4,6 +4,7 @@ import it.gavia.sostitutoincloud.dto.booking.BookingCreateDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingFilterDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingListDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingPageDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingVoceExtraDTO;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
@@ -16,11 +17,13 @@ import it.gavia.sostitutoincloud.service.BookingImportService;
 import it.gavia.sostitutoincloud.service.BookingService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -86,22 +89,37 @@ public class BookingController {
         }
     }
 
+    /**
+     * Lista prenotazioni paginata. size=0 (default) → dimensione pagina del tenant
+     * (tenant_settings.page_size). Filtri e ordinamento valgono su tutte le prenotazioni.
+     * stato: uno o più codici separati da virgola, oppure 'da_completare'.
+     */
     @GetMapping
-    public ResponseEntity<List<BookingListDTO>> findAll(
-            @RequestParam(required = false) String status,
+    public ResponseEntity<BookingPageDTO> findAll(
+            @RequestParam(required = false) String stato,
             @RequestParam(required = false) String channel,
-            @RequestParam(required = false) String q,
-            @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size) {
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataTo,
+            @RequestParam(required = false) Integer propertyId,
+            @RequestParam(required = false) Integer ownerId,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String dir,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "0") int size) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         BookingFilterDTO filter = BookingFilterDTO.builder()
-                .status(status)
+                .status(stato)
                 .channel(channel)
-                .q(q)
-                .page(page)
-                .size(size)
+                .q(search)
+                .dataFrom(dataFrom)
+                .dataTo(dataTo)
+                .propertyId(propertyId)
+                .ownerId(ownerId)
+                .sort(sort)
+                .dir(dir)
                 .build();
-        return ResponseEntity.ok(bookingService.findByTenantId(tenantId, filter));
+        return ResponseEntity.ok(bookingService.findPage(tenantId, filter, page, size));
     }
 
     /**

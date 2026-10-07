@@ -102,8 +102,9 @@ test.describe('Fase 04 — Documenti Fiscali', () => {
     expect(candidati.length, "serve almeno una prenotazione in stato 'ready'").toBeGreaterThan(0);
 
     // Fra le 'ready' si prende la prima senza documenti già emessi.
-    const documenti = await apiGet<DocumentListItem[]>(token, '/documents');
-    const conDocumenti = new Set((documenti.body ?? []).map(d => d.fkBookingId));
+    // Lista paginata: size alto per avere tutti i documenti in una pagina
+    const documenti = await apiGet<{ content: DocumentListItem[] }>(token, '/documents?size=1000');
+    const conDocumenti = new Set((documenti.body?.content ?? []).map(d => d.fkBookingId));
     const scelto = candidati.find(b => !conDocumenti.has(b.id));
     expect(scelto, "serve una prenotazione 'ready' senza documenti emessi").toBeTruthy();
 
@@ -336,8 +337,8 @@ test.describe('Fase 04 — Documenti Fiscali', () => {
     await expect(page.getByText(/nessun servizio PM calcolato/i).first()).toBeVisible();
 
     // Nessun documento creato per questa prenotazione
-    const documenti = await apiGet<DocumentListItem[]>(token, '/documents');
-    expect((documenti.body ?? []).filter(d => d.fkBookingId === senzaServizi!.id)).toHaveLength(0);
+    const documenti = await apiGet<{ content: DocumentListItem[] }>(token, '/documents?size=1000');
+    expect((documenti.body?.content ?? []).filter(d => d.fkBookingId === senzaServizi!.id)).toHaveLength(0);
   });
 
   /**
@@ -346,8 +347,8 @@ test.describe('Fase 04 — Documenti Fiscali', () => {
    * 'ricevuta_owner' e 'fattura_pm' sono solo i nomi della richiesta di generazione.
    */
   async function trovaDocumento(tipo: 'ricevuta' | 'fattura'): Promise<DocumentDetail> {
-    const lista = await apiGet<DocumentListItem[]>(token, '/documents');
-    const riga = (lista.body ?? [])
+    const lista = await apiGet<{ content: DocumentListItem[] }>(token, '/documents?size=1000');
+    const riga = (lista.body?.content ?? [])
       .filter(d => d.fkBookingId === booking.id)
       .find(d => d.documentType === tipo);
     expect(riga, `documento ${tipo} del booking ${booking.id} non trovato`).toBeTruthy();

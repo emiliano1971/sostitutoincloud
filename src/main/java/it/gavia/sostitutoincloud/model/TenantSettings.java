@@ -56,6 +56,9 @@ public class TenantSettings {
     // Codice tributo dei crediti d'imposta da NDC nel modello F24 (migration 027, default 6782)
     private String codiceTributoCreditoImposta;
 
+    // Dimensione pagina delle liste paginate (migration 028, default 50)
+    private Integer pageSize;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

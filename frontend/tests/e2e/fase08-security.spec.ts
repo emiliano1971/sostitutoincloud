@@ -121,7 +121,7 @@ test.describe('Fase 08 — Security', () => {
     // La lista prenotazioni non espone fk_tenant_id — e fa bene. L'appartenenza si
     // verifica per via indiretta: ogni prenotazione è di un proprietario del tenant
     // corrente, e il dettaglio riporta il fkTenantId del chiamante.
-    const bookings = (await apiGet<BookingRow[]>(tokenAdmin, '/bookings')).body;
+    const bookings = (await apiGet<{ content: BookingRow[] }>(tokenAdmin, '/bookings?size=1000')).body.content;
     expect(bookings.length).toBeGreaterThan(0);
 
     const ownerIdsDelTenant = new Set(

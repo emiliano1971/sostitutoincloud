@@ -59,4 +59,7 @@ public class TenantSettingsUpdateDTO {
 
     // Codice tributo dei crediti d'imposta da NDC nel modello F24 (default 6782)
     private String codiceTributoCreditoImposta;
+
+    // Dimensione pagina delle liste paginate (10..200); null = non modificare
+    private Integer pageSize;
 }

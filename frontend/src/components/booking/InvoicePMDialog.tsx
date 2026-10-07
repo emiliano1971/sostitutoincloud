@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { FileText, Printer, Send, Download, Loader2, AlertTriangle } from 'lucide-react';
+import { FileText, Send, Download, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { aggiornaStatoDocumento, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
@@ -159,36 +159,18 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
     }
   };
 
-  // Stampa in una finestra dedicata: window.print() sul dialog Radix (portal) stampa l'intera app.
+  // "Scarica PDF" = PDF generato dal server sulla fattura emessa (stesso documento inviato
+  // allo SDI); sostituisce la vecchia stampa HTML del dialog.
   const handlePrint = () => {
-    const content = document.getElementById('print-document-content')?.innerHTML;
-    if (!content) return;
-    const styles = Array.from(document.styleSheets)
-      .map(s => {
-        try { return Array.from(s.cssRules).map(r => r.cssText).join('\n'); }
-        catch { return ''; }
-      }).join('\n');
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-    if (!printWindow) return;
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Documento</title>
-          <style>${styles}</style>
-          <style>
-            body { font-family: Arial, sans-serif; font-size: 12px; margin: 20px; color: #000; }
-            * { box-sizing: border-box; }
-          </style>
-        </head>
-        <body>${content}</body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-    printWindow.close();
+    if (!docId) {
+      toast({
+        title: 'Fattura non emessa',
+        description: 'Emetti prima la fattura per poter scaricare il PDF',
+        variant: 'destructive',
+      });
+      return;
+    }
+    void handleDownloadPdf();
   };
 
   return (
@@ -325,21 +307,13 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
         <div className="flex gap-3 justify-end pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
           {isDocIssued ? (
-            // Documenti già emessi: azione ripetibile, solo stampa/download.
-            <>
-              <Button className="gap-2" onClick={handlePrint}>
-                <Printer className="h-4 w-4" />
-                Stampa
-              </Button>
-              {docId && (
-                <Button variant="outline" className="gap-2" onClick={handleDownloadPdf} disabled={isDownloading}>
-                  {isDownloading
-                    ? <Loader2 className="h-4 w-4 animate-spin" />
-                    : <Download className="h-4 w-4" />}
-                  Scarica PDF
-                </Button>
-              )}
-            </>
+            // Documenti già emessi: azione ripetibile, solo download del PDF del server.
+            <Button className="gap-2" onClick={handlePrint} disabled={isDownloading}>
+              {isDownloading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Download className="h-4 w-4" />}
+              Scarica PDF
+            </Button>
           ) : existingDoc ? (
             <>
               <Button className="gap-2" disabled>
@@ -360,9 +334,11 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             </Button>
           ) : (
             <>
-              <Button className="gap-2" onClick={handlePrint}>
-                <Printer className="h-4 w-4" />
-                Stampa / PDF
+              <Button className="gap-2" onClick={handlePrint} disabled={isDownloading}>
+                {isDownloading
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Download className="h-4 w-4" />}
+                Scarica PDF
               </Button>
               <Button className="gap-2 bg-success hover:bg-success/90 text-white" onClick={() => handleInvia(generatedDoc.documentId)}>
                 <Send className="h-4 w-4" />
