@@ -64,4 +64,7 @@ EXPOSE 8080
 ENV SPRING_PROFILES_ACTIVE=prod
 ENV JAVA_OPTS="-Xms512m -Xmx1024m"
 
-CMD ["catalina.sh", "run"]
+ENV JPDA_ADDRESS="0.0.0.0:5005"
+ENV JPDA_TRANSPORT="dt_socket"
+EXPOSE 5005
+CMD ["catalina.sh", "jpda", "run"]
