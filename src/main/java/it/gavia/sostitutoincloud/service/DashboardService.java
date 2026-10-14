@@ -1,11 +1,13 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
 import it.gavia.sostitutoincloud.dao.F24RecordDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.SettlementDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
+import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dto.dashboard.DashboardDTO;
 import it.gavia.sostitutoincloud.dto.dashboard.MensileDTO;
 import it.gavia.sostitutoincloud.model.Booking;
@@ -38,13 +40,19 @@ public class DashboardService {
     private final SettlementDAO settlementDAO;
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
+    private final BookingSplitEconomicoDAO splitEconomicoDAO;
+    private final TipoDocumentoDAO tipoDocumentoDAO;
 
     public DashboardService(BookingDAO bookingDAO,
                             FiscalDocumentDAO fiscalDocumentDAO,
                             F24RecordDAO f24RecordDAO,
                             SettlementDAO settlementDAO,
                             StatoPrenotazioneDAO statoPrenotazioneDAO,
-                            StatoDocumentoDAO statoDocumentoDAO) {
+                            StatoDocumentoDAO statoDocumentoDAO,
+                            BookingSplitEconomicoDAO splitEconomicoDAO,
+                            TipoDocumentoDAO tipoDocumentoDAO) {
+        this.tipoDocumentoDAO = tipoDocumentoDAO;
+        this.splitEconomicoDAO = splitEconomicoDAO;
         this.bookingDAO = bookingDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.f24RecordDAO = f24RecordDAO;
@@ -82,13 +90,53 @@ public class DashboardService {
                 .filter(b -> !statiEsclusiIds.contains(b.getFkStatoPrenotazioneId()))
                 .count();
 
+        List<FiscalDocument> allDocs = fiscalDocumentDAO.findByTenantId(tenantId);
+        Map<String, Integer> tipoDocumentoMap = tipoDocumentoDAO.findAll().stream()
+                .collect(Collectors.toMap(t -> t.getCodice(), t -> t.getId()));
+        Integer tipoFatturaId = tipoDocumentoMap.get("fattura");
+        Integer tipoNdcId = tipoDocumentoMap.get("nota_credito");
+        Integer statoAnnullataId = statoDocumentoMap.get("annullata");
+        Set<Integer> statiInviatiIds = Stream.of("sent_sdi", "accepted")
+                .map(statoDocumentoMap::get).filter(Objects::nonNull).collect(Collectors.toSet());
         Set<Integer> statiDocPendingIds = Stream.of("draft", "ready")
-                .map(statoDocumentoMap::get)
+                .map(statoDocumentoMap::get).filter(Objects::nonNull).collect(Collectors.toSet());
+
+        // A) Prenotazioni da fatturare: 'ready', check-out passato, nessuna fattura PM non annullata
+        Integer statoReadyId = statoPrenotazioneMap.get("ready");
+        Set<Integer> bookingConFattura = allDocs.stream()
+                .filter(d -> Objects.equals(tipoFatturaId, d.getFkTipoDocumentoId())
+                        && !Objects.equals(statoAnnullataId, d.getFkStatoDocumentoId()))
+                .map(FiscalDocument::getFkBookingId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        List<FiscalDocument> allDocs = fiscalDocumentDAO.findByTenantId(tenantId);
-        int documentiPending = (int) allDocs.stream()
+        int prenotazioniDaFatturare = (int) allBookings.stream()
+                .filter(b -> Objects.equals(statoReadyId, b.getFkStatoPrenotazioneId())
+                        && b.getCheckoutDate() != null
+                        && b.getCheckoutDate().isBefore(oggi)
+                        && !bookingConFattura.contains(b.getId()))
+                .count();
+
+        // B) Fatture da inviare SDI: fatture PM e NDC in draft/ready, escluse le fatture stornate
+        //    da una NDC attiva e le NDC su fatture non ancora trasmesse (stesse regole di SdiXmlService)
+        Set<Integer> fattureStornateIds = allDocs.stream()
+                .filter(d -> Objects.equals(tipoNdcId, d.getFkTipoDocumentoId())
+                        && !Objects.equals(statoAnnullataId, d.getFkStatoDocumentoId()))
+                .map(FiscalDocument::getFkDocumentoCollegatoId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<Integer> fattureInviateIds = allDocs.stream()
+                .filter(d -> Objects.equals(tipoFatturaId, d.getFkTipoDocumentoId())
+                        && statiInviatiIds.contains(d.getFkStatoDocumentoId()))
+                .map(FiscalDocument::getId)
+                .collect(Collectors.toSet());
+        int fattureDaInviareSDI = (int) allDocs.stream()
+                .filter(d -> Objects.equals(tipoFatturaId, d.getFkTipoDocumentoId())
+                        || Objects.equals(tipoNdcId, d.getFkTipoDocumentoId()))
                 .filter(d -> statiDocPendingIds.contains(d.getFkStatoDocumentoId()))
+                .filter(d -> !fattureStornateIds.contains(d.getId()))
+                .filter(d -> !Objects.equals(tipoNdcId, d.getFkTipoDocumentoId())
+                        || (d.getFkDocumentoCollegatoId() != null
+                            && fattureInviateIds.contains(d.getFkDocumentoCollegatoId())))
                 .count();
 
         List<F24Record> allF24 = f24RecordDAO.findByTenantId(tenantId);
@@ -104,13 +152,23 @@ public class DashboardService {
         YearMonth currentMonth = YearMonth.now();
         YearMonth prevMonth = currentMonth.minusMonths(1);
 
-        BigDecimal ricaviMeseCorrente = allBookings.stream()
+        // Ricavi e grafico: escluse le prenotazioni stornate (NDC) e cancellate, come la
+        // provvigione PM (query separata sullo split)
+        Set<Integer> statiNonRicaviIds = Stream.of("stornata", "cancelled")
+                .map(statoPrenotazioneMap::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        List<Booking> bookingsRicavi = allBookings.stream()
+                .filter(b -> !statiNonRicaviIds.contains(b.getFkStatoPrenotazioneId()))
+                .collect(Collectors.toList());
+
+        BigDecimal ricaviMeseCorrente = bookingsRicavi.stream()
                 .filter(b -> YearMonth.from(b.getCheckinDate()).equals(currentMonth))
                 .map(Booking::getGrossAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal ricaviMesePrecedente = allBookings.stream()
+        BigDecimal ricaviMesePrecedente = bookingsRicavi.stream()
                 .filter(b -> YearMonth.from(b.getCheckinDate()).equals(prevMonth))
                 .map(Booking::getGrossAmount)
                 .filter(Objects::nonNull)
@@ -118,19 +176,20 @@ public class DashboardService {
 
         DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("MMM yyyy", Locale.ITALIAN);
         DateTimeFormatter keyFormatter = DateTimeFormatter.ofPattern("yyyy-MM");
+        // Provvigione PM imponibile dallo split, escluse stornate/cancellate: una query per i 12 mesi
+        Map<YearMonth, BigDecimal> provvigioniPm = splitEconomicoDAO.sumProvvigionePmPerMese(
+                tenantId, currentMonth.minusMonths(11), currentMonth.plusMonths(1));
         List<MensileDTO> ricaviUltimi12Mesi = new ArrayList<>();
         for (int i = 11; i >= 0; i--) {
             YearMonth month = currentMonth.minusMonths(i);
-            List<Booking> monthBookings = allBookings.stream()
+            List<Booking> monthBookings = bookingsRicavi.stream()
                     .filter(b -> YearMonth.from(b.getCheckinDate()).equals(month))
                     .collect(Collectors.toList());
 
             String meseLabel = month.format(monthFormatter);
             meseLabel = meseLabel.substring(0, 1).toUpperCase() + meseLabel.substring(1);
 
-            BigDecimal ricaviPm = monthBookings.stream()
-                    .map(Booking::getPmFeeAmount).filter(Objects::nonNull)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal ricaviPm = provvigioniPm.getOrDefault(month, BigDecimal.ZERO);
             BigDecimal ricaviOw = monthBookings.stream()
                     .map(Booking::getOwnerNetAmount).filter(Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -154,7 +213,8 @@ public class DashboardService {
         return DashboardDTO.builder()
                 .bookingsDaCompletare(daCompletare)
                 .bookingsInPenale(inPenale)
-                .documentiPending(documentiPending)
+                .prenotazioniDaFatturare(prenotazioniDaFatturare)
+                .fattureDaInviareSDI(fattureDaInviareSDI)
                 .f24DaGenerare(f24DaGenerare)
                 .liquidazioniPending(liquidazioniPending)
                 .ricaviMeseCorrente(ricaviMeseCorrente)

@@ -2,6 +2,7 @@ package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
+import it.gavia.sostitutoincloud.dao.F24RecordDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
@@ -59,6 +60,7 @@ public class DocumentGenerationService {
     private final StatoPrenotazioneDAO statoPrenotazioneDAO;
     private final SdiXmlService sdiXmlService;
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
+    private final F24RecordDAO f24RecordDAO;
 
     public DocumentGenerationService(FiscalDocumentDAO fiscalDocumentDAO,
                                      BookingService bookingService,
@@ -71,7 +73,9 @@ public class DocumentGenerationService {
                                      BookingDAO bookingDAO,
                                      StatoPrenotazioneDAO statoPrenotazioneDAO,
                                      SdiXmlService sdiXmlService,
-                                     BookingSplitEconomicoDAO splitEconomicoDAO) {
+                                     BookingSplitEconomicoDAO splitEconomicoDAO,
+                                     F24RecordDAO f24RecordDAO) {
+        this.f24RecordDAO = f24RecordDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingService = bookingService;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
@@ -84,6 +88,24 @@ public class DocumentGenerationService {
         this.statoPrenotazioneDAO = statoPrenotazioneDAO;
         this.sdiXmlService = sdiXmlService;
         this.splitEconomicoDAO = splitEconomicoDAO;
+    }
+
+    /**
+     * Ricevuta emessa in un periodo il cui F24 principale è già pagato: la ritenuta andrà in un
+     * F24 integrativo. Non blocca l'emissione, si segnala solo. null se nessun avviso.
+     */
+    private String avvisoF24Pagato(Integer tenantId, LocalDate dataEmissione) {
+        if (dataEmissione == null) return null;
+        int mese = dataEmissione.getMonthValue();
+        int anno = dataEmissione.getYear();
+        boolean pagato = f24RecordDAO.findPrincipaleByPeriodo(tenantId, anno, mese)
+                .map(f -> "paid".equals(f.getStato()))
+                .orElse(false);
+        if (!pagato) return null;
+        log.info("DocumentGenerationService - ricevuta nel periodo {}/{} con F24 già pagato: avviso integrativo",
+                mese, anno);
+        return "Attenzione: l'F24 del periodo " + String.format("%02d/%d", mese, anno)
+                + " è già stato pagato. La ritenuta sarà inclusa in un F24 integrativo.";
     }
 
     public DocumentGenerateResponseDTO generate(Integer tenantId, DocumentGenerateRequestDTO request) {
@@ -345,6 +367,7 @@ public class DocumentGenerationService {
                 .guestName(booking.getGuestName())
                 .ownerName(booking.getOwnerName())
                 .propertyName(booking.getPropertyName())
+                .avviso(TIPO_RICEVUTA_OWNER.equals(tipo) ? avvisoF24Pagato(tenantId, dataEmissione) : null)
                 .build();
 
         // 8. Auto-invio SDI se configurato (tenant_settings.sdi_auto_send).

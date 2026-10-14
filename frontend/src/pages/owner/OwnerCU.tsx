@@ -87,7 +87,7 @@ const OwnerCU = () => {
                   <TableRow>
                     <TableHead>Anno</TableHead>
                     <TableHead className="text-right">Compensi</TableHead>
-                    <TableHead className="text-right">Ritenute</TableHead>
+                    <TableHead className="text-right">Ritenuta</TableHead>
                     <TableHead>Stato</TableHead>
                     <TableHead>Generata il</TableHead>
                     <TableHead className="w-12"></TableHead>

@@ -303,6 +303,9 @@ public class FiscalDocumentService {
      * attive: quelle annullate da una nota di credito non vanno né liquidate né certificate.
      */
     private List<DocumentListDTO> elenco(Integer tenantId, DocumentFilterDTO f) {
+        if (f.getMese() != null && (f.getMese() < 1 || f.getMese() > 12)) {
+            throw new IllegalArgumentException("Mese non valido: " + f.getMese() + " (ammesso 1..12)");
+        }
         String statoFilter = f.getStato();
         Integer ownerId = f.getOwnerId();
         LookupMaps lookup = buildLookupMaps(tenantId);
@@ -361,6 +364,11 @@ public class FiscalDocumentService {
                         || (d.getIssueDate() != null && !d.getIssueDate().isBefore(f.getDataFrom())))
                 .filter(d -> f.getDataTo() == null
                         || (d.getIssueDate() != null && !d.getIssueDate().isAfter(f.getDataTo())))
+                // Periodo di emissione (mese e/o anno), in aggiunta all'eventuale intervallo date
+                .filter(d -> f.getMese() == null
+                        || (d.getIssueDate() != null && d.getIssueDate().getMonthValue() == f.getMese()))
+                .filter(d -> f.getAnno() == null
+                        || (d.getIssueDate() != null && d.getIssueDate().getYear() == f.getAnno()))
                 .filter(filtroRicevute)
                 .map(d -> {
                     Booking booking = d.getFkBookingId() != null ? bookingsById.get(d.getFkBookingId()) : null;

@@ -17,6 +17,9 @@ export interface F24Record {
   annoCredito?: number;
   /** totalAmount - importoCredito: importo da versare. */
   saldoNetto?: number;
+  /** F24 integrativo di un periodo il cui principale è già pagato. */
+  integrativo?: boolean;
+  fkF24PrincipaleId?: number;
 }
 
 /** Credito d'imposta da nota di credito ancora compensabile. */
@@ -27,6 +30,9 @@ export interface CreditoDisponibile {
   /** Residuo disponibile. */
   importoCredito: number;
   annoRiferimento: number;
+  /** Periodo di competenza del credito (mese/anno della NDC). */
+  periodoMese?: number;
+  periodoAnno?: number;
 }
 
 export interface CreditoCompensazione {
@@ -71,6 +77,8 @@ export interface F24GenerazioneResult {
   codiceTributoCreditoImposta?: string;
   annoCredito?: number;
   saldoNetto?: number;
+  /** true se è stato generato (o ricalcolato) un F24 integrativo. */
+  integrativo?: boolean;
 }
 
 export async function getF24List(): Promise<F24Record[]> {

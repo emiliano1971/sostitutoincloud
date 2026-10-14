@@ -49,11 +49,11 @@ const OwnerDashboard = () => {
 
   const kpis = [
     { label: 'Totale lordo', value: fmtEuro(dashboard?.ricaviTotali), icon: TrendingUp, color: 'text-primary' },
-    { label: 'Netto maturato', value: fmtEuro(dashboard?.totalNet), icon: Wallet, color: 'text-success' },
-    { label: 'Ritenute', value: fmtEuro(dashboard?.totalRitenute), icon: FileText, color: 'text-warning' },
+    { label: 'Canone netto', value: fmtEuro(dashboard?.totalNet), icon: Wallet, color: 'text-success' },
+    { label: 'Ritenuta', value: fmtEuro(dashboard?.totalRitenute), icon: FileText, color: 'text-warning' },
     { label: 'Prenotazioni', value: dashboard?.prenotazioniCount ?? 0, icon: CalendarDays, color: 'text-primary' },
     { label: 'Liquidazioni', value: dashboard?.settlementsCount ?? 0, icon: Receipt, color: 'text-primary' },
-    { label: 'Netto da pagare', value: fmtEuro(dashboard?.netDaPagare), icon: Coins, color: 'text-success' },
+    { label: 'Da ricevere', value: fmtEuro(dashboard?.netDaPagare), icon: Coins, color: 'text-success' },
   ];
 
   const ownerRevenue = (dashboard?.ricaviMensili ?? []).map(d => ({
@@ -94,7 +94,7 @@ const OwnerDashboard = () => {
                 <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} tickFormatter={v => `€${(v/1000).toFixed(0)}k`} />
                 <Tooltip formatter={(v: number) => `€${v.toLocaleString('it-IT')}`} />
                 <Bar dataKey="netto" name="Netto" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="ritenute" name="Ritenute" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="ritenute" name="Ritenuta" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

@@ -37,6 +37,10 @@ public class F24Record {
     private Integer annoCredito;
     /** total_amount - importo_credito: importo effettivamente da versare. */
     private BigDecimal saldoNetto;
+    // F24 integrativo di un periodo il cui principale è già pagato (migration 030)
+    private boolean integrativo;
+    /** Principale del periodo; null se questo è il principale. */
+    private Integer fkF24PrincipaleId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -16,7 +16,10 @@ public class DashboardDTO {
 
     private Integer bookingsDaCompletare;
     private Integer bookingsInPenale;
-    private Integer documentiPending;
+    /** Prenotazioni 'ready' con check-out passato e senza fattura PM. */
+    private Integer prenotazioniDaFatturare;
+    /** Fatture PM e NDC in draft/ready trasmissibili allo SDI (escluse stornate e NDC su fatture non inviate). */
+    private Integer fattureDaInviareSDI;
     private Integer f24DaGenerare;
     private Integer liquidazioniPending;
     private BigDecimal ricaviMeseCorrente;

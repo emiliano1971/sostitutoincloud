@@ -378,7 +378,7 @@ test.describe('Fase 06 — Liquidazione', () => {
     // Riepilogo importi
     await expect(page.getByText('Lordo totale')).toBeVisible();
     await expect(page.getByText('Ritenute totali')).toBeVisible();
-    await expect(page.getByText('Netto da pagare')).toBeVisible();
+    await expect(page.getByText('Da pagare', { exact: true })).toBeVisible();
     await expect(page.getByText(euro(det.netAmount)).first()).toBeVisible();
 
     await expect(page.getByRole('button', { name: 'Scarica PDF' })).toBeVisible();

@@ -291,9 +291,15 @@ CREATE TABLE stato_prenotazione (
     created_at  TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMP       NOT NULL DEFAULT NOW()
 );
+-- migration 029: commento allineato al flusso con 'stornata'
 COMMENT ON TABLE stato_prenotazione IS
-    'Stati del workflow di una prenotazione (imported → enriched → ready → doc_issued → settled / cancelled). '
-    'finale = TRUE indica uno stato terminale oltre il quale il workflow non prosegue. '
+    'Stati del workflow di una prenotazione: imported → enriched → ready → doc_issued → settled; '
+    'cancelled per le prenotazioni annullate. '
+    'doc_issued/ready → stornata con la nota di credito totale sulla fattura PM: blocca '
+    'l''emissione di nuovi documenti e il ricalcolo dello stato; si esce annullando la NDC '
+    '(torna doc_issued o ready). Per riemettere i documenti la si copia in una nuova '
+    'prenotazione (fk_booking_origine_id): l''originale resta stornata. '
+    'finale = TRUE solo per gli stati terminali non reversibili (settled, cancelled). '
     'Lookup per consentire nuovi stati senza modificare il codice.';
 
 CREATE TRIGGER trg_stato_prenotazione_updated_at
@@ -799,15 +805,27 @@ CREATE TABLE f24_record (
     codice_tributo_credito  VARCHAR(10),                    -- da tenant_settings.codice_tributo_credito
     anno_credito            INTEGER,                        -- anno della NDC più recente compensata
     saldo_netto             DECIMAL(10,2),                  -- total_amount - importo_credito: importo da versare
+    -- migration 030: F24 integrativo per un periodo il cui F24 principale è già pagato
+    integrativo             BOOLEAN         NOT NULL DEFAULT FALSE,
+    fk_f24_principale_id    INTEGER         REFERENCES f24_record(id) ON DELETE SET NULL,
     created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_f24_tenant_period_tributo UNIQUE (fk_tenant_id, period, fk_codice_tributo_id),
     CONSTRAINT chk_f24_period_fmt           CHECK (period ~ '^\d{4}-(0[1-9]|1[0-2])$')
 );
+-- migration 030: un solo F24 principale per tenant/periodo/codice tributo (gli integrativi no)
+CREATE UNIQUE INDEX uq_f24_principale_tenant_period_tributo
+    ON f24_record (fk_tenant_id, period, fk_codice_tributo_id)
+    WHERE integrativo = FALSE;
 COMMENT ON TABLE f24_record IS
     'Versamenti periodici delle ritenute operate tramite modello F24. '
-    'Un record per mese per codice tributo per tenant. '
+    'Un record principale per mese per codice tributo per tenant, più eventuali integrativi '
+    '(migration 030) per le ritenute arrivate dopo il pagamento del principale. '
     'Codice tributo 1919: ritenute sui corrispettivi da locazioni brevi (art. 4 DL 50/2017).';
+
+COMMENT ON COLUMN f24_record.integrativo IS
+    'TRUE se è un F24 integrativo per un periodo già pagato. L AdE somma i versamenti per lo stesso periodo.';
+COMMENT ON COLUMN f24_record.fk_f24_principale_id IS
+    'FK al primo F24 del periodo (quello principale). NULL se questo è il principale.';
 
 CREATE TRIGGER trg_f24_record_updated_at
     BEFORE UPDATE ON f24_record
@@ -908,7 +926,7 @@ INSERT INTO stato_prenotazione (codice, descrizione, finale) VALUES
     ('doc_issued', 'Documento fiscale emesso',                     FALSE),
     ('settled',    'Liquidata al proprietario',                    TRUE),
     ('cancelled',  'Annullata',                                    TRUE),
-    ('stornata',   'Fattura PM stornata con nota di credito',      FALSE);  -- migration 025
+    ('stornata',   'Fattura PM stornata con nota di credito',      FALSE);  -- migration 025: reversibile (annullamento NDC)
 
 INSERT INTO stato_documento (codice, descrizione, is_error, finale) VALUES
     ('draft',     'Bozza',                    FALSE, FALSE),

@@ -71,6 +71,9 @@ import java.util.stream.Stream;
 @Log4j2
 public class BookingService {
 
+    // Codice stato_prenotazione della prenotazione stornata da NDC (id senza costante in BookingDAO)
+    private static final String STATO_STORNATA = "stornata";
+
     private static final Set<String> STATI_ESCLUSI_DA_COMPLETARE =
             Set.of("doc_issued", "settled", "cancelled", "stornata");
 
@@ -262,13 +265,21 @@ public class BookingService {
 
     /**
      * Determina lo stato corretto del booking dai dati disponibili, in ordine di priorità
-     * decrescente: cancelled > settled > doc_issued > ready > enriched > imported.
+     * decrescente: cancelled > stornata > settled > doc_issued > ready > enriched > imported.
      */
     private int resolveStatoId(Booking booking) {
         // 1. Cancellato manualmente: non retrocedere
         if (booking.getFkStatoPrenotazioneId() != null
                 && booking.getFkStatoPrenotazioneId() == BookingDAO.STATO_CANCELLED) {
             return BookingDAO.STATO_CANCELLED;
+        }
+        // 1b. Stornata da nota di credito: resta tale (con i documenti emessi il ricalcolo darebbe
+        //     doc_issued e riaprirebbe l'emissione). Esce solo con l'annullamento della NDC
+        //     (NdcService). Nessuna costante per l'id: si legge il codice dalla lookup.
+        if (booking.getFkStatoPrenotazioneId() != null
+                && STATO_STORNATA.equals(statoPrenotazioneDAO.findById(booking.getFkStatoPrenotazioneId())
+                        .map(StatoPrenotazione::getCodice).orElse(null))) {
+            return booking.getFkStatoPrenotazioneId();
         }
         // 2. Liquidazione pagata
         boolean settlementPagato = settlementBookingDAO.findSettlementIdByBookingId(booking.getId())
@@ -1673,7 +1684,7 @@ public class BookingService {
                 .orElseThrow(() -> new NoSuchElementException("Prenotazione non trovata: id=" + bookingId));
         String statoOrigine = statoPrenotazioneDAO.findById(origine.getFkStatoPrenotazioneId())
                 .map(StatoPrenotazione::getCodice).orElse(null);
-        if (!"stornata".equals(statoOrigine)) {
+        if (!STATO_STORNATA.equals(statoOrigine)) {
             throw new IllegalStateException("Solo i booking stornati possono essere copiati");
         }
         bookingDAO.findByOrigine(bookingId, tenantId).ifPresent(c -> {

@@ -39,6 +39,9 @@ const fmtImporto = (v?: number | null) =>
   `€${Math.abs(v ?? 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Filtri rapidi sullo stato fiscale delle ricevute (parametro filtroFiscale del backend). */
+const MESI = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+
 const FILTRI_FISCALI = [
   { key: '', label: 'Tutti' },
   { key: 'da_liquidare', label: 'Da liquidare' },
@@ -116,7 +119,9 @@ const SortableTh = ({ label, colKey, sortKey, sortDir, onSort, align = 'left' }:
 
 const DocumentsList = () => {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  // Stato SDI iniziale da ?stato= (link dalla dashboard "Fatture da inviare SDI")
+  const [statusFilter, setStatusFilter] = useState(
+    () => new URLSearchParams(window.location.search).get('stato') || 'all');
   const [docs, setDocs] = useState<DocumentListItem[]>([]);
   // Paginazione lato server (dimensione pagina dalle impostazioni del tenant)
   const [page, setPage] = useState(0);
@@ -124,6 +129,10 @@ const DocumentsList = () => {
   const [totalElements, setTotalElements] = useState(0);
   // Ricerca inviata al backend con un breve ritardo: niente richiesta a ogni tasto
   const [searchQuery, setSearchQuery] = useState('');
+  // Periodo di emissione: mese ('' = tutti) e anno (default l'anno corrente, '' = tutti)
+  const annoCorrente = new Date().getFullYear();
+  const [meseFilter, setMeseFilter] = useState<string>('');
+  const [annoFilter, setAnnoFilter] = useState<string>(String(annoCorrente));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string>('issueDate');
@@ -179,7 +188,7 @@ const DocumentsList = () => {
   // dell'ordinamento) si riparte da pagina 0: se si è su un'altra pagina si azzera e il
   // caricamento parte dal render successivo, senza una richiesta inutile sulla pagina vecchia.
   const filterKey = JSON.stringify([statusFilter, tipoFilter, searchQuery, filtroFiscaleAttivo,
-    dateFrom, dateTo, ownerIdFilter, settlementFilter, sortKey, sortDir]);
+    dateFrom, dateTo, meseFilter, annoFilter, ownerIdFilter, settlementFilter, sortKey, sortDir]);
   const prevFilterKey = useRef(filterKey);
   useEffect(() => {
     if (prevFilterKey.current !== filterKey) {
@@ -196,6 +205,8 @@ const DocumentsList = () => {
       filtroFiscale: filtroFiscaleAttivo || undefined,
       dataFrom: dateFrom || undefined,
       dataTo: dateTo || undefined,
+      mese: meseFilter ? Number(meseFilter) : undefined,
+      anno: annoFilter ? Number(annoFilter) : undefined,
       ownerId: ownerIdFilter ?? undefined,
       liquidazione: settlementFilter || undefined,
       sort: sortKey,
@@ -329,17 +340,6 @@ const DocumentsList = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Cerca numero, destinatario, prenotazione..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Stato SDI</SelectItem>
-                <SelectItem value="draft">Bozza</SelectItem>
-                <SelectItem value="ready">Pronto</SelectItem>
-                <SelectItem value="sent_sdi">Inviato SDI</SelectItem>
-                <SelectItem value="accepted">Accettato</SelectItem>
-                <SelectItem value="rejected">Rifiutato</SelectItem>
-              </SelectContent>
-            </Select>
             {/* Filtro stato liquidazione: lato server, persistito nell'URL (?liquidazione=paid).
                 Il Select non accetta value="" — 'all' fa da valore neutro e non finisce nell'URL. */}
             <Select
@@ -382,6 +382,17 @@ const DocumentsList = () => {
                 </Button>
               ))}
             </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[160px]"><Filter className="h-3.5 w-3.5 mr-2" /><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Stato SDI</SelectItem>
+                <SelectItem value="draft">Bozza</SelectItem>
+                <SelectItem value="ready">Pronto</SelectItem>
+                <SelectItem value="sent_sdi">Inviato SDI</SelectItem>
+                <SelectItem value="accepted">Accettato</SelectItem>
+                <SelectItem value="rejected">Rifiutato</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               variant="outline"
               className="gap-2"
@@ -396,8 +407,31 @@ const DocumentsList = () => {
             </Button>
           </div>
 
-          {/* Seconda riga: filtro per data emissione */}
+          {/* Seconda riga: periodo (mese/anno) e intervallo di date di emissione.
+              Il cambio filtro riporta a pagina 1 (filterKey). Radix non ammette value="":
+              'all' fa da "tutti" e non viene inviato al backend. */}
           <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t">
+            <div className="flex items-center gap-2">
+              <Select value={meseFilter || 'all'} onValueChange={v => setMeseFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-36"><SelectValue placeholder="Mese" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tutti i mesi</SelectItem>
+                  {MESI.map((m, i) => (
+                    <SelectItem key={m} value={String(i + 1)}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={annoFilter || 'all'} onValueChange={v => setAnnoFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-32"><SelectValue placeholder="Anno" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tutti gli anni</SelectItem>
+                  {/* dal 2024 all'anno corrente + 1 */}
+                  {Array.from({ length: annoCorrente - 2024 + 2 }, (_, i) => String(2024 + i)).map(anno => (
+                    <SelectItem key={anno} value={anno}>{anno}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Dal</span>
               <Input

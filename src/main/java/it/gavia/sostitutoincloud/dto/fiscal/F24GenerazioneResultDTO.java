@@ -33,4 +33,6 @@ public class F24GenerazioneResultDTO {
     private Integer annoCredito;
     /** totaleRitenute - importoCredito: importo da versare. */
     private BigDecimal saldoNetto;
+    /** true se l'F24 è un integrativo di un periodo il cui principale è già pagato. */
+    private boolean integrativo;
 }

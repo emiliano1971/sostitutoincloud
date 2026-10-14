@@ -22,4 +22,7 @@ public class CreditoDisponibileDTO {
     private BigDecimal importoCredito;
     /** Anno di emissione della NDC. */
     private Integer annoRiferimento;
+    /** Periodo di competenza della riga di credito (mese/anno della NDC). */
+    private Integer periodoMese;
+    private Integer periodoAnno;
 }

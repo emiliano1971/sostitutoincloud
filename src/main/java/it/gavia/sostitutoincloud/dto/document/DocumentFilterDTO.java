@@ -20,6 +20,8 @@ public class DocumentFilterDTO {
     private String filtroFiscale;   // da_liquidare | f24_non_pagato | senza_cu (solo ricevute attive)
     private LocalDate dataFrom;     // data emissione, estremi inclusi
     private LocalDate dataTo;
+    private Integer mese;           // mese di emissione 1..12
+    private Integer anno;           // anno di emissione
     private Integer ownerId;
     private String liquidazione;    // stato settlement (pending/calculated/approved/paid) | none = non liquidato
     private String sort;            // campo di DocumentListDTO; default issueDate

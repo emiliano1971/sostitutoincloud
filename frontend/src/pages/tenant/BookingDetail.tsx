@@ -474,6 +474,10 @@ const BookingDetail = () => {
       const doc = await generateDocument({ bookingId: Number(id), tipoDocumento });
       setGenerated(doc);
       toast({ title: 'Documento emesso', description: `Numero ${doc.documentNumber}` });
+      // Avviso non bloccante (ricevuta in un periodo con F24 già pagato)
+      if (doc.avviso) {
+        toast({ title: 'Attenzione', description: doc.avviso, duration: 8000 });
+      }
 
       // Esito dell'auto-invio SDI (tenant_settings.sdi_auto_send): si aggiunge al toast di
       // emissione, non lo sostituisce. I campi arrivano solo per la fattura PM con auto-invio

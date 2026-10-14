@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   CalendarDays, FileText, Receipt, AlertTriangle, TrendingUp,
-  CreditCard, Upload, ArrowRight, AlertCircle, Info, Loader2,
+  CreditCard, Upload, ArrowRight, AlertCircle, Info, Loader2, Send,
 } from 'lucide-react';
 import { getDashboard, type DashboardDTO } from '@/api/dashboardApi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -27,8 +27,12 @@ const TenantDashboard = () => {
   const kpis = dashboard ? [
     { label: 'Prenotazioni da Completare', value: dashboard.bookingsDaCompletare, icon: CalendarDays, color: 'text-primary' },
     { label: 'Ricavi Mese Corrente', value: fmt(dashboard.ricaviMeseCorrente), icon: TrendingUp, color: 'text-success' },
-    { label: 'Documenti da Emettere', value: dashboard.documentiPending, icon: FileText, color: 'text-warning' },
-    { label: 'F24 da Generare', value: dashboard.f24DaGenerare, icon: CreditCard, color: 'text-destructive' },
+    { label: 'Prenotazioni da fatturare', value: dashboard.prenotazioniDaFatturare, icon: FileText, color: 'text-warning',
+      hint: 'Check-out passato, senza fattura PM', href: '/bookings?stati=ready' },
+    { label: 'Fatture da inviare SDI', value: dashboard.fattureDaInviareSDI, icon: Send, color: 'text-amber-500',
+      valueColor: 'text-amber-600', hint: 'Fatture PM e NDC pronte per la trasmissione',
+      href: '/documents?stato=ready&tipo=fattura' },
+    { label: 'F24 da Generare', value: dashboard.f24DaGenerare, icon: CreditCard, color: 'text-destructive', href: '/f24' },
   ] : [];
 
   const alerts = dashboard ? [
@@ -87,15 +91,20 @@ const TenantDashboard = () => {
       ) : (
         <>
           {/* KPIs */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {kpis.map(kpi => (
-              <Card key={kpi.label}>
+              <Card
+                key={kpi.label}
+                className={kpi.href ? 'cursor-pointer transition-colors hover:bg-muted/50' : undefined}
+                onClick={kpi.href ? () => navigate(kpi.href!) : undefined}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-2">
                     <kpi.icon className={`h-5 w-5 ${kpi.color}`} />
                   </div>
-                  <p className="text-2xl font-bold text-foreground">{kpi.value}</p>
+                  <p className={`text-2xl font-bold ${kpi.valueColor ?? 'text-foreground'}`}>{kpi.value}</p>
                   <p className="text-xs text-muted-foreground">{kpi.label}</p>
+                  {kpi.hint && <p className="text-xs text-muted-foreground/70 mt-1">{kpi.hint}</p>}
                 </CardContent>
               </Card>
             ))}
@@ -125,6 +134,9 @@ const TenantDashboard = () => {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Ricavi ultimi 12 mesi</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Per mese di check-in. Provvigione PM netta (imponibile, escluse prenotazioni stornate).
+              </p>
             </CardHeader>
             <CardContent>
               <div className="h-[300px]">
@@ -135,7 +147,7 @@ const TenantDashboard = () => {
                     <YAxis className="text-xs" tick={{ fill: 'hsl(var(--muted-foreground))' }} tickFormatter={v => `€${(v / 1000).toFixed(0)}k`} />
                     <Tooltip formatter={(v: number) => `€${v.toLocaleString('it-IT')}`} />
                     <Legend />
-                    <Bar dataKey="ricaviPm" name="Ricavi PM" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="ricaviPm" name="Provvigione PM" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="ricaviOw" name="Ricavi OW" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="commissioni" name="Commissioni" fill="hsl(var(--warning))" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="ritenute" name="Ritenute" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} />

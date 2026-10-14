@@ -12,11 +12,15 @@ import it.gavia.sostitutoincloud.model.TenantSettings;
 import lombok.extern.log4j.Log4j2;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -33,6 +37,9 @@ import java.util.NoSuchElementException;
 public class F24PdfService {
 
     private static final String TEMPLATE_FILE = "f24-semplificato-acroform.pdf";
+    // Nota F24 integrativo: quarta riga della sezione Motivo del pagamento (punti PDF, origine in basso)
+    private static final float NOTA_X = 36f;
+    private static final float NOTA_Y = 592f;
 
     @Value("${app.storage.templates-path:}")
     private String templatesStoragePath;
@@ -159,6 +166,11 @@ public class F24PdfService {
 
             acroForm.flatten();
 
+            // F24 integrativo: il template non ha un campo note, la dicitura va in sovrimpressione
+            if (f24.isIntegrativo()) {
+                scriviNotaIntegrativo(doc, String.format("%02d/%d", f24.getPeriodoMese(), f24.getPeriodoAnno()));
+            }
+
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             doc.save(baos);
             byte[] out = baos.toByteArray();
@@ -167,6 +179,32 @@ public class F24PdfService {
             return out;
         } catch (IOException e) {
             throw new IllegalStateException("Errore generazione PDF F24: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Dicitura "VERSAMENTO INTEGRATIVO" sulla copia superiore del modello, nella quarta riga
+     * della sezione Motivo del pagamento (le prime due sono debito e credito): sfondo bianco
+     * sotto il testo per restare leggibile sopra le linee della griglia.
+     */
+    private void scriviNotaIntegrativo(PDDocument doc, String periodo) throws IOException {
+        String testo = "VERSAMENTO INTEGRATIVO al modello F24 principale del periodo " + periodo;
+        PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+        float size = 8f;
+        float x = NOTA_X;
+        float y = NOTA_Y;
+        float larghezza = font.getStringWidth(testo) / 1000 * size;
+        try (PDPageContentStream cs = new PDPageContentStream(doc, doc.getPage(0),
+                PDPageContentStream.AppendMode.APPEND, true, true)) {
+            cs.setNonStrokingColor(Color.WHITE);
+            cs.addRect(x - 2, y - 2, larghezza + 4, size + 3);
+            cs.fill();
+            cs.setNonStrokingColor(new Color(0xC0, 0x00, 0x00));
+            cs.beginText();
+            cs.setFont(font, size);
+            cs.newLineAtOffset(x, y);
+            cs.showText(testo);
+            cs.endText();
         }
     }
 

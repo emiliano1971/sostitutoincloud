@@ -110,6 +110,8 @@ const F24List = () => {
   // Dialog dettaglio
   const [dettaglio, setDettaglio] = useState<F24GenerazioneResult | null>(null);
   const [dettaglioOpen, setDettaglioOpen] = useState(false);
+  // Crediti da compensare dal dettaglio (F24 non pagato né inviato): ledgerId → importo
+  const [compensazioniDettaglio, setCompensazioniDettaglio] = useState<Record<number, string>>({});
 
   // Conferma pagamento
   const [pagatoTarget, setPagatoTarget] = useState<F24Record | null>(null);
@@ -143,7 +145,17 @@ const F24List = () => {
     try {
       const result = await generaF24(anno, mese);
       setRisultato(result);
-      toast({ title: 'F24 generato', description: `Periodo ${fmtPeriodo(mese, anno)} — ${fmtEuro(result.totaleRitenute)}` });
+      if (result.integrativo) {
+        toast({
+          title: 'F24 integrativo creato',
+          description: `Sono state incluse le ritenute orfane del periodo ${fmtPeriodo(mese, anno)}. `
+            + "Stesso periodo del principale, l'AdE somma i versamenti.",
+          duration: 6000,
+        });
+        setCompensazioni(proponiCreditiPeriodo(result));
+      } else {
+        toast({ title: 'F24 generato', description: `Periodo ${fmtPeriodo(mese, anno)} — ${fmtEuro(result.totaleRitenute)}` });
+      }
       reload();
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
@@ -156,6 +168,8 @@ const F24List = () => {
     try {
       const d = await getF24Detail(id);
       setDettaglio(d);
+      // Integrativo modificabile: crediti dello stesso periodo già proposti, come in generazione
+      setCompensazioniDettaglio(d.integrativo && creditiModificabili(d) ? proponiCreditiPeriodo(d) : {});
       setDettaglioOpen(true);
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
@@ -194,22 +208,26 @@ const F24List = () => {
     }
   };
 
-  const totaleCompensato = Object.values(compensazioni)
-    .reduce((s, v) => s + (parseFloat(v) || 0), 0);
-  const saldoNetto = risultato ? Math.max(0, risultato.totaleRitenute - totaleCompensato) : 0;
+  const totaleCompensato = sommaCompensazioni(compensazioni);
+  const totaleCompensatoDettaglio = sommaCompensazioni(compensazioniDettaglio);
 
   // L'F24 è già salvato dalla generazione: i crediti si applicano con una seconda chiamata,
   // che sostituisce le eventuali compensazioni precedenti dello stesso F24.
-  const handleApplicaCrediti = async () => {
-    if (!risultato) return;
-    const comp = Object.entries(compensazioni)
+  const handleApplicaCrediti = async (
+    f24: F24GenerazioneResult | null,
+    valori: Record<number, string>,
+    onAggiornato: (r: F24GenerazioneResult) => void,
+    azzera: () => void,
+  ) => {
+    if (!f24) return;
+    const comp = Object.entries(valori)
       .filter(([, v]) => parseFloat(v) > 0)
       .map(([id, v]) => ({ ledgerId: parseInt(id), importoUsato: Math.round(parseFloat(v) * 100) / 100 }));
     setApplicandoCrediti(true);
     try {
-      const aggiornato = await applicaCrediti(risultato.f24RecordId, comp);
-      setRisultato(aggiornato);
-      setCompensazioni({});
+      const aggiornato = await applicaCrediti(f24.f24RecordId, comp);
+      onAggiornato(aggiornato);
+      azzera();
       toast({
         title: comp.length > 0 ? 'Crediti compensati' : 'Compensazioni rimosse',
         description: `Saldo da versare ${fmtEuro(aggiornato.saldoNetto ?? aggiornato.totaleRitenute)}`,
@@ -338,7 +356,15 @@ const F24List = () => {
               <TableBody>
                 {filtered.map(f => (
                   <TableRow key={f.id}>
-                    <TableCell className="font-medium">{fmtPeriodo(f.periodoMese, f.periodoAnno)}</TableCell>
+                    <TableCell className="font-medium">
+                      {fmtPeriodo(f.periodoMese, f.periodoAnno)}
+                      {f.integrativo && (
+                        <Badge variant="outline" className="text-amber-600 border-amber-600 text-xs ml-1"
+                          title="F24 integrativo: stesso periodo del principale già pagato">
+                          Integrativo
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono text-sm">{f.codiceTributo}</TableCell>
                     <TableCell className="text-right font-medium">
                       {fmtEuro(f.saldoNetto ?? f.totalAmount)}
@@ -445,71 +471,7 @@ const F24List = () => {
               />
 
               {(risultato.crediti?.length ?? 0) > 0 && (
-                <div className="mt-4 border rounded-md p-3 space-y-3 bg-green-50/30 dark:bg-green-950/10">
-                  <h4 className="text-sm font-medium flex items-center gap-2 text-green-800 dark:text-green-300">
-                    Crediti d'imposta disponibili
-                    <span className="text-xs text-muted-foreground font-normal">(da note di credito)</span>
-                  </h4>
-                  {(risultato.importoCredito ?? 0) > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Questo F24 ha già {fmtEuro(risultato.importoCredito ?? 0)} di crediti compensati:
-                      applicando nuovi importi la compensazione viene sostituita.
-                    </p>
-                  )}
-                  {risultato.crediti!.map(c => {
-                    const max = Math.min(c.importoCredito, risultato.totaleRitenute);
-                    return (
-                      <div key={c.ledgerId} className="flex flex-wrap items-center gap-3 text-sm">
-                        <div className="flex-1 min-w-[12rem]">
-                          <span className="font-medium">{c.ndcDocumentNumber}</span>
-                          <span className="text-xs text-muted-foreground ml-2">
-                            {c.ndcDataEmissione} — anno {c.annoRiferimento}
-                          </span>
-                        </div>
-                        <span className="text-xs text-muted-foreground w-24 text-right">
-                          max {fmtEuro(c.importoCredito)}
-                        </span>
-                        <Input
-                          type="number"
-                          placeholder="€"
-                          value={compensazioni[c.ledgerId] ?? ''}
-                          onChange={e => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setCompensazioni({
-                              ...compensazioni,
-                              [c.ledgerId]: val > max ? String(max) : e.target.value,
-                            });
-                          }}
-                          className="w-28 h-7 text-xs"
-                          min={0}
-                          max={max}
-                          step={0.01}
-                        />
-                      </div>
-                    );
-                  })}
-                  {totaleCompensato > 0 && (
-                    <div className="border-t pt-2 space-y-1 text-sm mt-2">
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Totale ritenute</span>
-                        <span>{fmtEuro(risultato.totaleRitenute)}</span>
-                      </div>
-                      <div className="flex justify-between text-green-700">
-                        <span>Credito compensato</span>
-                        <span>-{fmtEuro(totaleCompensato)}</span>
-                      </div>
-                      <div className="flex justify-between font-medium border-t pt-1">
-                        <span>Saldo da versare</span>
-                        <span className={saldoNetto === 0 ? 'text-green-600' : ''}>{fmtEuro(saldoNetto)}</span>
-                      </div>
-                      {totaleCompensato > risultato.totaleRitenute && (
-                        <p className="text-xs text-destructive">
-                          ⚠ Il credito supera le ritenute del periodo ({fmtEuro(risultato.totaleRitenute)}).
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <SezioneCrediti f24={risultato} compensazioni={compensazioni} onChange={setCompensazioni} />
               )}
             </div>
           )}
@@ -528,7 +490,7 @@ const F24List = () => {
                 {(risultato.crediti?.length ?? 0) > 0 && (
                   <Button
                     variant="outline"
-                    onClick={handleApplicaCrediti}
+                    onClick={() => handleApplicaCrediti(risultato, compensazioni, setRisultato, () => setCompensazioni({}))}
                     disabled={applicandoCrediti || totaleCompensato <= 0 || totaleCompensato > risultato.totaleRitenute}
                   >
                     {applicandoCrediti && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -566,7 +528,22 @@ const F24List = () => {
               }}
             />
           )}
+          {dettaglio && creditiModificabili(dettaglio) && (dettaglio.crediti?.length ?? 0) > 0 && (
+            <SezioneCrediti f24={dettaglio} compensazioni={compensazioniDettaglio} onChange={setCompensazioniDettaglio} />
+          )}
           <DialogFooter>
+            {dettaglio && creditiModificabili(dettaglio) && (dettaglio.crediti?.length ?? 0) > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => handleApplicaCrediti(dettaglio, compensazioniDettaglio, setDettaglio,
+                  () => setCompensazioniDettaglio({}))}
+                disabled={applicandoCrediti || totaleCompensatoDettaglio <= 0
+                  || totaleCompensatoDettaglio > dettaglio.totaleRitenute}
+              >
+                {applicandoCrediti && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Applica crediti
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setDettaglioOpen(false)}>Chiudi</Button>
             <Button onClick={() => dettaglio && stampaDettaglioF24(dettaglio)} className="gap-2">
               <Printer className="h-4 w-4" /> Stampa dettaglio
@@ -597,6 +574,110 @@ const F24List = () => {
 };
 
 /** Ritenuta di un periodo diverso da quello dell'F24: è un arretrato recuperato. */
+/** Somma degli importi digitati nei campi di compensazione. */
+const sommaCompensazioni = (valori: Record<number, string>) =>
+  Object.values(valori).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+
+/** Crediti compensabili solo su un F24 non pagato e non inviato (stessa regola del backend). */
+const creditiModificabili = (f24: F24GenerazioneResult) => f24.stato !== 'paid' && f24.stato !== 'sent';
+
+/**
+ * Crediti dello stesso periodo dell'F24 proposti fino a coprire le ritenute, nell'ordine
+ * (la somma compensata non può superare il totale, il backend lo rifiuterebbe).
+ */
+const proponiCreditiPeriodo = (f24: F24GenerazioneResult): Record<number, string> => {
+  let residuo = f24.totaleRitenute;
+  const proposte: Record<number, string> = {};
+  for (const c of f24.crediti ?? []) {
+    if (c.periodoMese !== f24.periodoMese || c.periodoAnno !== f24.periodoAnno) continue;
+    const importo = Math.min(c.importoCredito, residuo);
+    if (importo <= 0) break;
+    proposte[c.ledgerId] = importo.toFixed(2);
+    residuo = Math.round((residuo - importo) * 100) / 100;
+  }
+  return proposte;
+};
+
+/**
+ * Crediti d'imposta disponibili (da NDC) con i campi importo da compensare e il riepilogo
+ * del saldo. Usata dal dialog di generazione e dal dettaglio F24.
+ */
+const SezioneCrediti = ({ f24, compensazioni, onChange }: {
+  f24: F24GenerazioneResult;
+  compensazioni: Record<number, string>;
+  onChange: (valori: Record<number, string>) => void;
+}) => {
+  const totaleCompensato = sommaCompensazioni(compensazioni);
+  const saldoNetto = Math.max(0, f24.totaleRitenute - totaleCompensato);
+  return (
+    <div className="mt-4 border rounded-md p-3 space-y-3 bg-green-50/30 dark:bg-green-950/10">
+      <h4 className="text-sm font-medium flex items-center gap-2 text-green-800 dark:text-green-300">
+        Crediti d'imposta disponibili
+        <span className="text-xs text-muted-foreground font-normal">(da note di credito)</span>
+      </h4>
+      {(f24.importoCredito ?? 0) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Questo F24 ha già {fmtEuro(f24.importoCredito ?? 0)} di crediti compensati:
+          applicando nuovi importi la compensazione viene sostituita.
+        </p>
+      )}
+      {f24.crediti!.map(c => {
+        const max = Math.min(c.importoCredito, f24.totaleRitenute);
+        return (
+          <div key={c.ledgerId} className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex-1 min-w-[12rem]">
+              <span className="font-medium">{c.ndcDocumentNumber}</span>
+              <span className="text-xs text-muted-foreground ml-2">
+                {c.ndcDataEmissione} — anno {c.annoRiferimento}
+              </span>
+            </div>
+            <span className="text-xs text-muted-foreground w-24 text-right">
+              max {fmtEuro(c.importoCredito)}
+            </span>
+            <Input
+              type="number"
+              placeholder="€"
+              value={compensazioni[c.ledgerId] ?? ''}
+              onChange={e => {
+                const val = parseFloat(e.target.value) || 0;
+                onChange({
+                  ...compensazioni,
+                  [c.ledgerId]: val > max ? String(max) : e.target.value,
+                });
+              }}
+              className="w-28 h-7 text-xs"
+              min={0}
+              max={max}
+              step={0.01}
+            />
+          </div>
+        );
+      })}
+      {totaleCompensato > 0 && (
+        <div className="border-t pt-2 space-y-1 text-sm mt-2">
+          <div className="flex justify-between text-muted-foreground">
+            <span>Totale ritenute</span>
+            <span>{fmtEuro(f24.totaleRitenute)}</span>
+          </div>
+          <div className="flex justify-between text-green-700">
+            <span>Credito compensato</span>
+            <span>-{fmtEuro(totaleCompensato)}</span>
+          </div>
+          <div className="flex justify-between font-medium border-t pt-1">
+            <span>Saldo da versare</span>
+            <span className={saldoNetto === 0 ? 'text-green-600' : ''}>{fmtEuro(saldoNetto)}</span>
+          </div>
+          {totaleCompensato > f24.totaleRitenute && (
+            <p className="text-xs text-destructive">
+              ⚠ Il credito supera le ritenute del periodo ({fmtEuro(f24.totaleRitenute)}).
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const isArretrato = (
   r: F24GenerazioneResult['ritenute'][number],
   periodoF24: { mese: number; anno: number },

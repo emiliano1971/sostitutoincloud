@@ -3,14 +3,23 @@ package it.gavia.sostitutoincloud.dao;
 import it.gavia.sostitutoincloud.dao.mapper.BookingSplitEconomicoRowMapper;
 import it.gavia.sostitutoincloud.model.BookingSplitEconomico;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.util.StreamUtils;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
@@ -149,5 +158,28 @@ public class BookingSplitEconomicoDAO {
                 BigDecimal.class, bookingId);
         log.debug("BookingSplitEconomicoDAO.sumImportoByBookingId() - bookingId={} totale={}", bookingId, sum);
         return sum;
+    }
+
+    /**
+     * Provvigione PM imponibile (voce commissione_pm) per mese di check-in nell'intervallo
+     * [from, to), escluse le prenotazioni stornate e cancellate. Mesi senza righe assenti.
+     */
+    public Map<YearMonth, BigDecimal> sumProvvigionePmPerMese(Integer tenantId, YearMonth from, YearMonth to) {
+        String sql = loadSql("sql/booking_split_economico/provvigione_pm_per_mese.sql");
+        Map<YearMonth, BigDecimal> result = new LinkedHashMap<>();
+        jdbcTemplate.query(sql, rs -> {
+            result.put(YearMonth.from(rs.getObject("mese", LocalDate.class)), rs.getBigDecimal("provvigione_pm"));
+        }, tenantId, from.atDay(1), to.atDay(1));
+        log.debug("BookingSplitEconomicoDAO.sumProvvigionePmPerMese() - tenantId={} {}..{} mesi={}",
+                tenantId, from, to, result.size());
+        return result;
+    }
+
+    private String loadSql(String classpath) {
+        try (InputStream is = new ClassPathResource(classpath).getInputStream()) {
+            return StreamUtils.copyToString(is, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("Impossibile leggere " + classpath, e);
+        }
     }
 }

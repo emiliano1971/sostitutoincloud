@@ -119,6 +119,10 @@ export async function getDocuments(params: {
   /** Data emissione (yyyy-MM-dd), estremi inclusi */
   dataFrom?: string;
   dataTo?: string;
+  /** Mese di emissione 1..12 */
+  mese?: number;
+  /** Anno di emissione */
+  anno?: number;
   ownerId?: number;
   /** Stato liquidazione (pending | calculated | approved | paid) o 'none' = non liquidato */
   liquidazione?: string;
@@ -182,6 +186,8 @@ export interface DocumentGenerateRequest {
 }
 
 export interface DocumentGenerateResponse {
+  /** Avviso non bloccante (es. F24 del periodo già pagato → ritenuta in un F24 integrativo). */
+  avviso?: string;
   documentId: number;
   documentNumber: string;
   tipoDocumento: string;

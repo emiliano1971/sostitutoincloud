@@ -218,6 +218,13 @@ public class FiscalDocumentDAO {
         log.info("FiscalDocumentDAO.updateSdiAccepted() - id={} dataConsegna={}", id, dataConsegna);
     }
 
+    /** IdentificativoSdI assegnato dallo SDI al file trasmesso (letto dalle ricevute di esito). */
+    public void updateSdiIdentifier(Integer documentId, String sdiIdentifier) {
+        jdbcTemplate.update("UPDATE fiscal_document SET sdi_identifier = ?, updated_at = NOW() WHERE id = ?",
+                sdiIdentifier, documentId);
+        log.info("FiscalDocumentDAO.updateSdiIdentifier() - id={} sdiIdentifier={}", documentId, sdiIdentifier);
+    }
+
     /**
      * Documento scartato dallo SDI: stato 'rejected' con l'elenco degli errori restituiti.
      */

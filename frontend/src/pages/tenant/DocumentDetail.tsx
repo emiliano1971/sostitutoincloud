@@ -659,6 +659,13 @@ const DocumentDetail = () => {
                   <span className="text-muted-foreground">Progressivo</span>
                   <span className="font-mono text-xs">{doc.sdiProgressivo}</span>
                 </div>
+                {/* IdentificativoSdI assegnato dallo SDI, letto dalle ricevute di esito */}
+                {doc.sdiIdentifier && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Identificativo SDI</span>
+                    <span className="font-mono text-xs">{doc.sdiIdentifier}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Data invio</span>
                   <span>{doc.sdiSentAt ? new Date(doc.sdiSentAt).toLocaleString('it-IT') : '—'}</span>

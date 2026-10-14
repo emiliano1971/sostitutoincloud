@@ -46,4 +46,6 @@ public class DocumentGenerateResponseDTO {
     private Boolean sdiDatiIncompleti;
     /** messaggio dell'errore che ha fatto fallire l'auto-invio (l'emissione resta valida) */
     private String sdiAutoSendError;
+    /** Avviso non bloccante (es. ricevuta in un periodo con F24 già pagato → F24 integrativo). */
+    private String avviso;
 }

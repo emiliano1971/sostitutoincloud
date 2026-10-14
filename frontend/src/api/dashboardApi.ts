@@ -12,7 +12,10 @@ export interface MensileDTO {
 export interface DashboardDTO {
   bookingsDaCompletare: number;
   bookingsInPenale: number;
-  documentiPending: number;
+  /** Prenotazioni 'ready' con check-out passato e senza fattura PM. */
+  prenotazioniDaFatturare: number;
+  /** Fatture PM e NDC pronte per la trasmissione SDI. */
+  fattureDaInviareSDI: number;
   f24DaGenerare: number;
   liquidazioniPending: number;
   ricaviMeseCorrente: number;

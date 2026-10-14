@@ -28,4 +28,7 @@ public class F24RecordDTO {
     private String codiceTributoCreditoImposta;
     private Integer annoCredito;
     private BigDecimal saldoNetto;
+    // F24 integrativo del periodo (migration 030) e principale di riferimento
+    private boolean integrativo;
+    private Integer fkF24PrincipaleId;
 }

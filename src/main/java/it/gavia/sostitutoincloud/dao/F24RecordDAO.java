@@ -22,6 +22,7 @@ public class F24RecordDAO {
             "SELECT id, fk_tenant_id, fk_codice_tributo_id, period, total_amount, withholdings_count, " +
             "stato, deadline_date, payment_date, periodo_mese, periodo_anno, reference_year, " +
             "importo_credito, codice_tributo_credito, anno_credito, saldo_netto, " +
+            "integrativo, fk_f24_principale_id, " +
             "created_at, updated_at FROM f24_record";
 
     private final JdbcTemplate jdbcTemplate;
@@ -67,18 +68,28 @@ public class F24RecordDAO {
         return jdbcTemplate.query(sql, f24RecordRowMapper, tenantId);
     }
 
-    /** F24 esistenti per tenant + periodo (anno/mese), per il controllo di unicità. */
+    /** Tutti gli F24 del periodo (anno/mese): principale e integrativi, per id crescente. */
     public List<F24Record> findByTenantAndPeriodo(Integer tenantId, Integer anno, Integer mese) {
         log.debug("F24RecordDAO.findByTenantAndPeriodo() - tenantId={}, anno={}, mese={}", tenantId, anno, mese);
         String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND periodo_anno = ? AND periodo_mese = ? ORDER BY id";
         return jdbcTemplate.query(sql, f24RecordRowMapper, tenantId, anno, mese);
     }
 
+    /** F24 principale (non integrativo) del periodo, se esiste. */
+    public Optional<F24Record> findPrincipaleByPeriodo(Integer tenantId, Integer anno, Integer mese) {
+        log.debug("F24RecordDAO.findPrincipaleByPeriodo() - tenantId={}, anno={}, mese={}", tenantId, anno, mese);
+        String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND periodo_anno = ? AND periodo_mese = ? "
+                + "AND integrativo = FALSE ORDER BY id LIMIT 1";
+        List<F24Record> result = jdbcTemplate.query(sql, f24RecordRowMapper, tenantId, anno, mese);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
     public F24Record insert(F24Record record) {
         String sql = "INSERT INTO f24_record (" +
                 "fk_tenant_id, fk_codice_tributo_id, period, total_amount, withholdings_count, " +
-                "stato, deadline_date, payment_date, periodo_mese, periodo_anno, reference_year" +
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+                "stato, deadline_date, payment_date, periodo_mese, periodo_anno, reference_year, " +
+                "integrativo, fk_f24_principale_id" +
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -93,6 +104,8 @@ public class F24RecordDAO {
             ps.setObject(9, record.getPeriodoMese());
             ps.setObject(10, record.getPeriodoAnno());
             ps.setObject(11, record.getReferenceYear());
+            ps.setBoolean(12, record.isIntegrativo());
+            ps.setObject(13, record.getFkF24PrincipaleId());
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();

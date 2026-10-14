@@ -225,6 +225,16 @@ public class SdiRispostaService {
                     default -> { /* il regex ammette solo i quattro esiti */ }
                 }
 
+                // IdentificativoSdI: figlio diretto della radice in RC, NS, MC e anche nei metadati
+                // MT (stesso valore del file trasmesso). Lo si salva a ogni esito abbinato.
+                String sdiId = testo(doc, "IdentificativoSdI");
+                if (sdiId != null && !sdiId.isBlank()) {
+                    String id = sdiId.length() > 50 ? sdiId.substring(0, 50) : sdiId;   // VARCHAR(50)
+                    fiscalDocumentDAO.updateSdiIdentifier(fd.getId(), id);
+                    log.info("SdiRispostaService - IdentificativoSdI={} salvato per documento {}",
+                            id, fd.getDocumentNumber());
+                }
+
                 // L'anno viene dalla data di emissione del documento, la stessa usata da
                 // SdiXmlService per l'archivio: risposta e fattura finiscono nella stessa cartella.
                 String anno = fd.getIssueDate() != null

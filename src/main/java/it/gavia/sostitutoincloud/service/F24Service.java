@@ -21,11 +21,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -73,20 +75,23 @@ public class F24Service {
     }
 
     public F24GenerazioneResultDTO generaF24(Integer tenantId, Integer anno, Integer mese) {
-        // 1. Un solo F24 per tenant/periodo. Se esiste già:
-        //    - pagato   → intoccabile
-        //    - altrimenti → si ricalcola, agganciando le ritenute del periodo non ancora incluse
-        //      (es. prenotazioni importate dopo la prima generazione), senza crearne un secondo.
+        // 1. Un F24 principale per tenant/periodo. Se esiste già:
+        //    - non pagato → si ricalcola, agganciando le ritenute del periodo non ancora incluse
+        //      (es. prenotazioni importate dopo la prima generazione), senza crearne un secondo;
+        //    - pagato → le ritenute arrivate dopo vanno in un F24 integrativo dello stesso
+        //      periodo (migration 030): l'AdE somma i versamenti. Il principale resta intoccabile.
         List<F24Record> esistenti = f24RecordDAO.findByTenantAndPeriodo(tenantId, anno, mese);
         if (!esistenti.isEmpty()) {
-            F24Record esistente = esistenti.get(0);
-            if (STATO_PAID.equals(esistente.getStato())) {
-                throw new IllegalStateException("F24 già pagato per periodo " + mese + "/" + anno
-                        + " — impossibile modificare");
+            F24Record principale = esistenti.stream()
+                    .filter(f -> !f.isIntegrativo())
+                    .findFirst()
+                    .orElse(esistenti.get(0));
+            if (!STATO_PAID.equals(principale.getStato())) {
+                log.info("F24Service.generaF24() - F24 {} già presente per {}/{} (stato={}): ricalcolo",
+                        principale.getId(), mese, anno, principale.getStato());
+                return ricalcola(tenantId, principale.getId());
             }
-            log.info("F24Service.generaF24() - F24 {} già presente per {}/{} (stato={}): ricalcolo",
-                    esistente.getId(), mese, anno, esistente.getStato());
-            return ricalcola(tenantId, esistente.getId());
+            return generaIntegrativo(tenantId, anno, mese, principale, esistenti);
         }
 
         // 2. Ritenute da versare del periodo
@@ -146,6 +151,71 @@ public class F24Service {
                 tenantId, mese, anno, totale, ritenute.size());
 
         // 10. Risultato con dettaglio ritenute collegate e crediti compensabili
+        return dettaglio(tenantId, saved.getId());
+    }
+
+    /**
+     * F24 integrativo per un periodo il cui principale è già pagato: raccoglie le ritenute
+     * 'da_versare' del periodo non ancora agganciate. Ammesso solo entro la scadenza del periodo
+     * (dopo serve il ravvedimento: lo gestisce il commercialista). Se c'è già un integrativo non
+     * pagato lo si ricalcola invece di crearne un altro.
+     */
+    private F24GenerazioneResultDTO generaIntegrativo(Integer tenantId, Integer anno, Integer mese,
+                                                      F24Record principale, List<F24Record> esistenti) {
+        LocalDate deadline = principale.getDeadlineDate();
+        if (deadline != null && LocalDate.now().isAfter(deadline)) {
+            throw new IllegalStateException("Impossibile generare F24 integrativo: scadenza del periodo "
+                    + mese + "/" + anno + " superata (" + deadline.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+                    + "). Contattare il commercialista.");
+        }
+
+        Optional<F24Record> integrativoAperto = esistenti.stream()
+                .filter(F24Record::isIntegrativo)
+                .filter(f -> !STATO_PAID.equals(f.getStato()))
+                .findFirst();
+        if (integrativoAperto.isPresent()) {
+            log.info("F24Service.generaF24() - integrativo {} già aperto per {}/{}: ricalcolo",
+                    integrativoAperto.get().getId(), mese, anno);
+            return ricalcola(tenantId, integrativoAperto.get().getId());
+        }
+
+        // Ritenute orfane: del periodo, 'da_versare' e non agganciate (la query lo garantisce)
+        List<WithholdingLedger> orfane = withholdingLedgerDAO.findDaVersareByPeriodo(tenantId, mese, anno);
+        if (orfane.isEmpty()) {
+            throw new IllegalStateException("Nessuna ritenuta da versare per il periodo " + mese + "/" + anno
+                    + ": tutte già incluse in un F24.");
+        }
+        BigDecimal totaleOrfane = orfane.stream()
+                .map(WithholdingLedger::getRitenutaAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        F24Record saved = f24RecordDAO.insert(F24Record.builder()
+                .fkTenantId(tenantId)
+                .fkCodiceTributoId(principale.getFkCodiceTributoId())
+                .periodoMese(mese)
+                .periodoAnno(anno)
+                .referenceYear(anno)
+                .totalAmount(totaleOrfane)
+                .withholdingsCount(orfane.size())
+                .stato(STATO_READY)
+                .deadlineDate(deadline)             // stessa scadenza del principale
+                .period(principale.getPeriod())
+                .integrativo(true)
+                .fkF24PrincipaleId(principale.getId())
+                .build());
+        f24RecordDAO.updateCredito(saved.getId(), BigDecimal.ZERO, null, null, totaleOrfane);
+
+        // Come nel principale: agganciate e marcate versate
+        for (WithholdingLedger riga : orfane) {
+            withholdingLedgerDAO.updateF24Record(riga.getId(), saved.getId());
+            withholdingLedgerDAO.updateStato(riga.getId(), STATO_VERSATA);
+        }
+
+        auditService.log("f24.generate", "F24", saved.getId(),
+                "Generato F24 integrativo periodo " + mese + "/" + anno + " (principale " + principale.getId()
+                        + ") importo €" + totaleOrfane + " (" + orfane.size() + " ritenute)");
+        log.info("F24Service.generaF24() - tenant={} periodo={}/{} F24 integrativo {} creato con {} ritenute orfane totale={}",
+                tenantId, mese, anno, saved.getId(), orfane.size(), totaleOrfane);
         return dettaglio(tenantId, saved.getId());
     }
 
@@ -329,6 +399,8 @@ public class F24Service {
                             .importoCredito(nz(r.getRitenutaAmount()).abs())
                             .annoRiferimento(ndc != null && ndc.getIssueDate() != null
                                     ? ndc.getIssueDate().getYear() : null)
+                            .periodoMese(r.getPeriodoMese())
+                            .periodoAnno(r.getPeriodoAnno())
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -404,6 +476,7 @@ public class F24Service {
                 .annoCredito(f.getAnnoCredito())
                 .saldoNetto(f.getSaldoNetto() != null ? f.getSaldoNetto()
                         : nz(f.getTotalAmount()).subtract(nz(f.getImportoCredito())))
+                .integrativo(f.isIntegrativo())
                 .build();
     }
 
@@ -455,6 +528,8 @@ public class F24Service {
                 .codiceTributoCreditoImposta(f.getCodiceTributoCreditoImposta())
                 .annoCredito(f.getAnnoCredito())
                 .saldoNetto(f.getSaldoNetto() != null ? f.getSaldoNetto() : f.getTotalAmount())
+                .integrativo(f.isIntegrativo())
+                .fkF24PrincipaleId(f.getFkF24PrincipaleId())
                 .build();
     }
 }

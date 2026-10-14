@@ -99,7 +99,7 @@ const SettlementDetail = () => {
   const bookings = settlement.bookings ?? [];
 
   // Netto per riga = canone − ritenuta (il bollo è informativo e NON incide sui totali).
-  // Il totale riconcilia con settlement.netAmount (card "Netto da pagare").
+  // Il totale riconcilia con settlement.netAmount (card "Da pagare").
   const nettoRiga = (b: { ownerNetAmount?: number; withholdingAmount?: number }) =>
     (b.ownerNetAmount ?? 0) - (b.withholdingAmount ?? 0);
 
@@ -290,10 +290,10 @@ const SettlementDetail = () => {
         </Card>
       </div>
 
-      {/* Netto da pagare — evidenza */}
+      {/* Da pagare — evidenza */}
       <Card className={NET_BG}>
         <CardContent className="p-6 text-center">
-          <p className="text-sm text-muted-foreground">Netto da pagare</p>
+          <p className="text-sm text-muted-foreground">Da pagare</p>
           <p className="text-3xl font-bold mt-1 text-success">{fmtEuro(settlement.netAmount)}</p>
         </CardContent>
       </Card>

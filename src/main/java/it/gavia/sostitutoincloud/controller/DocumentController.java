@@ -58,6 +58,8 @@ public class DocumentController {
             @RequestParam(required = false) String filtroFiscale,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dataTo,
+            @RequestParam(required = false) Integer mese,
+            @RequestParam(required = false) Integer anno,
             @RequestParam(required = false) Integer ownerId,
             @RequestParam(required = false) String liquidazione,
             @RequestParam(required = false) String sort,
@@ -67,7 +69,7 @@ public class DocumentController {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         DocumentFilterDTO filtro = DocumentFilterDTO.builder()
                 .stato(stato).tipo(tipo).search(search).filtroFiscale(filtroFiscale)
-                .dataFrom(dataFrom).dataTo(dataTo).ownerId(ownerId)
+                .dataFrom(dataFrom).dataTo(dataTo).mese(mese).anno(anno).ownerId(ownerId)
                 .liquidazione(liquidazione).sort(sort).dir(dir)
                 .build();
         return ResponseEntity.ok(fiscalDocumentService.findPage(tenantId, filtro, page, size));
