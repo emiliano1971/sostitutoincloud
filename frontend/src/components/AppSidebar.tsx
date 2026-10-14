@@ -9,10 +9,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { NavLink } from '@/components/NavLink';
 import { RoleSwitcher } from '@/components/RoleSwitcher';
 import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
+import { AppFooter } from '@/components/AppFooter';
 import {
   LayoutDashboard, Building2, Users, Home, FileText, CalendarDays,
   Upload, GitMerge, Receipt, CreditCard, Award, ScrollText,
-  Settings, LogOut, ChevronDown, BookOpen, Globe, MapPin, KeyRound,
+  Settings, LogOut, ChevronDown, BookOpen, Globe, MapPin, KeyRound, Info,
 } from 'lucide-react';
 import appLogo from '@/assets/logo-icon.png';
 
@@ -154,6 +155,16 @@ export function AppSidebar() {
             </div>
           </div>
         )}
+        <SidebarMenuButton asChild>
+          <NavLink
+            to="/about"
+            className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+            activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+          >
+            <Info className="h-4 w-4 shrink-0" />
+            {!collapsed && <span className="text-xs">Informazioni</span>}
+          </NavLink>
+        </SidebarMenuButton>
         <SidebarMenuButton onClick={() => setChangePwdOpen(true)} className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent">
           <KeyRound className="h-4 w-4" />
           {!collapsed && <span className="text-xs">Cambia password</span>}
@@ -163,6 +174,7 @@ export function AppSidebar() {
           {!collapsed && <span className="text-xs">Esci</span>}
         </SidebarMenuButton>
         <ChangePasswordDialog open={changePwdOpen} onOpenChange={setChangePwdOpen} />
+        {!collapsed && <AppFooter className="text-sidebar-muted border-sidebar-border px-2 pt-2 pb-0" />}
       </SidebarFooter>
     </Sidebar>
   );

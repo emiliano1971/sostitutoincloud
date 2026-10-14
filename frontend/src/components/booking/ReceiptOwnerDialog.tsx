@@ -15,7 +15,7 @@ interface ReceiptOwnerDialogProps {
   booking: Booking;
   owner?: OwnerProfile;
   property?: Property;
-  /** Emittente della ricevuta (stessa struttura passata a InvoicePMDialog). */
+  /** Sostituto d'imposta indicato nelle note (stessa struttura passata a InvoicePMDialog). */
   tenantData?: { legal_name: string; vat_number: string; tax_code: string; address: string };
   generatedDoc?: DocumentGenerateResponse | null;
   existingDoc?: FiscalDocumentSummary;
@@ -49,27 +49,21 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
     ? new Date(receiptDateSource).toLocaleDateString('it-IT')
     : new Date().toLocaleDateString('it-IT');
 
-  // Aliquota ritenuta storicizzata sulla prenotazione (il documento non la riporta).
-  // Senza aliquota non si inventa una percentuale: si mostra solo l'importo.
-  const aliquotaRitenuta = booking.aliquota_ritenuta != null ? Math.round(booking.aliquota_ritenuta) : null;
   const round2 = (v: number) => Math.round(v * 100) / 100;
 
   // Ricevuta emessa: importi del documento salvato, gli stessi del PDF del server.
   // Subito dopo l'emissione, finché il booking non è ricaricato, vale la risposta di generate.
   // Il bollo è solo informativo: non entra nel totale (totale = canone di locazione).
   let canone: number;
-  let ritenuta: number;
   let importoBollo: number;
   let totaleRicevuta: number;
   const emessa = !!existingDoc || !!generatedDoc;
   if (existingDoc) {
     canone = existingDoc.canoneLocazione ?? existingDoc.importoTotale;
-    ritenuta = existingDoc.ritenutaAmount ?? 0;
     importoBollo = existingDoc.bolloAmount ?? 0;
     totaleRicevuta = existingDoc.importoTotale;
   } else if (generatedDoc) {
     canone = generatedDoc.importoTotale;
-    ritenuta = generatedDoc.ritenuta ?? 0;
     importoBollo = generatedDoc.importoBollo ?? 0;
     totaleRicevuta = generatedDoc.importoTotale;
   } else {
@@ -81,9 +75,6 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
     canone = round2(fatturaPM
       ? booking.gross_amount - fatturaPM.importoTotale - tassaInclusa
       : (booking.owner_net_amount ?? 0));
-    ritenuta = aliquotaRitenuta != null
-      ? round2(canone * aliquotaRitenuta / 100)
-      : (booking.withholding_amount ?? 0);
     // Bollo dalle impostazioni del tenant se canone > soglia (solo informativo)
     importoBollo = canone > sogliaBollo ? importoBolloTenant : 0;
     totaleRicevuta = canone;
@@ -136,18 +127,16 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Receipt className="h-5 w-5" />
-            Ricevuta PM → Proprietario
+            Ricevuta Proprietario → Ospite
           </DialogTitle>
         </DialogHeader>
 
         <div className="border rounded-lg p-6 space-y-6 bg-background text-foreground text-sm" id="print-document-content">
-          {/* Emittente: tenant (PM) — stessa struttura del PDF ricevuta-owner.html */}
+          {/* Emittente: proprietario — stessa struttura del PDF ricevuta-owner.html */}
           <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-lg font-bold text-foreground">{tenantData?.legal_name || '—'}</h2>
-              <p className="text-xs text-muted-foreground mt-1">P.IVA: {tenantData?.vat_number || '—'}</p>
-              <p className="text-xs text-muted-foreground">C.F.: {tenantData?.tax_code || '—'}</p>
-              {tenantData?.address && <p className="text-xs text-muted-foreground">{tenantData.address}</p>}
+              <h2 className="text-lg font-bold text-foreground">{booking.owner_cognome_nome ?? booking.owner_name}</h2>
+              <p className="text-xs text-muted-foreground mt-1">C.F.: {owner?.tax_code || '—'}</p>
             </div>
             <div className="text-right">
               <Badge className="text-xs mb-2">RICEVUTA</Badge>
@@ -158,25 +147,17 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
 
           <Separator />
 
-          {/* Destinatario (proprietario), immobile, soggiorno */}
-          <div className="grid grid-cols-3 gap-6">
+          {/* Destinatario (ospite), immobile */}
+          <div className="grid grid-cols-2 gap-6">
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Destinatario</p>
-              <p className="font-medium">{booking.owner_cognome_nome ?? booking.owner_name}</p>
-              <p className="text-xs text-muted-foreground">C.F.: {owner?.tax_code || '—'}</p>
+              <p className="font-medium">{booking.guest_name}</p>
+              <p className="text-xs text-muted-foreground">C.F.: {booking.guest_tax_code || '—'}</p>
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Immobile</p>
               <p className="font-medium">{booking.property_name}</p>
-              {property && <p className="text-xs text-muted-foreground mt-1">{property.address}, {property.city}</p>}
-              <p className="text-xs text-muted-foreground">Cod. {property?.internal_code}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Soggiorno</p>
-              <p className="font-medium">{booking.guest_name}</p>
-              <p className="text-xs text-muted-foreground">CF: {booking.guest_tax_code || '—'}</p>
-              <p className="text-xs text-muted-foreground">Prenotazione: {booking.external_booking_id}</p>
-              <p className="text-xs text-muted-foreground">Canale: {booking.channel_name}</p>
+              {property?.city && <p className="text-xs text-muted-foreground mt-1">{property.city}</p>}
             </div>
           </div>
 
@@ -210,7 +191,7 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
           <div className="flex justify-end">
             <div className="w-64 space-y-2">
               <div className="flex justify-between text-xs gap-3">
-                <span className="text-muted-foreground">Canone di locazione (fuori campo IVA art. 4 D.L. 50/2017 – cedolare secca)</span>
+                <span className="text-muted-foreground">Canone di locazione</span>
                 <span className="whitespace-nowrap">{fmt(canone)}</span>
               </div>
               {bolloApplicabile && (
@@ -231,15 +212,10 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
 
           {/* Note */}
           <div className="text-xs text-muted-foreground space-y-1">
-            <p><strong>Operazione fuori campo IVA</strong> – Canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017, soggetto a cedolare secca</p>
-            <p>Imposta assolta in forma di cedolare secca ai sensi dell'art. 3 D.Lgs. 23/2011</p>
+            <p><strong>Operazione fuori campo IVA</strong> – Canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017</p>
             {bolloApplicabile && <p><strong>Imposta di bollo:</strong> {fmt(importoBollo)} assolta in modo virtuale (canone &gt; {fmt(sogliaBollo)})</p>}
-            <p><strong>Ritenuta d'acconto{aliquotaRitenuta != null ? ` ${aliquotaRitenuta}%` : ''}:</strong> {fmt(ritenuta)} (trattenuta dal sostituto d'imposta)</p>
             {!emessa && <p className="italic">Anteprima preliminare: gli importi definitivi sono quelli della ricevuta emessa.</p>}
-            <p><strong>Locatore:</strong> {booking.owner_name} {owner ? `(C.F. ${owner.tax_code})` : ''}</p>
-            <p><strong>Conduttore:</strong> {booking.guest_name}</p>
-            <p><strong>Periodo di locazione:</strong> {booking.checkin_date} – {booking.checkout_date} ({booking.nights} notti)</p>
-            <p><strong>Rif. contratto:</strong> prenotazione {booking.external_booking_id}</p>
+            <p><strong>Sostituto d'imposta:</strong> {tenantData?.legal_name || '—'} — P.IVA {tenantData?.vat_number || '—'}</p>
           </div>
         </div>
 

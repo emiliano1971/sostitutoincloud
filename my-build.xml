@@ -34,6 +34,8 @@
         <copy todir="${project.basedir}/WEB-INF/classes" overwrite="true">
             <fileset dir="${project.build.outputDirectory}">
                 <include name="**/*.class"/>
+                <!-- generato da git-commit-id-maven-plugin, letto da BuildInfoService -->
+                <include name="git.properties"/>
             </fileset>
         </copy>
 

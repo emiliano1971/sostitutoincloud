@@ -6,13 +6,13 @@
   Template ricevuta owner — placeholder {NOME_CAMPO} sostituiti da DocumentPdfService
   con String.replace(). NON è un template Thymeleaf.
 
-  Differenze rispetto a fattura-pm.html:
-  - titolo RICEVUTA
-  - emittente (intestazione) = dati del tenant/PM: ragione sociale, P.IVA, C.F., indirizzo
-  - destinatario = dati del proprietario: cognome e nome, C.F.
+  Ricevuta del proprietario all'ospite:
+  - emittente (intestazione) = proprietario: cognome e nome, C.F.
     (owner_profile non ha un indirizzo: non viene stampato)
+  - destinatario = ospite: nome, C.F.
   - nessuna colonna IVA (canone fuori campo IVA)
-  - totali con ritenuta d'acconto
+  - totale = solo canone; nessuna ritenuta; bollo indicato ma non sommato
+  - il tenant (PM) compare solo nelle note come sostituto d'imposta
 
   NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox:
   le zone a più colonne usano display:table/table-cell.
@@ -81,7 +81,7 @@
   }
   .col {
     display: table-cell;
-    width: 33.33%;
+    width: 50%;
     vertical-align: top;
     padding-right: 15px;
   }
@@ -137,14 +137,11 @@
 </head>
 <body>
 
-<!-- INTESTAZIONE — emittente: dati del tenant (PM) -->
+<!-- INTESTAZIONE — emittente: proprietario -->
 <div class="header">
   <div class="header-left">
-    <div class="company-name">{TENANT_LEGAL_NAME}</div>
-    <div>P.IVA: {TENANT_VAT_NUMBER}</div>
-    <div>C.F.: {TENANT_TAX_CODE}</div>
-    <div>{TENANT_STREET}</div>
-    <div>{TENANT_CAP_CITTA}</div>
+    <div class="company-name">{OWNER_COGNOME_NOME}</div>
+    <div>C.F.: {OWNER_COD_FISC}</div>
   </div>
   <div class="header-right">
     <div class="doc-title">RICEVUTA</div>
@@ -153,33 +150,24 @@
   </div>
 </div>
 
-<!-- DESTINATARIO (proprietario) + IMMOBILE + SOGGIORNO -->
+<!-- DESTINATARIO (ospite) + IMMOBILE -->
 <div class="cols">
   <div class="col">
     <div class="section-title">Destinatario</div>
-    <div><strong>{OWNER_COGNOME_NOME}</strong></div>
-    <div>C.F.: {OWNER_TAX_CODE}</div>
+    <div><strong>{RECIPIENT_NAME}</strong></div>
+    <div>C.F.: {RECIPIENT_TAX_CODE}</div>
   </div>
   <div class="col">
     <div class="section-title">Immobile</div>
     <div><strong>{PROPERTY_NAME}</strong></div>
-    <div>{PROPERTY_ADDRESS}</div>
     <div>{PROPERTY_CITY}</div>
-  </div>
-  <div class="col">
-    <div class="section-title">Soggiorno</div>
-    <div>Ospite: {GUEST_NAME}</div>
-    <div>Check-in: {CHECKIN_DATE}</div>
-    <div>Check-out: {CHECKOUT_DATE}</div>
-    <div>Notti: {NIGHTS}</div>
-    <div>Ospiti: {GUESTS}</div>
   </div>
 </div>
 
-<!-- RIGHE RICEVUTA — nessuna colonna IVA -->
+<!-- DETTAGLIO SOGGIORNO — canone + eventuale marca da bollo, nessuna colonna IVA -->
 <div class="section">
   <div class="section-title">
-    Dettaglio
+    Dettaglio soggiorno
   </div>
   <table>
     <thead>
@@ -194,41 +182,21 @@
   </table>
 </div>
 
-<!-- TOTALI — con ritenuta d'acconto -->
+<!-- TOTALE — solo il canone -->
 <div class="totals">
   <table>
-    <tr>
-      <td>Canone lordo</td>
-      <td class="text-right">
-        {CANONE_LORDO} &#8364;
-      </td>
-    </tr>
-    <tr>
-      <td>Ritenuta {ALIQUOTA_RITENUTA}%</td>
-      <td class="text-right" style="color:red">
-        -{RITENUTA} &#8364;
-      </td>
-    </tr>
-    <tr>
-      <td>Marca da bollo</td>
-      <td class="text-right">
-        {BOLLO} &#8364;
-      </td>
-    </tr>
     <tr class="total-row">
-      <td>NETTO A PAGARE</td>
+      <td>TOTALE RICEVUTA</td>
       <td class="text-right">
-        {NETTO_PAGARE} &#8364;
+        {CANONE} &#8364;
       </td>
     </tr>
   </table>
 </div>
 
 <div class="note">
-  Operazione fuori campo IVA — canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017,
-  soggetto a cedolare secca (art. 3 D.Lgs. 23/2011).<br/>
-  Ritenuta d'acconto trattenuta e versata dal sostituto d'imposta.<br/>
-  La marca da bollo è indicata a fini informativi e non è scalata dal netto a pagare.
+  Operazione fuori campo IVA — canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017.<br/>
+  Sostituto d'imposta: {TENANT_NAME} — P.IVA {TENANT_PIVA}
 </div>
 
 <div class="footer">

@@ -54,6 +54,7 @@ import OwnerDocuments from "./pages/owner/OwnerDocuments";
 import OwnerSettlements from "./pages/owner/OwnerSettlements";
 import OwnerCU from "./pages/owner/OwnerCU";
 import GuestDocuments from "./pages/GuestDocuments";
+import AboutPage from "./pages/AboutPage";
 const queryClient = new QueryClient();
 
 // Rotta iniziale per ruolo: destinazione del redirect quando un utente prova ad
@@ -143,6 +144,11 @@ function AppRoutes() {
         <Route path="users" element={<UsersList />} />
         <Route path="ota" element={<OTARegistry />} />
         <Route path="tourist-tax" element={<TouristTaxSettings />} />
+      </Route>
+
+      {/* Informazioni (versione): raggiungibile da tutti i ruoli con la sidebar del back-office */}
+      <Route path="/about" element={<ProtectedRoute allow={['super_admin', 'tenant_admin', 'pm_user']}><DashboardLayout /></ProtectedRoute>}>
+        <Route index element={<AboutPage />} />
       </Route>
 
       {/* Owner */}

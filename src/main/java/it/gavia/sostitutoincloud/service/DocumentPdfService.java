@@ -7,7 +7,6 @@ import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
-import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
@@ -15,7 +14,6 @@ import it.gavia.sostitutoincloud.model.FiscalDocumentRigaNdc;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.Tenant;
-import it.gavia.sostitutoincloud.model.TenantSettings;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
 import it.gavia.sostitutoincloud.util.TenantAddressUtils;
 import lombok.extern.log4j.Log4j2;
@@ -74,7 +72,6 @@ public class DocumentPdfService {
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final BookingDAO bookingDAO;
-    private final TenantSettingsDAO tenantSettingsDAO;
     private final OwnerProfileDAO ownerProfileDAO;
     private final PropertyDAO propertyDAO;
     // Non previsti dalla specifica ma necessari: il tenant serve per l'intestazione
@@ -86,7 +83,6 @@ public class DocumentPdfService {
 
     public DocumentPdfService(FiscalDocumentDAO fiscalDocumentDAO,
                               BookingDAO bookingDAO,
-                              TenantSettingsDAO tenantSettingsDAO,
                               OwnerProfileDAO ownerProfileDAO,
                               PropertyDAO propertyDAO,
                               TenantDAO tenantDAO,
@@ -97,7 +93,6 @@ public class DocumentPdfService {
         this.rigaNdcDAO = rigaNdcDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
-        this.tenantSettingsDAO = tenantSettingsDAO;
         this.ownerProfileDAO = ownerProfileDAO;
         this.propertyDAO = propertyDAO;
         this.tenantDAO = tenantDAO;
@@ -124,7 +119,6 @@ public class DocumentPdfService {
                 ? doc.getFkOwnerId()
                 : (property != null ? property.getFkOwnerId() : null);
         OwnerProfile owner = ownerId != null ? ownerProfileDAO.findById(ownerId).orElse(null) : null;
-        TenantSettings settings = tenantSettingsDAO.findByTenantId(tenantId).orElse(null);
 
         // 2. Tipo documento → template
         String codiceTipo = tipoDocumentoDAO.findById(doc.getFkTipoDocumentoId())
@@ -154,7 +148,7 @@ public class DocumentPdfService {
 
         // 4. Sostituzione placeholder
         Map<String, String> campi = TIPO_RICEVUTA_OWNER.equals(tipo)
-                ? campiRicevuta(doc, booking, property, owner, tenant, settings)
+                ? campiRicevuta(doc, booking, property, owner, tenant)
                 : CODICE_NOTA_CREDITO.equals(tipo)
                         ? campiNotaCredito(doc, booking, property, tenant)
                         : campiFattura(doc, booking, property, tenant);
@@ -253,58 +247,55 @@ public class DocumentPdfService {
         return c;
     }
 
+    /**
+     * Ricevuta del proprietario all'ospite: emittente = proprietario (locatore),
+     * destinatario = ospite (fiscal_document.recipient_*, CF con fallback sul booking).
+     * Il totale è il solo canone: nessuna ritenuta, il bollo è indicato ma non sommato.
+     * Il tenant compare solo come sostituto d'imposta nelle note.
+     */
     private Map<String, String> campiRicevuta(FiscalDocument doc, Booking booking, Property property,
-                                              OwnerProfile owner, Tenant tenant, TenantSettings settings) {
+                                              OwnerProfile owner, Tenant tenant) {
         // Canone: colonna dedicata sul documento; fallback = totale meno bollo addebitato.
         BigDecimal canone = doc.getCanoneLocazione() != null
                 ? doc.getCanoneLocazione()
                 : nz(doc.getTotalAmount()).subtract(nz(doc.getBolloAmount()));
-        BigDecimal ritenuta = nz(doc.getRitenutaAmount());
         BigDecimal bollo = nz(doc.getBolloAmount());
-        // Netto = canone - ritenuta. Il bollo NON è scalato: è coerente con SettlementService
-        // (net_amount = total_amount - withholding_amount) ed è solo informativo.
-        BigDecimal netto = canone.subtract(ritenuta).setScale(2, RoundingMode.HALF_UP);
 
         StringBuilder righe = new StringBuilder();
         righe.append(rigaRicevuta(
                 "Canone di locazione turistica breve"
                         + (booking.getCheckinDate() != null && booking.getCheckoutDate() != null
                         ? " — dal " + data(booking.getCheckinDate()) + " al " + data(booking.getCheckoutDate())
-                        : ""),
+                        : "")
+                        + (booking.getNights() != null
+                        ? " — " + booking.getNights() + (booking.getNights() == 1 ? " notte" : " notti") : ""),
                 canone));
+        // Bollo valorizzato in emissione solo se canone > soglia (tenant_settings.bollo_soglia)
         if (bollo.compareTo(BigDecimal.ZERO) > 0) {
             righe.append(rigaRicevuta("Marca da bollo", bollo));
         }
 
+        String recipientName = doc.getRecipientName() != null && !doc.getRecipientName().isBlank()
+                ? doc.getRecipientName() : booking.getGuestName();
+        String recipientTaxCode = doc.getRecipientTaxCode() != null && !doc.getRecipientTaxCode().isBlank()
+                ? doc.getRecipientTaxCode() : booking.getGuestTaxCode();
+
         Map<String, String> c = new LinkedHashMap<>();
-        // Emittente = tenant (PM), destinatario = proprietario
-        c.put("OWNER_NAME", esc(nomeOwner(owner)));
+        // Emittente = proprietario
         c.put("OWNER_COGNOME_NOME", esc(cognomeNomeOwner(owner)));
-        c.put("OWNER_TAX_CODE", esc(owner != null ? owner.getTaxCode() : null));
-        c.put("TENANT_LEGAL_NAME", esc(tenant.getLegalName()));
-        c.put("TENANT_VAT_NUMBER", esc(tenant.getVatNumber()));
-        c.put("TENANT_TAX_CODE", esc(tenant.getTaxCode()));
-        c.put("TENANT_LEGAL_ADDRESS", esc(TenantAddressUtils.indirizzoCompleto(tenant)));
-        c.put("TENANT_STREET", esc(tenant.getLegalAddress()));
-        c.put("TENANT_CAP_CITTA", esc(capCitta(tenant)));
-        c.put("TENANT_PEC", esc(tenant.getPec()));
+        c.put("OWNER_COD_FISC", esc(owner != null ? owner.getTaxCode() : null));
+        // Destinatario = ospite
+        c.put("RECIPIENT_NAME", esc(recipientName));
+        c.put("RECIPIENT_TAX_CODE", esc(recipientTaxCode));
+        // Sostituto d'imposta = tenant (PM)
+        c.put("TENANT_NAME", esc(tenant.getLegalName()));
+        c.put("TENANT_PIVA", esc(tenant.getVatNumber()));
         c.put("DOCUMENT_NUMBER", esc(doc.getDocumentNumber()));
         c.put("ISSUE_DATE", data(doc.getIssueDate()));
-        c.put("GUEST_NAME", esc(booking.getGuestName()));
-        c.put("EXTERNAL_BOOKING_ID", esc(booking.getExternalBookingId()));
         c.put("PROPERTY_NAME", esc(property != null ? property.getDisplayName() : null));
-        c.put("PROPERTY_ADDRESS", esc(property != null ? property.getAddress() : null));
         c.put("PROPERTY_CITY", esc(property != null ? property.getCity() : null));
-        c.put("CHECKIN_DATE", data(booking.getCheckinDate()));
-        c.put("CHECKOUT_DATE", data(booking.getCheckoutDate()));
-        c.put("NIGHTS", booking.getNights() != null ? String.valueOf(booking.getNights()) : "—");
-        c.put("GUESTS", booking.getGuests() != null ? String.valueOf(booking.getGuests()) : "—");
         c.put("RIGHE_RICEVUTA", righe.toString());
-        c.put("ALIQUOTA_RITENUTA", perc(aliquotaRitenuta(booking, property, settings, canone, ritenuta)));
-        c.put("CANONE_LORDO", importo(canone));
-        c.put("RITENUTA", importo(ritenuta));
-        c.put("BOLLO", importo(bollo));
-        c.put("NETTO_PAGARE", importo(netto));
+        c.put("CANONE", importo(canone));
         return c;
     }
 
@@ -335,42 +326,6 @@ public class DocumentPdfService {
                 + "</tr>";
     }
 
-    /**
-     * Aliquota ritenuta da mostrare: quella memorizzata sul booking, altrimenti quella dei
-     * settings in base a primo/secondo immobile, altrimenti ricavata da ritenuta/canone.
-     */
-    private BigDecimal aliquotaRitenuta(Booking booking, Property property, TenantSettings settings,
-                                        BigDecimal canone, BigDecimal ritenuta) {
-        if (booking.getAliquotaRitenuta() != null) {
-            return booking.getAliquotaRitenuta();
-        }
-        if (settings != null) {
-            boolean primoImmobile = property != null && Boolean.TRUE.equals(property.getPrimoImmobile());
-            BigDecimal rate = primoImmobile
-                    ? settings.getWithholdingRatePrimary()
-                    : settings.getWithholdingRateSecondary();
-            if (rate != null) {
-                return rate;
-            }
-        }
-        if (canone.compareTo(BigDecimal.ZERO) > 0) {
-            return ritenuta.multiply(CENTO).divide(canone, 2, RoundingMode.HALF_UP);
-        }
-        return BigDecimal.ZERO;
-    }
-
-    private String nomeOwner(OwnerProfile owner) {
-        if (owner == null) {
-            return null;
-        }
-        if (owner.getLegalName() != null && !owner.getLegalName().isBlank()) {
-            return owner.getLegalName();
-        }
-        String nome = ((owner.getFirstName() != null ? owner.getFirstName() : "") + " "
-                + (owner.getLastName() != null ? owner.getLastName() : "")).trim();
-        return nome.isEmpty() ? null : nome;
-    }
-
     /** "Cognome Nome" del proprietario; per le società la ragione sociale. */
     private String cognomeNomeOwner(OwnerProfile owner) {
         if (owner == null) {
@@ -382,21 +337,6 @@ public class DocumentPdfService {
         String nome = ((owner.getLastName() != null ? owner.getLastName() : "") + " "
                 + (owner.getFirstName() != null ? owner.getFirstName() : "")).trim();
         return nome.isEmpty() ? null : nome;
-    }
-
-    /** Seconda riga dell'indirizzo del tenant: "00100 Roma (RM)". null se manca tutto. */
-    private String capCitta(Tenant tenant) {
-        StringBuilder sb = new StringBuilder();
-        if (tenant.getCap() != null && !tenant.getCap().isBlank()) {
-            sb.append(tenant.getCap().trim());
-        }
-        if (tenant.getComune() != null && !tenant.getComune().isBlank()) {
-            sb.append(sb.length() > 0 ? " " : "").append(tenant.getComune().trim());
-        }
-        if (tenant.getProvincia() != null && !tenant.getProvincia().isBlank()) {
-            sb.append(sb.length() > 0 ? " " : "").append("(").append(tenant.getProvincia().trim()).append(")");
-        }
-        return sb.length() > 0 ? sb.toString() : null;
     }
 
     // ────────────────────────────── rendering ──────────────────────────────
