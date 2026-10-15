@@ -40,8 +40,10 @@ public class SpaController {
             "/tourist-tax",
             "/tourist-tax/**",
             "/documents",
+            "/documents/**",
             "/f24",
             "/settlements",
+            "/settlements/**",
             "/cu",
             "/audit",
             "/settings",
@@ -53,7 +55,10 @@ public class SpaController {
             "/owner/**",
             "/login",
             "/forgot-password",
-            "/reset-password"
+            "/reset-password",
+            "/change-password",
+            "/about",
+            "/guest/**"
     })
     public String forward() {
         log.debug("[SpaController] forward verso /index.html");
