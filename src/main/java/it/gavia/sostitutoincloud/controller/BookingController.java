@@ -8,6 +8,7 @@ import it.gavia.sostitutoincloud.dto.booking.BookingPageDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingVoceExtraDTO;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
+import it.gavia.sostitutoincloud.dto.email.InviaDocumentiDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportConfirmDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportResultDTO;
@@ -15,6 +16,7 @@ import it.gavia.sostitutoincloud.dto.importing.ImportPreviewV2RequestDTO;
 import it.gavia.sostitutoincloud.dto.importing.ImportUploadResponseDTO;
 import it.gavia.sostitutoincloud.service.BookingImportService;
 import it.gavia.sostitutoincloud.service.BookingService;
+import it.gavia.sostitutoincloud.service.EmailService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -34,10 +36,13 @@ public class BookingController {
 
     private final BookingService bookingService;
     private final BookingImportService bookingImportService;
+    private final EmailService emailService;
 
-    public BookingController(BookingService bookingService, BookingImportService bookingImportService) {
+    public BookingController(BookingService bookingService, BookingImportService bookingImportService,
+                             EmailService emailService) {
         this.bookingService = bookingService;
         this.bookingImportService = bookingImportService;
+        this.emailService = emailService;
     }
 
     @PostMapping("/import")
@@ -158,6 +163,30 @@ public class BookingController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException | java.time.format.DateTimeParseException e) {
             return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Invio via email di fattura PM + ricevuta owner (PDF allegati).
+     * 200 {"message"}, 400 dati mancanti o documenti non della prenotazione, 500 errore SMTP.
+     */
+    @PostMapping("/{id}/invia-documenti")
+    public ResponseEntity<?> inviaDocumenti(@PathVariable Integer id, @RequestBody InviaDocumentiDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("BookingController.inviaDocumenti() - tenantId={} bookingId={} fatturaId={} ricevutaId={}",
+                tenantId, id, dto.getFatturaId(), dto.getRicevutaId());
+        try {
+            emailService.inviaDocumenti(tenantId, id, dto.getDestinatari(), dto.getOggetto(), dto.getTesto(),
+                    dto.getFatturaId(), dto.getRicevutaId());
+            return ResponseEntity.ok(java.util.Map.of("message", "Email inviata a " + dto.getDestinatari().trim()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", e.getMessage()));
+        } catch (jakarta.mail.MessagingException | org.springframework.mail.MailException e) {
+            log.error("BookingController.inviaDocumenti() - invio fallito bookingId={}: {}", id, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(java.util.Map.of("error", "Invio email fallito: " + e.getMessage()));
         }
     }
 

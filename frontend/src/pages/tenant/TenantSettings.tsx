@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import ComuneAutocomplete from '../../components/ComuneAutocomplete';
@@ -468,6 +469,18 @@ const TenantSettings = () => {
                   </select>
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="emailTestoPredefinito">Testo email documenti</Label>
+                <p className="text-xs text-muted-foreground">
+                  Testo predefinito per l'invio della fattura PM e della ricevuta all'ospite. Editabile prima di ogni invio.
+                </p>
+                <Textarea
+                  id="emailTestoPredefinito"
+                  defaultValue={settings.emailTestoPredefinito ?? ''}
+                  rows={8}
+                  placeholder={"Gentile ospite,\nin allegato trova i documenti relativi al suo soggiorno..."}
+                />
+              </div>
               <div className="flex justify-end">
                 <Button disabled={saving} onClick={() => {
                   const pageSize = parseInt((document.getElementById('pageSize') as HTMLInputElement).value);
@@ -480,6 +493,8 @@ const TenantSettings = () => {
                     pageSize,
                     // 0 = nessun canale default (null nel DTO significherebbe "non modificare")
                     fkCanaleOtaDefaultId: parseInt((document.getElementById('fkCanaleOtaDefaultId') as HTMLSelectElement).value) || 0,
+                    // Stringa vuota = rimuovi il testo (null nel DTO significherebbe "non modificare")
+                    emailTestoPredefinito: (document.getElementById('emailTestoPredefinito') as HTMLTextAreaElement).value,
                   });
                 }}>
                   {saving ? 'Salvataggio...' : 'Salva Configurazione'}

@@ -22,6 +22,7 @@ import it.gavia.sostitutoincloud.model.CanaleOta;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
+import it.gavia.sostitutoincloud.util.EmailUtils;
 import it.gavia.sostitutoincloud.util.ExcelCellUtils;
 import it.gavia.sostitutoincloud.util.NazioneUtils;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
@@ -150,7 +151,13 @@ public class BookingImportService {
             Map.entry("prezzo", "IMPORTO_TOTALE"),
             Map.entry("importo commissione", "COMMISSIONE"),
             Map.entry("nome ospite(i)", "CLIENTE_NOME"),
-            Map.entry("nome ospite", "CLIENTE_NOME")
+            Map.entry("nome ospite", "CLIENTE_NOME"),
+            // Recapiti ospite. Le chiavi sono già normalizzate (minuscolo): "Email" = "email".
+            Map.entry("email", "EMAIL"),
+            Map.entry("e-mail", "EMAIL"),
+            Map.entry("mail", "EMAIL"),
+            Map.entry("telefono", "TELEFONO"),
+            Map.entry("phone", "TELEFONO")
     ));
 
     /** Copia ordinata per lunghezza chiave decrescente (a parità, alfabetica: ordine stabile). */
@@ -197,7 +204,10 @@ public class BookingImportService {
             Map.entry("cf", "CODICE_FISCALE"),
             Map.entry("indirizzo", "INDIRIZZO"),
             Map.entry("telefono", "TELEFONO"),
-            Map.entry("phone", "TELEFONO")
+            Map.entry("phone", "TELEFONO"),
+            Map.entry("email", "EMAIL"),
+            Map.entry("e-mail", "EMAIL"),
+            Map.entry("mail", "EMAIL")
     ));
 
     public BookingImportPreviewDTO preview(Integer tenantId, MultipartFile file) throws IOException, CsvException {
@@ -409,6 +419,7 @@ public class BookingImportService {
                         .guestCountry(row.getGuestCountry())
                         .guestAddress(row.getGuestAddress())
                         .guestPhone(row.getGuestPhone())
+                        .guestEmail(EmailUtils.normalizza(row.getGuestEmail()))
                         .checkinDate(row.getCheckinDate())
                         .checkoutDate(row.getCheckoutDate())
                         .nights(row.getNights())
@@ -605,6 +616,7 @@ public class BookingImportService {
                             .codiceFiscale(mapVal(gRow, gMap, "CODICE_FISCALE"))
                             .indirizzo(mapVal(gRow, gMap, "INDIRIZZO"))
                             .telefono(mapVal(gRow, gMap, "TELEFONO"))
+                            .email(mapVal(gRow, gMap, "EMAIL"))
                             .build());
                 }
             }
@@ -759,7 +771,13 @@ public class BookingImportService {
             String dataNascita   = guest != null ? guest.getBirthDate()  : null;
             String numDocumento  = guest != null ? guest.getDocNumber()  : null;
             String indirizzo     = guest != null ? guest.getIndirizzo()  : null;
-            String telefono      = guest != null ? guest.getTelefono()   : null;
+            // Telefono: quello del file ospiti ha la precedenza, altrimenti quello del file prenotazioni.
+            String telefono      = guest != null && !blank(guest.getTelefono())
+                    ? guest.getTelefono() : nullSeBlank(mapVal(row, bMap, "TELEFONO"));
+            // Email: quella del file prenotazioni, più quella del file ospiti se diversa (separate da ;).
+            String email         = EmailUtils.unisci(
+                    EmailUtils.normalizza(mapVal(row, bMap, "EMAIL")),
+                    guest != null ? EmailUtils.normalizza(guest.getEmail()) : null);
 
             // CF ospite: il valore presente nel file ha la precedenza sul calcolo.
             String cfOspite = null;
@@ -828,6 +846,7 @@ public class BookingImportService {
                     .guestCountry(guest != null ? guest.getCountry() : null)
                     .guestAddress(indirizzo)
                     .guestPhone(telefono)
+                    .guestEmail(email)
                     .checkinDate(checkin)
                     .checkoutDate(checkout)
                     .nights(nights)
@@ -1118,6 +1137,8 @@ public class BookingImportService {
 
     private boolean blank(String s) { return s == null || s.isBlank(); }
 
+    private String nullSeBlank(String s) { return blank(s) ? null : s.trim(); }
+
     private String orEmpty(String s) { return s != null ? s : ""; }
 
     @lombok.Data
@@ -1134,6 +1155,7 @@ public class BookingImportService {
         private String codiceFiscale;
         private String indirizzo;
         private String telefono;
+        private String email;
     }
 
     // ── parsing helpers ──────────────────────────────────────────────────────

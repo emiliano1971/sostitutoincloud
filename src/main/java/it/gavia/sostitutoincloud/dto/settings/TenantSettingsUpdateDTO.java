@@ -62,4 +62,7 @@ public class TenantSettingsUpdateDTO {
 
     // Dimensione pagina delle liste paginate (10..200); null = non modificare
     private Integer pageSize;
+
+    // Testo predefinito dell'email di invio documenti; null = non modificare, "" = svuota
+    private String emailTestoPredefinito;
 }

@@ -19,4 +19,6 @@ public class GuestUpdateDTO {
     private String guestCountry;
     private String guestAddress;
     private String guestPhone;
+    /** Più indirizzi separati da ; — stringa vuota = rimuovi. */
+    private String guestEmail;
 }

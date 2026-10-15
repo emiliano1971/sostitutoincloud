@@ -44,6 +44,8 @@ export interface TenantSettingsDTO {
   codiceTributoCreditoImposta?: string;
   /** Dimensione pagina delle liste paginate (10..200, default 50). */
   pageSize?: number;
+  /** Testo predefinito dell'email di invio documenti (in scrittura "" = svuota). */
+  emailTestoPredefinito?: string | null;
 }
 
 export async function getSettings(): Promise<TenantSettingsDTO> {

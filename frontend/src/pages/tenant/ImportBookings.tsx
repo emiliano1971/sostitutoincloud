@@ -70,6 +70,8 @@ const BOOKING_FIELDS: FieldDef[] = [
   { key: 'STATO',          label: 'Stato' },
   { key: 'CLIENTE_NOME',   label: 'Cliente nome' },
   { key: 'CLIENTE_COGNOME',label: 'Cliente cognome' },
+  { key: 'EMAIL',          label: 'Email ospite' },
+  { key: 'TELEFONO',       label: 'Telefono ospite' },
 ];
 
 const GUEST_FIELDS: FieldDef[] = [
@@ -85,6 +87,7 @@ const GUEST_FIELDS: FieldDef[] = [
   { key: 'CODICE_FISCALE', label: 'Codice Fiscale' },
   { key: 'INDIRIZZO',      label: 'Indirizzo' },
   { key: 'TELEFONO',       label: 'Telefono' },
+  { key: 'EMAIL',          label: 'Email' },
 ];
 
 const ImportBookings = () => {

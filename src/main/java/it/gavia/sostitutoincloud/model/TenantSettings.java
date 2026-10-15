@@ -59,6 +59,9 @@ public class TenantSettings {
     // Dimensione pagina delle liste paginate (migration 028, default 50)
     private Integer pageSize;
 
+    // Testo predefinito dell'email di invio documenti (migration 031)
+    private String emailTestoPredefinito;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

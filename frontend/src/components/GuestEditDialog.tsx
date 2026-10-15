@@ -24,6 +24,7 @@ interface GuestData {
   guestCountry?: string;
   guestAddress?: string;
   guestPhone?: string;
+  guestEmail?: string;
 }
 
 interface GuestEditDialogProps {
@@ -46,6 +47,7 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
   const [docNumber, setDocNumber] = useState(guest.guestDocNumber ?? '');
   const [indirizzo, setIndirizzo] = useState(guest.guestAddress ?? '');
   const [telefono, setTelefono] = useState(guest.guestPhone ?? '');
+  const [email, setEmail] = useState(guest.guestEmail ?? '');
   // Considera straniero tutto ciò che non è esplicitamente Italia (100000100)
   // o le stringhe legacy 'Italia'/'italy'
   const isItalia = (c?: string) =>
@@ -117,6 +119,8 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
             : nazione,
         guestAddress: indirizzo.trim() || undefined,
         guestPhone: telefono.trim() || undefined,
+        // Stringa vuota (e non undefined): svuotare il campo rimuove l'email salvata.
+        guestEmail: email.trim(),
       };
       const updated = await updateBookingGuest(bookingId, payload);
       toast({ title: 'Dati ospite aggiornati' });
@@ -209,6 +213,17 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
               <Label className="text-xs">Telefono</Label>
               <Input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="+39 …" />
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Email ospite</Label>
+            <Input
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="email1@example.com;email2@example.com"
+              type="text"
+            />
+            <p className="text-xs text-muted-foreground">Più indirizzi separati da ;</p>
           </div>
 
           <div className="space-y-1">

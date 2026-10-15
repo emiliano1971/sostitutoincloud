@@ -42,6 +42,7 @@ import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.model.Tenant;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
+import it.gavia.sostitutoincloud.util.EmailUtils;
 import it.gavia.sostitutoincloud.util.NazioneUtils;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import it.gavia.sostitutoincloud.util.TenantAddressUtils;
@@ -343,6 +344,10 @@ public class BookingService {
         String guestCountry = merge(dto.getGuestCountry(), existing.getGuestCountry());
         String guestAddress = merge(dto.getGuestAddress(), existing.getGuestAddress());
         String guestPhone = merge(dto.getGuestPhone(), existing.getGuestPhone());
+        // Email: a differenza degli altri campi una stringa vuota la rimuove (null = invariata).
+        String guestEmail = dto.getGuestEmail() == null
+                ? existing.getGuestEmail()
+                : emptyToNull(EmailUtils.normalizza(dto.getGuestEmail()));
 
         // CF: se manca sia nel body sia a DB, prova a calcolarlo dai dati anagrafici già
         // mergiati (come nel flusso import). Un CF già presente non viene mai ricalcolato.
@@ -380,6 +385,7 @@ public class BookingService {
                 .guestCountry(guestCountry)
                 .guestAddress(guestAddress)
                 .guestPhone(guestPhone)
+                .guestEmail(guestEmail)
                 .build();
 
         log.info("BookingService.updateBookingGuest() - id={} merge completato", bookingId);
@@ -758,6 +764,7 @@ public class BookingService {
                 .guestCountry(emptyToNull(dto.getGuestCountry()))
                 .guestAddress(emptyToNull(dto.getGuestAddress()))
                 .guestPhone(emptyToNull(dto.getGuestPhone()))
+                .guestEmail(EmailUtils.normalizza(dto.getGuestEmail()))
                 // Colonne NOT NULL senza valore derivato: l'INSERT le scrive sempre,
                 // quindi il DEFAULT dello schema non entrerebbe mai in gioco.
                 .fkStatoPrenotazioneId(BookingDAO.STATO_IMPORTED)
@@ -1588,6 +1595,7 @@ public class BookingService {
                 .guestCountry(b.getGuestCountry())
                 .guestAddress(b.getGuestAddress())
                 .guestPhone(b.getGuestPhone())
+                .guestEmail(b.getGuestEmail())
                 .propertyName(prop != null ? prop.getDisplayName() : null)
                 .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)
@@ -1726,6 +1734,7 @@ public class BookingService {
                 .guestCountry(origine.getGuestCountry())
                 .guestAddress(origine.getGuestAddress())
                 .guestPhone(origine.getGuestPhone())
+                .guestEmail(origine.getGuestEmail())
                 .fkStatoPrenotazioneId(BookingDAO.STATO_IMPORTED)
                 .paymentStatus("pending")
                 .settlementStatus("pending")

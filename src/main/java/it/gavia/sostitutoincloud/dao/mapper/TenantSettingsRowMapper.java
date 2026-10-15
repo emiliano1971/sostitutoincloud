@@ -36,6 +36,7 @@ public class TenantSettingsRowMapper implements RowMapper<TenantSettings> {
                 .fkCanaleOtaDefaultId(rs.getObject("fk_canale_ota_default_id", Integer.class))
                 .codiceTributoCreditoImposta(rs.getString("codice_tributo_credito"))
                 .pageSize(rs.getInt("page_size"))
+                .emailTestoPredefinito(rs.getString("email_testo_predefinito"))
                 .createdAt(rs.getTimestamp("created_at") != null
                         ? rs.getTimestamp("created_at").toLocalDateTime() : null)
                 .updatedAt(rs.getTimestamp("updated_at") != null

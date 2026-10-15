@@ -39,6 +39,8 @@ public class Booking {
     private String guestCountry;
     private String guestAddress;
     private String guestPhone;
+    /** Email ospite, più indirizzi separati da ; (migration 031). */
+    private String guestEmail;
     // Somma delle righe booking_split_economico in fattura PM (migration 018)
     private BigDecimal totalCostiPm;
     private LocalDate checkinDate;

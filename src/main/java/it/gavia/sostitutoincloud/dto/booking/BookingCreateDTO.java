@@ -41,4 +41,5 @@ public class BookingCreateDTO {
     private String guestCountry;
     private String guestAddress;
     private String guestPhone;
+    private String guestEmail;           // opzionale — più indirizzi separati da ;
 }

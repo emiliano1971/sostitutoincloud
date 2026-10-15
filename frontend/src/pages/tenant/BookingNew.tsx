@@ -70,6 +70,7 @@ const BookingNew = () => {
   const [country, setCountry] = useState('100000100');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +123,7 @@ const BookingNew = () => {
         guestCountry: country,
         guestAddress: address.trim() || undefined,
         guestPhone: phone.trim() || undefined,
+        guestEmail: email.trim() || undefined,
       };
       const created = await createBooking(payload);
       toast({ title: 'Prenotazione creata', description: created.externalBookingId });
@@ -325,6 +327,12 @@ const BookingNew = () => {
                 <Label className="text-xs">Telefono</Label>
                 <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+39 …" />
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Email ospite</Label>
+              <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" type="text" />
+              <p className="text-xs text-muted-foreground">Più indirizzi separati da ;</p>
             </div>
 
             <div className="space-y-1">

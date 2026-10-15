@@ -37,7 +37,7 @@ public class BookingDAO {
             "SELECT b.id, b.fk_tenant_id, b.fk_property_id, b.fk_owner_id, b.fk_canale_ota_id, b.fk_regime_fiscale_id, b.fk_booking_origine_id, " +
             "b.external_booking_id, b.guest_name, b.guest_tax_code, " +
             "b.guest_birth_date, b.guest_sesso, b.guest_birth_place, b.guest_birth_belfiore, " +
-            "b.guest_doc_type, b.guest_doc_number, b.guest_country, b.guest_address, b.guest_phone, " +
+            "b.guest_doc_type, b.guest_doc_number, b.guest_country, b.guest_address, b.guest_phone, b.guest_email, " +
             "b.checkin_date, b.checkout_date, " +
             "b.nights, b.guests, b.gross_amount, b.ota_commission_amount, b.cleaning_amount, " +
             "b.pm_fee_amount, b.owner_net_amount, b.withholding_amount, b.aliquota_ritenuta, b.tourist_tax_amount, " +
@@ -140,13 +140,13 @@ public class BookingDAO {
                 "external_booking_id, guest_name, guest_tax_code, " +
                 // Anagrafica ospite: va scritta già in fase di import, non solo con updateGuestData().
                 "guest_birth_date, guest_sesso, guest_birth_place, guest_birth_belfiore, " +
-                "guest_doc_type, guest_doc_number, guest_country, guest_address, guest_phone, " +
+                "guest_doc_type, guest_doc_number, guest_country, guest_address, guest_phone, guest_email, " +
                 "checkin_date, checkout_date, nights, guests, " +
                 "gross_amount, ota_commission_amount, cleaning_amount, pm_fee_amount, " +
                 "owner_net_amount, withholding_amount, aliquota_ritenuta, tourist_tax_amount, " +
                 "tourist_tax_included_in_gross, tourist_tax_collection, " +
                 "fk_stato_prenotazione_id, payment_status, settlement_status" +
-                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
             PreparedStatement ps = con.prepareStatement(sql, new String[]{"id"});
@@ -167,23 +167,24 @@ public class BookingDAO {
             ps.setObject(15, booking.getGuestCountry());
             ps.setObject(16, booking.getGuestAddress());
             ps.setObject(17, booking.getGuestPhone());
-            ps.setObject(18, booking.getCheckinDate());
-            ps.setObject(19, booking.getCheckoutDate());
-            ps.setObject(20, booking.getNights());
-            ps.setObject(21, booking.getGuests());
-            ps.setObject(22, booking.getGrossAmount());
-            ps.setObject(23, booking.getOtaCommissionAmount());
-            ps.setObject(24, booking.getCleaningAmount());
-            ps.setObject(25, booking.getPmFeeAmount());
-            ps.setObject(26, booking.getOwnerNetAmount());
-            ps.setObject(27, booking.getWithholdingAmount());
-            ps.setObject(28, booking.getAliquotaRitenuta());
-            ps.setObject(29, booking.getTouristTaxAmount());
-            ps.setBoolean(30, Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()));
-            ps.setObject(31, booking.getTouristTaxCollection(), Types.OTHER);
-            ps.setObject(32, booking.getFkStatoPrenotazioneId());
-            ps.setObject(33, booking.getPaymentStatus(), Types.OTHER);
-            ps.setObject(34, booking.getSettlementStatus(), Types.OTHER);
+            ps.setObject(18, booking.getGuestEmail());
+            ps.setObject(19, booking.getCheckinDate());
+            ps.setObject(20, booking.getCheckoutDate());
+            ps.setObject(21, booking.getNights());
+            ps.setObject(22, booking.getGuests());
+            ps.setObject(23, booking.getGrossAmount());
+            ps.setObject(24, booking.getOtaCommissionAmount());
+            ps.setObject(25, booking.getCleaningAmount());
+            ps.setObject(26, booking.getPmFeeAmount());
+            ps.setObject(27, booking.getOwnerNetAmount());
+            ps.setObject(28, booking.getWithholdingAmount());
+            ps.setObject(29, booking.getAliquotaRitenuta());
+            ps.setObject(30, booking.getTouristTaxAmount());
+            ps.setBoolean(31, Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()));
+            ps.setObject(32, booking.getTouristTaxCollection(), Types.OTHER);
+            ps.setObject(33, booking.getFkStatoPrenotazioneId());
+            ps.setObject(34, booking.getPaymentStatus(), Types.OTHER);
+            ps.setObject(35, booking.getSettlementStatus(), Types.OTHER);
             return ps;
         }, keyHolder);
         Integer id = keyHolder.getKey().intValue();
@@ -267,13 +268,13 @@ public class BookingDAO {
         String sql = "UPDATE booking SET guest_name = ?, guest_tax_code = ?, guest_birth_date = ?, " +
                 "guest_sesso = ?, guest_birth_place = ?, guest_birth_belfiore = ?, " +
                 "guest_doc_type = ?, guest_doc_number = ?, guest_country = ?, " +
-                "guest_address = ?, guest_phone = ?, updated_at = NOW() " +
+                "guest_address = ?, guest_phone = ?, guest_email = ?, updated_at = NOW() " +
                 "WHERE id = ? AND fk_tenant_id = ?";
         int updated = jdbcTemplate.update(sql,
                 g.getGuestName(), g.getGuestTaxCode(), g.getGuestBirthDate(),
                 g.getGuestSesso(), g.getGuestBirthPlace(), g.getGuestBirthBelfiore(),
                 g.getGuestDocType(), g.getGuestDocNumber(), g.getGuestCountry(),
-                g.getGuestAddress(), g.getGuestPhone(),
+                g.getGuestAddress(), g.getGuestPhone(), g.getGuestEmail(),
                 bookingId, tenantId);
         log.info("BookingDAO.updateGuestAnagrafica() - bookingId={} tenantId={} updated={}", bookingId, tenantId, updated);
         return updated;

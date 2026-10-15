@@ -549,6 +549,8 @@ CREATE TABLE booking (
     -- Recapiti ospite (migration 013), mappabili dal file ospiti in import
     guest_address                   VARCHAR(200),
     guest_phone                     VARCHAR(30),
+    -- migration 031: email ospite, più indirizzi separati da ;
+    guest_email                     VARCHAR(500),
     checkin_date                    DATE                    NOT NULL,
     checkout_date                   DATE                    NOT NULL,
     nights                          SMALLINT                NOT NULL,
@@ -590,6 +592,10 @@ COMMENT ON TABLE booking IS
 CREATE TRIGGER trg_booking_updated_at
     BEFORE UPDATE ON booking
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON COLUMN booking.guest_email IS
+    'Email ospite, più indirizzi separati da punto e virgola. '
+    'Importata dal file prenotazioni o inserita manualmente.';
 
 COMMENT ON COLUMN booking.total_costi_pm IS
     'Somma delle voci booking_split_economico '
@@ -1243,6 +1249,8 @@ CREATE TABLE tenant_settings (
     codice_tributo_credito      VARCHAR(10)     NOT NULL DEFAULT '6782',
     -- migration 028: dimensione pagina delle liste paginate (documenti, booking ecc.)
     page_size                   INTEGER         NOT NULL DEFAULT 50,
+    -- migration 031: testo predefinito dell'email di invio documenti
+    email_testo_predefinito     TEXT,
     created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at                  TIMESTAMP       NOT NULL DEFAULT NOW()
 );
@@ -1255,6 +1263,9 @@ COMMENT ON COLUMN tenant_settings.fk_canale_ota_default_id IS
     'NULL = nessun canale default configurato.';
 COMMENT ON COLUMN tenant_settings.page_size IS
     'Dimensione pagina per le liste paginate (documenti, booking ecc.). Default 50.';
+COMMENT ON COLUMN tenant_settings.email_testo_predefinito IS
+    'Testo predefinito per l email di invio documenti fiscali '
+    '(fattura PM e ricevuta owner). Editabile prima dell invio.';
 
 CREATE TRIGGER trg_tenant_settings_updated_at
     BEFORE UPDATE ON tenant_settings

@@ -163,6 +163,10 @@ public class TenantSettingsService {
                                 ? dto.getCodiceTributoCreditoImposta().trim()
                                 : existing.getCodiceTributoCreditoImposta())
                 .pageSize(validaPageSize(dto.getPageSize(), existing.getPageSize()))
+                // null = non modificare; stringa vuota = rimuovi il testo predefinito
+                .emailTestoPredefinito(dto.getEmailTestoPredefinito() == null
+                        ? existing.getEmailTestoPredefinito()
+                        : dto.getEmailTestoPredefinito().isBlank() ? null : dto.getEmailTestoPredefinito())
                 .build();
 
         TenantSettings saved = tenantSettingsDAO.save(updated);
@@ -250,6 +254,7 @@ public class TenantSettingsService {
                 .fkCanaleOtaDefaultId(s.getFkCanaleOtaDefaultId())
                 .codiceTributoCreditoImposta(s.getCodiceTributoCreditoImposta())
                 .pageSize(s.getPageSize())
+                .emailTestoPredefinito(s.getEmailTestoPredefinito())
                 .build();
     }
 

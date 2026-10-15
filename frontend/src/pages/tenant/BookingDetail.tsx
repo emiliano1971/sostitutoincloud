@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Copy, FileDown } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Copy, FileDown, Mail, Phone, Send } from 'lucide-react';
 import { getContractRules, type ContractRule } from '@/api/contractApi';
 import { cn } from '@/lib/utils';
 import GuestEditDialog from '@/components/GuestEditDialog';
@@ -18,6 +20,7 @@ import {
   aggiornaVoceExtra,
   eliminaVoceExtra,
   copiaBooking,
+  inviaDocumenti,
   type BookingSplitRiga,
   type BookingDetail as BookingDetailType,
   type BookingUpdateSplitRequest,
@@ -325,6 +328,12 @@ const BookingDetail = () => {
   const [editingRigaId, setEditingRigaId] = useState<number | null>(null);
   // Il PM inserisce l'imponibile (netto): il lordo lo calcola il backend
   const [voceForm, setVoceForm] = useState({ descrizione: '', imponibile: '', includeInFatturaPm: true });
+  // Box "Invia Documenti": email con fattura PM + ricevuta owner allegate
+  const [showInvioEmail, setShowInvioEmail] = useState(false);
+  const [emailDest, setEmailDest] = useState('');
+  const [emailOggetto, setEmailOggetto] = useState('');
+  const [emailTesto, setEmailTesto] = useState('');
+  const [inviando, setInviando] = useState(false);
 
   // Booking stornato con NDC totale: la copia riparte dai dati originali con split ricalcolato
   const handleCopia = async () => {
@@ -861,6 +870,49 @@ const BookingDetail = () => {
         && d.statoDocumento !== 'annullata')
     : undefined;
 
+  // Invio email: fattura PM non annullata né stornata da NDC, ricevuta non annullata,
+  // prenotazione non stornata.
+  const puoInviare = !!existingInvoice
+    && existingInvoice.statoDocumento !== 'annullata'
+    && !ndcAttiva
+    && booking.statoPrenotazione !== 'stornata'
+    && !!existingReceipt
+    && existingReceipt.statoDocumento !== 'annullata';
+
+  // All'apertura del box: destinatari dall'email ospite, testo dalle impostazioni, oggetto vuoto
+  const toggleInvioEmail = () => {
+    if (!showInvioEmail) {
+      setEmailDest(booking.guestEmail ?? '');
+      setEmailTesto(tenantSettings?.emailTestoPredefinito ?? '');
+      setEmailOggetto('');
+    }
+    setShowInvioEmail(!showInvioEmail);
+  };
+
+  const handleInviaEmail = async () => {
+    if (!existingInvoice || !existingReceipt) return;
+    setInviando(true);
+    try {
+      await inviaDocumenti(booking.id, {
+        destinatari: emailDest,
+        oggetto: emailOggetto,
+        testo: emailTesto,
+        fatturaId: existingInvoice.id,
+        ricevutaId: existingReceipt.id,
+      });
+      toast({ title: 'Email inviata', description: `Documenti inviati a ${emailDest}` });
+      setShowInvioEmail(false);
+    } catch (e) {
+      toast({
+        title: 'Errore invio email',
+        description: e instanceof Error ? e.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setInviando(false);
+    }
+  };
+
   // Dati reali dal backend per i dialog (sostituiscono i mock hardcoded)
   const dialogOwner = {
     tax_code: booking.ownerTaxCode ?? '',
@@ -953,6 +1005,18 @@ const BookingDetail = () => {
               )}
               {(booking.guestDocType || booking.guestDocNumber) && (
                 <div className="flex justify-between"><span className="text-muted-foreground">Documento</span><span>{[booking.guestDocType?.replace('_', ' '), booking.guestDocNumber].filter(Boolean).join(' · ')}</span></div>
+              )}
+              {booking.guestEmail && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="text-xs break-all">{booking.guestEmail}</span>
+                </div>
+              )}
+              {booking.guestPhone && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="text-xs">{booking.guestPhone}</span>
+                </div>
               )}
               {datiFatturazioneMancanti ? (
                 <Badge variant="outline" className="mt-1 text-xs text-orange-600 border-orange-300">
@@ -1337,6 +1401,63 @@ const BookingDetail = () => {
         </Card>
       </div>
 
+      {puoInviare && existingInvoice && existingReceipt && (
+        <Card>
+          <CardHeader className="pb-2 cursor-pointer" onClick={toggleInvioEmail}>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Send className="h-4 w-4" />
+              Invia Documenti
+              <ChevronDown className={cn('h-4 w-4 ml-auto transition-transform', showInvioEmail && 'rotate-180')} />
+            </CardTitle>
+          </CardHeader>
+          {showInvioEmail && (
+            <CardContent className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Destinatario *</Label>
+                <Input
+                  value={emailDest}
+                  onChange={e => setEmailDest(e.target.value)}
+                  placeholder="email@example.com"
+                  className="text-sm"
+                />
+                <p className="text-xs text-muted-foreground">Più indirizzi separati da ;</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Oggetto *</Label>
+                <Input
+                  value={emailOggetto}
+                  onChange={e => setEmailOggetto(e.target.value)}
+                  placeholder={`Documenti prenotazione ${booking.externalBookingId}`}
+                  className="text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Testo</Label>
+                <Textarea
+                  value={emailTesto}
+                  onChange={e => setEmailTesto(e.target.value)}
+                  rows={6}
+                  className="text-sm"
+                />
+              </div>
+              <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-3">
+                <span>Allegati:</span>
+                <span className="flex items-center gap-1"><FileText className="h-3.5 w-3.5" />{existingInvoice.documentNumber}</span>
+                <span className="flex items-center gap-1"><ReceiptText className="h-3.5 w-3.5" />{existingReceipt.documentNumber}</span>
+              </div>
+              <Button
+                onClick={handleInviaEmail}
+                disabled={inviando || !emailDest.trim() || !emailOggetto.trim()}
+                className="w-full"
+                size="sm"
+              >
+                {inviando ? 'Invio in corso...' : 'Invia Email'}
+              </Button>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
       {/* Action Buttons */}
       <div className="flex flex-wrap gap-3">
         <InvoicePMDialog
@@ -1400,6 +1521,7 @@ const BookingDetail = () => {
             guestCountry: booking.guestCountry,
             guestAddress: booking.guestAddress,
             guestPhone: booking.guestPhone,
+            guestEmail: booking.guestEmail,
           }}
           onSaved={(updated) => setBooking(updated)}
         />

@@ -64,4 +64,7 @@ public class TenantSettingsDTO {
 
     // Dimensione pagina delle liste paginate (documenti, ...)
     private Integer pageSize;
+
+    // Testo predefinito dell'email di invio documenti (fattura PM + ricevuta)
+    private String emailTestoPredefinito;
 }

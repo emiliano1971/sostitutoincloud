@@ -33,6 +33,7 @@ public class BookingDetailDTO {
     private String guestCountry;
     private String guestAddress;
     private String guestPhone;
+    private String guestEmail;
     private String propertyName;
     private String ownerName;
     private String channelName;

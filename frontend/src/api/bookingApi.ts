@@ -110,6 +110,8 @@ export interface BookingDetail extends BookingListItem {
   guestCountry?: string;
   guestAddress?: string;
   guestPhone?: string;
+  /** Email ospite, più indirizzi separati da ; */
+  guestEmail?: string;
   regimeFiscaleCodice?: string;
   otaCommissionAmount?: number;
   cleaningAmount?: number;
@@ -274,6 +276,8 @@ export interface BookingCreateRequest {
   guestCountry?: string;
   guestAddress?: string;
   guestPhone?: string;
+  /** Più indirizzi separati da ; */
+  guestEmail?: string;
 }
 
 /** Inserimento manuale. Split economico, ritenuta e stato sono calcolati dal backend. */
@@ -293,10 +297,20 @@ export interface GuestUpdateRequest {
   guestCountry?: string;
   guestAddress?: string;
   guestPhone?: string;
+  /** Più indirizzi separati da ; — stringa vuota = rimuovi, assente = invariata. */
+  guestEmail?: string;
 }
 
 export async function updateBookingGuest(id: number, data: GuestUpdateRequest): Promise<BookingDetail> {
   return patch<BookingDetail>(`/bookings/${id}/guest`, data);
+}
+
+/** Invio via email di fattura PM + ricevuta owner come allegati PDF. */
+export async function inviaDocumenti(
+  bookingId: number,
+  data: { destinatari: string; oggetto: string; testo: string; fatturaId: number; ricevutaId: number },
+): Promise<{ message: string }> {
+  return post<{ message: string }>(`/bookings/${bookingId}/invia-documenti`, data);
 }
 
 export interface BookingUpdateSplitRequest {
