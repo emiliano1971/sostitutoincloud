@@ -21,6 +21,18 @@ RUN mvn dependency:go-offline -q
 # Copia il progetto (vedi .dockerignore per le esclusioni)
 COPY . .
 
+ARG GIT_COMMIT=dev
+ARG GIT_DATE=dev
+
+RUN if [ "$GIT_COMMIT" != "dev" ]; then \
+      printf 'git.commit.id.abbrev=%s\ngit.commit.time=%s\n' \
+        "$GIT_COMMIT" "$GIT_DATE" \
+        > src/main/resources/git.properties; \
+      echo "git.properties scritto: $GIT_COMMIT $GIT_DATE"; \
+    else \
+      echo "GIT_COMMIT non passato, versione resterà dev"; \
+    fi
+
 # Build con profilo da ARG. Il profilo test/prod:
 #  - builda il frontend React (npm) con base path / (prod) o /sostitutoincloud/ (test)
 #  - copia frontend/dist → target/classes/static/
