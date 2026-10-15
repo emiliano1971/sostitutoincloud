@@ -9,7 +9,7 @@ ARG MAVEN_PROFILE=prod
 
 # Node.js 18 — richiesto dai profili test/prod del pom
 # (exec-maven-plugin esegue npm install + npm run build)
-RUN apt-get update && apt-get install -y curl && \
+RUN apt-get update && apt-get install -y curl git && \
     curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
     apt-get install -y nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
