@@ -21,7 +21,7 @@ import java.util.NoSuchElementException;
  * @Profile non è valutato sui singoli metodi handler, va sulla classe/bean.
  */
 @Log4j2
-@Profile({"local", "test"})
+@Profile({"local", "test", "prod"})
 @RestController
 @RequestMapping("/api/bookings")
 public class BookingDevController {
