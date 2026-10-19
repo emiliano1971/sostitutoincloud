@@ -6,13 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, AlertTriangle, Loader2, X, Settings2, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   uploadImportFiles, previewImportV2, confirmImport,
   getImportTemplates, saveImportTemplate,
-  type ImportUploadResponse, type ImportPreview, type ImportResult, type ImportTemplate,
+  type ImportUploadResponse, type ImportPreview, type ImportPreviewRow, type ImportResult, type ImportTemplate,
 } from '@/api/importApi';
 import TemplateManagerDialog from '@/components/TemplateManagerDialog';
 import QuickContractDialog from '@/components/QuickContractDialog';
@@ -53,6 +54,10 @@ const StepNav = ({ onBack, onNext, nextLabel = 'Avanti', nextDisabled, nextTitle
   </div>
 );
 
+// Nazione ospite (codici del file ospiti): 100000100 = Italia, qualsiasi altro valore = estero
+const isItaliano = (country?: string) => country === '100000100';
+const isEstero = (country?: string) => country != null && country !== '' && country !== '100000100';
+
 interface FieldDef { key: string; label: string; required?: boolean; }
 
 const BOOKING_FIELDS: FieldDef[] = [
@@ -67,11 +72,13 @@ const BOOKING_FIELDS: FieldDef[] = [
   { key: 'BAMBINI',        label: 'Bambini' },
   { key: 'NEONATI',        label: 'Neonati' },
   { key: 'COMMISSIONE',    label: 'Commissione canale' },
-  { key: 'STATO',          label: 'Stato' },
+  { key: 'STATO',          label: 'Stato prenotazione' },
   { key: 'CLIENTE_NOME',   label: 'Cliente nome' },
   { key: 'CLIENTE_COGNOME',label: 'Cliente cognome' },
   { key: 'EMAIL',          label: 'Email ospite' },
   { key: 'TELEFONO',       label: 'Telefono ospite' },
+  // Paese di provenienza dell'ospite (es. Italia, Francia): usato se il file ospiti non ha la nazione
+  { key: 'PAESE',          label: 'Nazione ospite' },
 ];
 
 const GUEST_FIELDS: FieldDef[] = [
@@ -125,6 +132,8 @@ const ImportBookings = () => {
   // Step 2/3
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  // Nazione forzata dall'utente per riga (chiave = rowNumber), inviata alla conferma
+  const [forzature, setForzature] = useState<Record<number, 'IT' | 'EST'>>({});
   const [isConfirming, setIsConfirming] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [contractDialogOpen, setContractDialogOpen] = useState(false);
@@ -242,6 +251,7 @@ const ImportBookings = () => {
         },
       });
       setPreview(prev);
+      setForzature({});
       // Pre-seleziona tutte le righe importabili (stato 'nuova')
       setSelectedRows(new Set(prev.rows.filter(r => r.status === 'nuova').map(r => r.rowNumber)));
       setStep(2);
@@ -267,11 +277,58 @@ const ImportBookings = () => {
   const selezionaTutte = () => setSelectedRows(new Set(nuoveRows.map(r => r.rowNumber)));
   const deselezionaTutte = () => setSelectedRows(new Set());
 
+  // Forzatura nazione sulle righe selezionate: nazione e CF vengono applicati alla conferma
+  const forzaNazione = (tipo: 'IT' | 'EST') => {
+    const nuove = { ...forzature };
+    selectedRows.forEach(rowNum => { nuove[rowNum] = tipo; });
+    setForzature(nuove);
+  };
+  const handleForzaItaliano = () => forzaNazione('IT');
+  const handleForzaEstero = () => forzaNazione('EST');
+
+  const getCountryEffettivo = (row: ImportPreviewRow) => {
+    const f = forzature[row.rowNumber];
+    if (f === 'IT') return '100000100';
+    if (f === 'EST') return '999999999';
+    return row.guestCountry;
+  };
+
+  // CF che verrà sostituito alla conferma per effetto della forzatura
+  const cfDaRicalcolare = (row: ImportPreviewRow) => {
+    const f = forzature[row.rowNumber];
+    const cf = row.guestTaxCode ?? '';
+    if (f === 'IT') return !cf || cf.startsWith('EST');
+    if (f === 'EST') return !cf || (!cf.startsWith('EST') && cf.length === 16);
+    return false;
+  };
+
+  // Barra dell'anteprima, sopra e sotto la tabella: forzature a sinistra, navigazione a destra
+  const barraAnteprima = (className?: string) => (
+    <div className={cn('flex items-center justify-between gap-2 flex-wrap', className)}>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={handleForzaItaliano} disabled={selectedRows.size === 0}>
+          🇮🇹 Forza Italiano
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleForzaEstero} disabled={selectedRows.size === 0}>
+          🌍 Forza Estero
+        </Button>
+      </div>
+      <StepNav onBack={() => setStep(1)} onNext={() => setStep(3)}
+               nextLabel={`Conferma Import (${selectedRows.size} prenotazioni)`}
+               nextDisabled={selectedRows.size === 0}
+               nextTitle={selectedRows.size === 0 ? 'Seleziona almeno una prenotazione' : undefined} />
+    </div>
+  );
+
   const handleConfirm = async () => {
     if (!preview) return;
     setIsConfirming(true);
     try {
-      const res = await confirmImport(preview.importSessionId, [...selectedRows]);
+      // Solo le forzature delle righe effettivamente importate
+      const forzatureSelezionate = Object.entries(forzature)
+        .map(([rowNum, tipo]) => ({ rowNumber: parseInt(rowNum), tipo }))
+        .filter(f => selectedRows.has(f.rowNumber));
+      const res = await confirmImport(preview.importSessionId, [...selectedRows], forzatureSelezionate);
       setResult(res);
       setStep(4);
     } catch (err) {
@@ -289,6 +346,7 @@ const ImportBookings = () => {
     setBookingMapping({});
     setGuestMapping({});
     setPreview(null);
+    setForzature({});
     setResult(null);
     setUploadError(null);
     setSelectedTemplate(null);
@@ -586,10 +644,7 @@ const ImportBookings = () => {
       {/* Step 2: Anteprima */}
       {step === 2 && preview && (
         <div className="space-y-4">
-          <StepNav onBack={() => setStep(1)} onNext={() => setStep(3)}
-                   nextLabel={`Conferma Import (${selectedRows.size} prenotazioni)`}
-                   nextDisabled={selectedRows.size === 0}
-                   nextTitle={selectedRows.size === 0 ? 'Seleziona almeno una prenotazione' : undefined} />
+          {barraAnteprima()}
           <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -655,7 +710,8 @@ const ImportBookings = () => {
                     <TableHead>Canale</TableHead>
                     <TableHead>Check-in</TableHead>
                     <TableHead>Importo</TableHead>
-                    <TableHead>Stato</TableHead>
+                    <TableHead className="text-xs text-muted-foreground font-normal">Italiano</TableHead>
+                    <TableHead>Stato import</TableHead>
                     <TableHead>Warnings</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -679,7 +735,11 @@ const ImportBookings = () => {
                       <TableCell className="text-xs text-muted-foreground">{row.rowNumber}</TableCell>
                       <TableCell className="text-sm font-medium">{row.guestName}</TableCell>
                       <TableCell className="text-xs font-mono">
-                        {row.guestTaxCode
+                        {cfDaRicalcolare(row)
+                          ? <span className="text-muted-foreground font-sans italic">
+                              {forzature[row.rowNumber] === 'IT' ? 'calcolato alla conferma' : 'EST… alla conferma'}
+                            </span>
+                          : row.guestTaxCode
                           ? row.guestTaxCode
                           : <span className="text-muted-foreground">—</span>}
                       </TableCell>
@@ -688,6 +748,16 @@ const ImportBookings = () => {
                       <TableCell className="text-sm">{row.checkinDate}</TableCell>
                       <TableCell className="text-sm font-mono">
                         {row.grossAmount != null ? `€ ${row.grossAmount.toFixed(2)}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-center whitespace-nowrap">
+                        {isItaliano(getCountryEffettivo(row))
+                          ? <span className="text-sm">Sì 🇮🇹</span>
+                          : isEstero(getCountryEffettivo(row))
+                          ? <span className="text-sm">No 🌍</span>
+                          : <span className="text-xs text-muted-foreground">?</span>}
+                        {forzature[row.rowNumber] && (
+                          <Badge variant="outline" className="text-xs ml-1">forzato</Badge>
+                        )}
                       </TableCell>
                       <TableCell>{statusBadge(row.status, row.errorMessage ?? undefined)}</TableCell>
                       <TableCell className="text-xs">
@@ -729,10 +799,7 @@ const ImportBookings = () => {
               </Table>
             </div>
 
-            <StepNav onBack={() => setStep(1)} onNext={() => setStep(3)}
-                     nextLabel={`Conferma Import (${selectedRows.size} prenotazioni)`}
-                     nextDisabled={selectedRows.size === 0}
-                     nextTitle={selectedRows.size === 0 ? 'Seleziona almeno una prenotazione' : undefined} />
+            {barraAnteprima('mt-4')}
           </CardContent>
           </Card>
         </div>
@@ -750,6 +817,17 @@ const ImportBookings = () => {
               {preview.dupeCount > 0 && <> {preview.dupeCount} duplicate saranno ignorate.</>}
               {' '}Questa azione non può essere annullata.
             </p>
+            {(() => {
+              const forzate = Object.entries(forzature).filter(([n]) => selectedRows.has(parseInt(n)));
+              if (forzate.length === 0) return null;
+              const it = forzate.filter(([, t]) => t === 'IT').length;
+              return (
+                <p className="text-sm text-muted-foreground">
+                  Nazione forzata su {forzate.length} prenotazioni: {it} italiane, {forzate.length - it} estere
+                  (il codice fiscale viene ricalcolato o generato alla conferma).
+                </p>
+              );
+            })()}
           </CardContent>
           </Card>
           <StepNav onBack={() => setStep(2)} onNext={handleConfirm} nextLabel="Procedi" loading={isConfirming} />

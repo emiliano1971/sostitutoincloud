@@ -7,6 +7,8 @@ export interface ImportPreviewRow {
   externalBookingId: string;
   guestName: string;
   guestTaxCode?: string;
+  /** Codice nazione dal file ospiti (100000100 = Italia, 999999999 = straniero generico). */
+  guestCountry?: string;
   propertyCode: string;
   propertyName?: string;
   fkPropertyId?: number;
@@ -86,11 +88,18 @@ export async function uploadImportFile(file: File): Promise<ImportPreview> {
   return res.json();
 }
 
+/** Nazione forzata in anteprima su una riga: applicata a nazione e CF alla conferma. */
+export interface ForzaturaNazione {
+  rowNumber: number;
+  tipo: 'IT' | 'EST';
+}
+
 export async function confirmImport(
   importSessionId: string,
-  selectedRowNumbers: number[]
+  selectedRowNumbers: number[],
+  forzature: ForzaturaNazione[] = [],
 ): Promise<ImportResult> {
-  return post<ImportResult>('/bookings/import/confirm', { importSessionId, selectedRowNumbers });
+  return post<ImportResult>('/bookings/import/confirm', { importSessionId, selectedRowNumbers, forzature });
 }
 
 // ── Import V2: doppio file (prenotazioni + ospiti) + mapping colonne manuale ──

@@ -15,6 +15,7 @@ import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewRowDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportResultDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportRowDTO;
+import it.gavia.sostitutoincloud.dto.importing.ForzaturaNazione;
 import it.gavia.sostitutoincloud.dto.importing.ImportColumnMappingDTO;
 import it.gavia.sostitutoincloud.dto.importing.ImportUploadResponseDTO;
 import it.gavia.sostitutoincloud.model.Booking;
@@ -103,6 +104,12 @@ public class BookingImportService {
     }
 
     // ── campi di sistema import V2 ─────────────────────────────────────────
+    // Forzature nazione dall'anteprima import e codici nazione corrispondenti
+    private static final String FORZA_ITALIANO = "IT";
+    private static final String FORZA_ESTERO = "EST";
+    private static final String NAZIONE_ITALIA = "100000100";
+    private static final String NAZIONE_ESTERO_GENERICO = "999999999";
+
     private static final List<String> BOOKING_REQUIRED_FIELDS =
             List.of("BOOKING_ID", "ORIGINE", "STRUTTURA", "CHECKIN", "CHECKOUT", "IMPORTO_TOTALE");
 
@@ -157,7 +164,16 @@ public class BookingImportService {
             Map.entry("e-mail", "EMAIL"),
             Map.entry("mail", "EMAIL"),
             Map.entry("telefono", "TELEFONO"),
-            Map.entry("phone", "TELEFONO")
+            Map.entry("phone", "TELEFONO"),
+            // Nazione ospite (es. "Paese viaggiatore" AvaiBook, "Booker country" Booking.com):
+            // nome del paese in chiaro, usato solo se il file ospiti non dà la nazione.
+            Map.entry("paese viaggiatore", "PAESE"),
+            Map.entry("paese", "PAESE"),
+            Map.entry("nazione", "PAESE"),
+            Map.entry("nazione ospite", "PAESE"),
+            Map.entry("country", "PAESE"),
+            Map.entry("nazionalita", "PAESE"),
+            Map.entry("nazionalità", "PAESE")
     ));
 
     /** Copia ordinata per lunghezza chiave decrescente (a parità, alfabetica: ordine stabile). */
@@ -198,6 +214,10 @@ public class BookingImportService {
             Map.entry("n. documento", "NUM_DOCUMENTO"),
             Map.entry("nr documento", "NUM_DOCUMENTO"),
             Map.entry("nazione", "NAZIONE"),
+            // Nazionalità: usata se il file non ha la colonna "Nazione" (a parità, vince la colonna
+            // che viene prima nel file — negli export AvaiBook "Nazione" precede "Nazionalità").
+            Map.entry("nazionalità", "NAZIONE"),
+            Map.entry("nazionalita", "NAZIONE"),
             Map.entry("codice fiscale", "CODICE_FISCALE"),
             Map.entry("codicefiscale", "CODICE_FISCALE"),
             Map.entry("codice_fiscale", "CODICE_FISCALE"),
@@ -287,6 +307,15 @@ public class BookingImportService {
 
         int imported = 0, skipped = 0, errors = 0;
         List<String> errorMessages = new ArrayList<>();
+
+        // Nazione forzata in anteprima ("IT" | "EST") per numero di riga; a parità di riga vince l'ultima.
+        Map<Integer, String> forzatureMap = dto.getForzature() == null ? Map.of()
+                : dto.getForzature().stream()
+                        .filter(f -> f.getRowNumber() != null
+                                && (FORZA_ITALIANO.equals(f.getTipo()) || FORZA_ESTERO.equals(f.getTipo())))
+                        .collect(Collectors.toMap(ForzaturaNazione::getRowNumber, ForzaturaNazione::getTipo,
+                                (a, b) -> b));
+        int forzateIt = 0, forzateEst = 0;
 
         for (BookingImportRowDTO row : cached) {
             boolean selected;
@@ -383,10 +412,42 @@ public class BookingImportService {
                 // progressivo EST conta le righe già presenti a DB, quindi assegnandolo appena
                 // prima dell'insert ogni prenotazione ne riceve uno distinto.
                 String cfOspite = row.getGuestTaxCode();
-                if (blank(cfOspite) && NazioneUtils.isNazioneEstera(row.getGuestCountry())) {
+                String guestCountry = row.getGuestCountry();
+
+                // Nazione forzata in anteprima: sostituisce quella del file e invalida il CF
+                // dell'altro tipo. Le righe in cache non vengono modificate.
+                String forzatura = forzatureMap.get(row.getRowNumber());
+                if (FORZA_ITALIANO.equals(forzatura)) {
+                    forzateIt++;
+                    guestCountry = NAZIONE_ITALIA;
+                    if (!blank(cfOspite) && cfOspite.startsWith("EST")) {
+                        cfOspite = null;
+                    }
+                    // CF ricalcolato solo se l'anagrafica è completa; altrimenti resta vuoto
+                    if (blank(cfOspite)) {
+                        LocalDate nascita = parseDateSafe(row.getGuestBirthDate());
+                        cfOspite = nascita == null || blank(row.getGuestBirthPlace()) ? null
+                                : codiceFiscaleService.calcolaSafe(row.getGuestLastName(), row.getGuestFirstName(),
+                                        nascita, normalizzaSesso(row.getGuestGender()), row.getGuestBirthPlace())
+                                .orElse(null);
+                    }
+                    log.debug("BookingImportService.confirm() - booking {}: forzato italiano, CF={}",
+                            row.getExternalBookingId(), cfOspite);
+                } else if (FORZA_ESTERO.equals(forzatura)) {
+                    forzateEst++;
+                    guestCountry = NAZIONE_ESTERO_GENERICO;
+                    // CF italiano (16 caratteri, non EST) azzerato: si genera il CF fittizio estero
+                    if (!blank(cfOspite) && !cfOspite.startsWith("EST") && cfOspite.trim().length() == 16) {
+                        cfOspite = null;
+                    }
+                    log.debug("BookingImportService.confirm() - booking {}: forzato estero",
+                            row.getExternalBookingId());
+                }
+
+                if (blank(cfOspite) && NazioneUtils.isNazioneEstera(guestCountry)) {
                     cfOspite = codiceFiscaleService.generaCfEstero(tenantId, Year.now().getValue());
                     log.debug("BookingImportService.confirm() - booking {}: CF fittizio estero {} (nazione={})",
-                            row.getExternalBookingId(), cfOspite, row.getGuestCountry());
+                            row.getExternalBookingId(), cfOspite, guestCountry);
                 }
 
                 // Regime fiscale fotografato dal proprietario dell'immobile: l'owner può
@@ -416,7 +477,7 @@ public class BookingImportService {
                         .guestBirthBelfiore(belfioreDaCf(cfOspite))
                         .guestDocType(row.getGuestDocType())
                         .guestDocNumber(row.getGuestDocNumber())
-                        .guestCountry(row.getGuestCountry())
+                        .guestCountry(guestCountry)
                         .guestAddress(row.getGuestAddress())
                         .guestPhone(row.getGuestPhone())
                         .guestEmail(EmailUtils.normalizza(row.getGuestEmail()))
@@ -474,6 +535,9 @@ public class BookingImportService {
         }
 
         importSessionCache.remove(dto.getImportSessionId());
+        if (!forzatureMap.isEmpty()) {
+            log.info("BookingImportService.confirm() - forzature applicate: {} IT, {} EST", forzateIt, forzateEst);
+        }
         log.info("BookingImportService.confirm() - tenantId={} imported={} errors={}", tenantId, imported, errors);
         auditService.log("booking.import", "Booking", null,
                 "Importate " + imported + " prenotazioni da CSV");
@@ -813,17 +877,26 @@ public class BookingImportService {
                 }
             }
 
+            // Nazione: quella del file ospiti (codice a 9 cifre) ha la precedenza; se manca si usa
+            // il paese del file prenotazioni (nome in chiaro), ridotto a Italia / estero generico.
+            String guestCountry = guest != null && !blank(guest.getCountry()) ? guest.getCountry() : null;
+            String paeseFile = nullSeBlank(mapVal(row, bMap, "PAESE"));
+            if (guestCountry == null && paeseFile != null) {
+                guestCountry = NazioneUtils.isNazioneEstera(paeseFile) ? NAZIONE_ESTERO_GENERICO : NAZIONE_ITALIA;
+                log.debug("BookingImportService - nazione da file prenotazioni: {} → {}", paeseFile, guestCountry);
+            }
+
             // Ospite straniero senza CF: il codice fittizio (EST+anno+progressivo) NON si genera
             // qui. Il progressivo dipende dalle righe realmente presenti a DB e in preview nulla
             // è ancora inserito: generarlo ora darebbe lo stesso codice a tutte le righe del file.
             // Viene assegnato riga per riga in confirm(), al momento dell'insert.
-            if (cfOspite == null && guest != null && NazioneUtils.isNazioneEstera(guest.getCountry())) {
+            if (cfOspite == null && NazioneUtils.isNazioneEstera(guestCountry)) {
                 // Per uno straniero comune e data di nascita italiani non servono: i warning
                 // sul CF non calcolabile sarebbero fuorvianti.
                 warnings.removeIf(w -> w.startsWith("CF non calcolabile"));
                 warnings.add("Codice Nazione straniero: il CF verrà generato alla conferma");
                 log.debug("BookingImportService - riga {}: ospite straniero (nazione={}), "
-                        + "CF fittizio rimandato alla conferma", rowNum, guest.getCountry());
+                        + "CF fittizio rimandato alla conferma", rowNum, guestCountry);
             }
 
             boolean duplicata = bookingDAO
@@ -843,7 +916,7 @@ public class BookingImportService {
                     .guestBirthPlace(guest != null ? guest.getBirthPlace() : null)
                     .guestDocType(guest != null ? guest.getDocType() : null)
                     .guestDocNumber(guest != null ? guest.getDocNumber() : null)
-                    .guestCountry(guest != null ? guest.getCountry() : null)
+                    .guestCountry(guestCountry)
                     .guestAddress(indirizzo)
                     .guestPhone(telefono)
                     .guestEmail(email)
@@ -874,7 +947,7 @@ public class BookingImportService {
                     .guestBirthBelfiore(belfioreDaCf(cfOspite))
                     .guestDocType(guest != null ? guest.getDocType() : null)
                     .guestDocNumber(numDocumento)
-                    .guestCountry(guest != null ? guest.getCountry() : null)
+                    .guestCountry(guestCountry)
                     .propertyCode(struttura)
                     .propertyName(m.propertyName())
                     .fkPropertyId(m.propertyId())
