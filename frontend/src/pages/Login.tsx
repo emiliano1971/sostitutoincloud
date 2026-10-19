@@ -11,7 +11,6 @@ import appLogoIcon from '@/assets/logo-icon.png';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import loginBg from '@/assets/login-bg.jpg';
 import { toast } from '@/hooks/use-toast';
-import { getConfig } from '@/config/AppConfig';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -139,30 +138,6 @@ const Login = () => {
                   </div>
                 </form>
 
-                {/* Account disponibili — nascosti in produzione */}
-                {getConfig().environment === 'local' && (
-                  <div className="mt-6 pt-4 border-t">
-                    <p className="text-xs text-muted-foreground mb-3 font-medium">Account disponibili:</p>
-                    <div className="space-y-1.5">
-                      {[
-                        { email: 'superadmin@sostitutoincloud.it', role: 'Super Admin', password: 'atena' },
-                        { email: 'admin@casavacanze.it', role: 'Tenant Admin', password: 'atena2026' },
-                        { email: 'proprietario@email.it', role: 'Proprietario', password: 'atena' },
-                      ].map(acc => (
-                        <button
-                          key={acc.email}
-                          type="button"
-                          onClick={() => { setEmail(acc.email); setPassword(acc.password); }}
-                          className="w-full flex items-center justify-between p-2 rounded-md text-xs hover:bg-muted transition-colors"
-                          disabled={isLoading}
-                        >
-                          <span className="text-muted-foreground font-mono">{acc.email}</span>
-                          <span className="text-primary font-medium">{acc.role}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </CardContent>
             </TabsContent>
 

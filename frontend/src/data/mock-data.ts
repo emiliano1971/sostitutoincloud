@@ -1,15 +1,7 @@
 import type {
   Tenant, OwnerProfile, Property, Booking, FiscalDocument,
-  Settlement, F24Record, CURecord, AuditLogEntry, AlertItem, UserContext,
+  Settlement, F24Record, CURecord, AlertItem,
 } from '@/types';
-
-// ---- User Contexts ----
-export const mockUsers: UserContext[] = [
-  { user_id: 'u1', email: 'superadmin@sostitutoincloud.it', first_name: 'Marco', last_name: 'Rossi', role: 'super_admin' },
-  { user_id: 'u2', email: 'admin@casavacanze.it', first_name: 'Laura', last_name: 'Bianchi', role: 'tenant_admin', tenant_id: 't1', tenant_name: 'Casa Vacanze Italia SRL' },
-  { user_id: 'u3', email: 'pm@casavacanze.it', first_name: 'Giovanni', last_name: 'Verdi', role: 'pm_user', tenant_id: 't1', tenant_name: 'Casa Vacanze Italia SRL' },
-  { user_id: 'u4', email: 'proprietario@email.it', first_name: 'Anna', last_name: 'Moretti', role: 'owner_user', tenant_id: 't1', tenant_name: 'Casa Vacanze Italia SRL', owner_id: 'o1' },
-];
 
 // ---- Tenants ----
 export const mockTenants: Tenant[] = [
@@ -226,18 +218,6 @@ export const mockCU: CURecord[] = mockOwners.slice(0, 3).map((owner, i) => ({
   generated_at: i < 2 ? '2025-02-28' : undefined,
   created_at: '2025-02-01',
 }));
-
-// ---- Audit Log ----
-export const mockAuditLog: AuditLogEntry[] = [
-  { log_id: 'al1', tenant_id: 't1', user_email: 'admin@casavacanze.it', action: 'booking.import', entity_type: 'Booking', entity_id: 'b1', details: 'Importate 12 prenotazioni da file CSV', ip_address: '192.168.1.10', created_at: '2025-03-15T10:30:00' },
-  { log_id: 'al2', tenant_id: 't1', user_email: 'pm@casavacanze.it', action: 'document.issue', entity_type: 'FiscalDocument', entity_id: 'doc5', details: 'Emessa fattura FE-2025-0005 per prenotazione b5', ip_address: '192.168.1.11', created_at: '2025-03-14T14:22:00' },
-  { log_id: 'al3', tenant_id: 't1', user_email: 'admin@casavacanze.it', action: 'settlement.approve', entity_type: 'Settlement', entity_id: 'set2', details: 'Approvata liquidazione proprietario Ferrari - Febbraio 2025', ip_address: '192.168.1.10', created_at: '2025-03-13T09:15:00' },
-  { log_id: 'al4', user_email: 'superadmin@sostitutoincloud.it', action: 'tenant.create', entity_type: 'Tenant', entity_id: 't3', details: 'Creato tenant Toscana Property Management', ip_address: '10.0.0.1', created_at: '2025-03-12T16:45:00' },
-  { log_id: 'al5', tenant_id: 't1', user_email: 'pm@casavacanze.it', action: 'document.choose_ricevuta', entity_type: 'Booking', entity_id: 'b12', details: 'PM ha scelto ricevuta semplice invece di fattura - Motivazione: ospite straniero senza CF', ip_address: '192.168.1.11', created_at: '2025-03-11T11:00:00' },
-  { log_id: 'al6', tenant_id: 't1', user_email: 'admin@casavacanze.it', action: 'f24.generate', entity_type: 'F24', entity_id: 'f24-2', details: 'Generato F24 febbraio 2025 - €3.120,45', ip_address: '192.168.1.10', created_at: '2025-03-10T08:30:00' },
-  { log_id: 'al7', tenant_id: 't1', user_email: 'admin@casavacanze.it', action: 'owner.create', entity_type: 'OwnerProfile', entity_id: 'o3', details: 'Creato proprietario Lucia Conti', ip_address: '192.168.1.10', created_at: '2025-03-09T15:00:00' },
-  { log_id: 'al8', user_email: 'superadmin@sostitutoincloud.it', action: 'tenant.suspend', entity_type: 'Tenant', entity_id: 't3', details: 'Sospeso tenant Toscana PM - morosità', ip_address: '10.0.0.1', created_at: '2025-03-08T12:00:00' },
-];
 
 // ---- Alerts ----
 export const mockAlerts: AlertItem[] = [
