@@ -78,6 +78,10 @@ export interface BookingListItem {
   guests: number;
   grossAmount: number;
   ownerNetAmount: number;
+  /** Provvigione PM imponibile (commissione_pm dello split); 0 per stornate/cancellate. */
+  pmNetAmount?: number;
+  /** Nazione ospite: 100000100 = Italia, altro = estero. */
+  guestCountry?: string;
   // Assenti (Jackson NON_NULL) sulle prenotazioni senza tassa di soggiorno valorizzata.
   touristTaxIncludedInGross?: boolean;
   touristTaxAmount?: number;

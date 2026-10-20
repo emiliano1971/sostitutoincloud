@@ -361,8 +361,8 @@ CREATE TABLE tenant (
     id                      SERIAL          PRIMARY KEY,
     legal_name              VARCHAR(200)    NOT NULL,
     display_name            VARCHAR(100)    NOT NULL,
-    tax_code                CHAR(16)        NOT NULL UNIQUE,
-    vat_number              CHAR(11)        UNIQUE,           -- solo 11 cifre, senza prefisso IT
+    tax_code                VARCHAR(16)     NOT NULL UNIQUE,  -- migration 032: CF 16 caratteri o 11 cifre (= P.IVA)
+    vat_number              VARCHAR(11)     UNIQUE,           -- solo 11 cifre, senza prefisso IT
     stato                   tenant_status   NOT NULL DEFAULT 'draft',
     administrative_email    VARCHAR(150)    NOT NULL,
     pec                     VARCHAR(150),
@@ -422,8 +422,8 @@ CREATE TABLE owner_profile (
     first_name      VARCHAR(80),                -- compilato per owner_type = persona_fisica
     last_name       VARCHAR(80),                -- compilato per owner_type = persona_fisica
     legal_name      VARCHAR(200),               -- compilato per owner_type = piva / societa
-    tax_code        CHAR(16)        NOT NULL,
-    vat_number      CHAR(11),                   -- solo per piva / societa
+    tax_code        VARCHAR(16)     NOT NULL,   -- migration 032: CF 16 caratteri o 11 cifre (= P.IVA)
+    vat_number      VARCHAR(11),                -- obbligatoria per piva / societa
     fk_regime_fiscale_id INTEGER         NOT NULL REFERENCES regime_fiscale(id) ON DELETE RESTRICT DEFAULT 1,  -- 1 = 'cedolare_secca'
     email           VARCHAR(150),
     phone           VARCHAR(20),
@@ -1236,7 +1236,7 @@ CREATE TABLE tenant_settings (
     regime_fiscale_pm           VARCHAR(10)     NOT NULL DEFAULT 'RF01',   -- RF01 ordinario, RF19 forfettario
     natura_iva_esente           VARCHAR(10)     NOT NULL DEFAULT 'N2.1',   -- natura IVA per operazioni esenti/fuori campo
     -- Policy documentali
-    sdi_auto_send               BOOLEAN         NOT NULL DEFAULT TRUE,
+    sdi_auto_send               BOOLEAN         NOT NULL DEFAULT FALSE,  -- migration 033: invio SDI manuale di default
     deroga_ricevuta_enabled     BOOLEAN         NOT NULL DEFAULT FALSE,
     numerazione_automatica      BOOLEAN         NOT NULL DEFAULT TRUE,
     -- Notifiche

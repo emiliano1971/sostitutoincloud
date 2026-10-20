@@ -1,3 +1,4 @@
+import { isCF, isPIVA, isValidCFOrPIVA, normalizzaCF } from '@/lib/fiscalCodeValidator';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -55,8 +56,15 @@ const OwnerCreate = () => {
     if (isPersonaFisica && !form.firstName.trim()) return 'Nome obbligatorio';
     if (isPersonaFisica && !form.lastName.trim()) return 'Cognome obbligatorio';
     if (!isPersonaFisica && !form.legalName.trim()) return 'Ragione sociale obbligatoria';
-    if (!form.taxCode.trim()) return 'Codice fiscale obbligatorio';
-    if (form.taxCode.trim().length !== 16) return 'Il codice fiscale deve avere esattamente 16 caratteri';
+    // CF / P.IVA per tipo (stesse regole del backend):
+    // persona fisica → CF 16 caratteri; piva/società → P.IVA obbligatoria, CF facoltativo (vuoto = P.IVA)
+    if (isPersonaFisica) {
+      if (!isCF(form.taxCode)) return 'Codice fiscale: 16 caratteri alfanumerici obbligatori';
+      if (form.vatNumber.trim() && !isPIVA(form.vatNumber)) return 'Partita IVA: 11 cifre numeriche';
+    } else {
+      if (!isPIVA(form.vatNumber)) return 'Partita IVA: 11 cifre numeriche obbligatorie';
+      if (form.taxCode.trim() && !isValidCFOrPIVA(form.taxCode)) return 'Codice fiscale non valido: 16 caratteri alfanumerici o 11 cifre';
+    }
     if (!form.regimeCodice) return 'Regime fiscale obbligatorio';
     if (!form.email.trim()) return 'Email obbligatoria';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Formato email non valido';
@@ -155,18 +163,18 @@ const OwnerCreate = () => {
             <Separator />
 
             <div className="space-y-2">
-              <Label>Codice Fiscale * (16 caratteri)</Label>
+              <Label>{isPersonaFisica ? 'Codice Fiscale * (16 caratteri)' : 'Codice Fiscale (16 caratteri o 11 cifre)'}</Label>
               <Input
                 value={form.taxCode}
-                onChange={e => update('taxCode', e.target.value.toUpperCase())}
-                placeholder="RSSMRA80A01H501Z"
+                onChange={e => update('taxCode', normalizzaCF(e.target.value))}
+                placeholder={isPersonaFisica ? 'RSSMRA80A01H501Z' : 'RSSMRA80A01H501Z (opzionale)'}
                 className="font-mono uppercase"
                 maxLength={16}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Partita IVA (11 cifre)</Label>
+              <Label>{isPersonaFisica ? 'Partita IVA (11 cifre)' : 'Partita IVA * (11 cifre)'}</Label>
               <Input
                 value={form.vatNumber}
                 onChange={e => update('vatNumber', e.target.value)}

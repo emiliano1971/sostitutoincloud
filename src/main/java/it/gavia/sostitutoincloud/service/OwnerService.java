@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.service;
 
+import it.gavia.sostitutoincloud.util.CodiceFiscalePivaValidator;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.CuRecordDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
@@ -115,7 +116,12 @@ public class OwnerService {
 
     public OwnerDetailDTO create(Integer tenantId, OwnerCreateDTO dto) {
         log.info("OwnerService.create() - tenantId={} taxCode={}", tenantId, dto.getTaxCode());
-        ownerProfileDAO.findByTaxCode(dto.getTaxCode())
+        // CF / P.IVA secondo il tipo: persona fisica → CF a 16; piva/società → P.IVA obbligatoria
+        String ownerType = dto.getOwnerType() != null ? dto.getOwnerType() : "persona_fisica";
+        String vatNumber = CodiceFiscalePivaValidator.normalizza(dto.getVatNumber());
+        String taxCode = CodiceFiscalePivaValidator.validaOwner(ownerType,
+                CodiceFiscalePivaValidator.normalizza(dto.getTaxCode()), vatNumber);
+        ownerProfileDAO.findByTaxCode(taxCode)
                 .filter(o -> tenantId.equals(o.getFkTenantId()))
                 .ifPresent(o -> { throw new IllegalArgumentException("Proprietario con questo CF già esistente"); });
         Integer regimeId = dto.getFkRegimeFiscaleId();
@@ -126,12 +132,12 @@ public class OwnerService {
         }
         OwnerProfile owner = OwnerProfile.builder()
                 .fkTenantId(tenantId)
-                .ownerType(dto.getOwnerType())
+                .ownerType(ownerType)
                 .firstName(dto.getFirstName())
                 .lastName(dto.getLastName())
                 .legalName(dto.getLegalName())
-                .taxCode(dto.getTaxCode())
-                .vatNumber(dto.getVatNumber())
+                .taxCode(taxCode)
+                .vatNumber(vatNumber)
                 .fkRegimeFiscaleId(regimeId)
                 .email(dto.getEmail())
                 .phone(dto.getPhone())
@@ -150,20 +156,30 @@ public class OwnerService {
         OwnerProfile existing = ownerProfileDAO.findById(ownerId)
                 .filter(o -> tenantId.equals(o.getFkTenantId()))
                 .orElseThrow(() -> new RuntimeException("Owner non trovato: id=" + ownerId));
-        if (dto.getTaxCode() != null && !dto.getTaxCode().equals(existing.getTaxCode())) {
-            ownerProfileDAO.findByTaxCode(dto.getTaxCode())
+        // Valori effettivi (campo assente = invariato; stringa vuota = rimosso) validati per tipo
+        String ownerType = dto.getOwnerType() != null ? dto.getOwnerType() : existing.getOwnerType();
+        String vatNumber = dto.getVatNumber() != null
+                ? CodiceFiscalePivaValidator.normalizza(dto.getVatNumber())
+                : existing.getVatNumber();
+        String taxCode = CodiceFiscalePivaValidator.validaOwner(ownerType,
+                dto.getTaxCode() != null
+                        ? CodiceFiscalePivaValidator.normalizza(dto.getTaxCode())
+                        : existing.getTaxCode(),
+                vatNumber);
+        if (!taxCode.equals(existing.getTaxCode())) {
+            ownerProfileDAO.findByTaxCode(taxCode)
                     .filter(o -> tenantId.equals(o.getFkTenantId()) && !o.getId().equals(ownerId))
                     .ifPresent(o -> { throw new IllegalArgumentException("Proprietario con questo CF già esistente"); });
         }
         OwnerProfile toUpdate = OwnerProfile.builder()
                 .id(existing.getId())
                 .fkTenantId(existing.getFkTenantId())
-                .ownerType(dto.getOwnerType() != null ? dto.getOwnerType() : existing.getOwnerType())
+                .ownerType(ownerType)
                 .firstName(dto.getFirstName() != null ? dto.getFirstName() : existing.getFirstName())
                 .lastName(dto.getLastName() != null ? dto.getLastName() : existing.getLastName())
                 .legalName(dto.getLegalName() != null ? dto.getLegalName() : existing.getLegalName())
-                .taxCode(dto.getTaxCode() != null ? dto.getTaxCode() : existing.getTaxCode())
-                .vatNumber(dto.getVatNumber() != null ? dto.getVatNumber() : existing.getVatNumber())
+                .taxCode(taxCode)
+                .vatNumber(vatNumber)
                 .fkRegimeFiscaleId(dto.getFkRegimeFiscaleId() != null ? dto.getFkRegimeFiscaleId() : existing.getFkRegimeFiscaleId())
                 .email(dto.getEmail() != null ? dto.getEmail() : existing.getEmail())
                 .phone(dto.getPhone() != null ? dto.getPhone() : existing.getPhone())

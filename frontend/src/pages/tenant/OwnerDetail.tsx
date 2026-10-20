@@ -1,3 +1,4 @@
+import { isCF, isPIVA, isValidCFOrPIVA, normalizzaCF } from '@/lib/fiscalCodeValidator';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -40,7 +41,7 @@ const OwnerDetail = () => {
   const [showEdit, setShowEdit] = useState(false);
   const [eliminando, setEliminando] = useState(false);
   const [editForm, setEditForm] = useState({
-    firstName: '', lastName: '', legalName: '', taxCode: '',
+    ownerType: 'persona_fisica', firstName: '', lastName: '', legalName: '', taxCode: '',
     vatNumber: '', email: '', phone: '', iban: '', fiscalRegimeCodice: 'cedolare_secca',
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -147,6 +148,7 @@ const OwnerDetail = () => {
 
   const handleOpenEdit = () => {
     setEditForm({
+      ownerType: owner.ownerType ?? 'persona_fisica',
       firstName: owner.firstName ?? '',
       lastName: owner.lastName ?? '',
       legalName: owner.legalName ?? '',
@@ -164,20 +166,31 @@ const OwnerDetail = () => {
   };
 
   const handleSaveEdit = async () => {
-    if (!editForm.firstName.trim()) { setEditError('Nome obbligatorio'); return; }
-    if (!editForm.taxCode.trim() || editForm.taxCode.trim().length !== 16) {
-      setEditError('Il codice fiscale deve avere esattamente 16 caratteri'); return;
+    // Stesse regole di OwnerCreate / backend, in base al tipo selezionato
+    const pf = editForm.ownerType === 'persona_fisica';
+    if (pf && !editForm.firstName.trim()) { setEditError('Nome obbligatorio'); return; }
+    if (!pf && !editForm.legalName.trim()) { setEditError('Ragione sociale obbligatoria'); return; }
+    if (pf) {
+      if (!isCF(editForm.taxCode)) { setEditError('Codice fiscale: 16 caratteri alfanumerici obbligatori'); return; }
+      if (editForm.vatNumber.trim() && !isPIVA(editForm.vatNumber)) { setEditError('Partita IVA: 11 cifre numeriche'); return; }
+    } else {
+      if (!isPIVA(editForm.vatNumber)) { setEditError('Partita IVA: 11 cifre numeriche obbligatorie'); return; }
+      if (editForm.taxCode.trim() && !isValidCFOrPIVA(editForm.taxCode)) {
+        setEditError('Codice fiscale non valido: 16 caratteri alfanumerici o 11 cifre'); return;
+      }
     }
     if (!editForm.email.trim()) { setEditError('Email obbligatoria'); return; }
     setIsSaving(true);
     setEditError(null);
     try {
       const updated = await updateOwner(owner.id, {
+        ownerType:         editForm.ownerType,
         firstName:         editForm.firstName.trim() || undefined,
         lastName:          editForm.lastName.trim() || undefined,
         legalName:         editForm.legalName.trim() || undefined,
+        // CF vuoto per piva/società = P.IVA (backend); P.IVA vuota = rimossa
         taxCode:           editForm.taxCode.trim(),
-        vatNumber:         editForm.vatNumber.trim() || undefined,
+        vatNumber:         editForm.vatNumber.trim(),
         email:             editForm.email.trim(),
         phone:             editForm.phone.trim() || undefined,
         iban:              editForm.iban.trim() || undefined,
@@ -395,9 +408,22 @@ const OwnerDetail = () => {
             {/* Anagrafica */}
             <div className="space-y-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Anagrafica</p>
+              <div className="space-y-1">
+                <Label>Tipo proprietario</Label>
+                <Select value={editForm.ownerType} onValueChange={v => setEditForm(f => ({ ...f, ownerType: v }))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="persona_fisica">Persona fisica</SelectItem>
+                    <SelectItem value="piva">Partita IVA</SelectItem>
+                    <SelectItem value="societa">Società</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Label>Nome *</Label>
+                  <Label>{editForm.ownerType === 'persona_fisica' ? 'Nome *' : 'Nome'}</Label>
                   <Input value={editForm.firstName} onChange={e => setEditForm(f => ({ ...f, firstName: e.target.value }))} />
                 </div>
                 <div className="space-y-1">
@@ -405,27 +431,28 @@ const OwnerDetail = () => {
                   <Input value={editForm.lastName} onChange={e => setEditForm(f => ({ ...f, lastName: e.target.value }))} />
                 </div>
               </div>
-              {owner.ownerType !== 'persona_fisica' && (
+              {editForm.ownerType !== 'persona_fisica' && (
                 <div className="space-y-1">
-                  <Label>Ragione Sociale</Label>
+                  <Label>Ragione Sociale *</Label>
                   <Input value={editForm.legalName} onChange={e => setEditForm(f => ({ ...f, legalName: e.target.value }))} />
                 </div>
               )}
               <div className="space-y-1">
-                <Label>Codice Fiscale * (16 caratteri)</Label>
+                <Label>{editForm.ownerType === 'persona_fisica' ? 'Codice Fiscale * (16 caratteri)' : 'Codice Fiscale (16 caratteri o 11 cifre)'}</Label>
                 <Input
                   value={editForm.taxCode}
-                  onChange={e => setEditForm(f => ({ ...f, taxCode: e.target.value.toUpperCase() }))}
+                  onChange={e => setEditForm(f => ({ ...f, taxCode: normalizzaCF(e.target.value) }))}
+                  placeholder={editForm.ownerType === 'persona_fisica' ? 'RSSMRA80A01H501Z' : 'RSSMRA80A01H501Z (opzionale)'}
                   className="font-mono uppercase"
                   maxLength={16}
                 />
               </div>
-              {owner.ownerType !== 'persona_fisica' && (
-                <div className="space-y-1">
-                  <Label>Partita IVA</Label>
-                  <Input value={editForm.vatNumber} onChange={e => setEditForm(f => ({ ...f, vatNumber: e.target.value }))} className="font-mono" maxLength={11} />
-                </div>
-              )}
+              {/* P.IVA: obbligatoria per piva/società, facoltativa per persona fisica */}
+              <div className="space-y-1">
+                <Label>{editForm.ownerType === 'persona_fisica' ? 'Partita IVA' : 'Partita IVA *'}</Label>
+                <Input value={editForm.vatNumber} onChange={e => setEditForm(f => ({ ...f, vatNumber: e.target.value.trim() }))}
+                  placeholder="12345678901" className="font-mono" maxLength={11} />
+              </div>
             </div>
 
             <Separator />

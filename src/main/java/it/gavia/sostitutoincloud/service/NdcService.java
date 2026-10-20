@@ -257,7 +257,7 @@ public class NdcService {
         } else {
             boolean autoSend = tenantSettingsDAO.findByTenantId(tenantId)
                     .map(TenantSettings::getSdiAutoSend)
-                    .orElse(true);
+                    .orElse(false);   // senza impostazioni: invio manuale, come il default del tenant
             if (autoSend) {
                 try {
                     sdiXmlService.generaEInvia(tenantId, ndc.getId());

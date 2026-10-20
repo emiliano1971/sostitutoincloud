@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.service;
 
+import it.gavia.sostitutoincloud.util.CodiceFiscalePivaValidator;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
 import it.gavia.sostitutoincloud.dto.settings.TenantSettingsDTO;
@@ -49,12 +50,27 @@ public class TenantSettingsService {
                 .orElseThrow(() -> new RuntimeException("Tenant non trovato: id=" + tenantId));
 
         if (hasTenantDataChanges(dto)) {
+            // Stesse regole di TenantService: P.IVA obbligatoria, CF a 16 o 11 cifre (vuoto = P.IVA)
+            String vatNumber = dto.getVatNumber() != null
+                    ? CodiceFiscalePivaValidator.normalizza(dto.getVatNumber())
+                    : tenant.getVatNumber();
+            String taxCode = CodiceFiscalePivaValidator.validaTenant(
+                    dto.getTaxCode() != null
+                            ? CodiceFiscalePivaValidator.normalizza(dto.getTaxCode())
+                            : tenant.getTaxCode(),
+                    vatNumber);
+            Integer tenantIdCorrente = tenant.getId();
+            if (!taxCode.equals(tenant.getTaxCode())) {
+                tenantDAO.findByTaxCode(taxCode)
+                        .filter(t -> !t.getId().equals(tenantIdCorrente))
+                        .ifPresent(t -> { throw new IllegalArgumentException("Tenant con questo codice fiscale già esistente"); });
+            }
             Tenant toUpdate = Tenant.builder()
                     .id(tenant.getId())
                     .legalName(dto.getLegalName() != null ? dto.getLegalName() : tenant.getLegalName())
                     .displayName(dto.getDisplayName() != null ? dto.getDisplayName() : tenant.getDisplayName())
-                    .taxCode(dto.getTaxCode() != null ? dto.getTaxCode() : tenant.getTaxCode())
-                    .vatNumber(dto.getVatNumber() != null ? dto.getVatNumber() : tenant.getVatNumber())
+                    .taxCode(taxCode)
+                    .vatNumber(vatNumber)
                     .administrativeEmail(dto.getAdministrativeEmail() != null ? dto.getAdministrativeEmail() : tenant.getAdministrativeEmail())
                     .pec(dto.getPec() != null ? dto.getPec() : tenant.getPec())
                     .phone(dto.getPhone() != null ? dto.getPhone() : tenant.getPhone())
@@ -207,7 +223,8 @@ public class TenantSettingsService {
                 .bolloAddebitatoCliente(true)
                 .regimeFiscalePm("RF01")
                 .naturaIvaEsente("N2.1")
-                .sdiAutoSend(true)
+                // Default invio SDI manuale: l'auto-invio si attiva dalle impostazioni del tenant
+                .sdiAutoSend(false)
                 .derogaRicevutaEnabled(false)
                 .numerazioneAutomatica(true)
                 .alertScadenzeDocumenti(true)

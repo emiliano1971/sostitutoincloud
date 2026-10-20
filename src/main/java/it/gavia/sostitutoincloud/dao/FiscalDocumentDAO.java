@@ -196,6 +196,18 @@ public class FiscalDocumentDAO {
         log.info("FiscalDocumentDAO.updateSdiInfo() - id={} prog={}", id, sdiProgressivo);
     }
 
+    /**
+     * Documento inviato allo SDI fuori dall'applicazione: stato sent_sdi senza file.
+     * Il progressivo resta quello che c'è (di norma null): non se ne consuma uno nuovo.
+     */
+    public void updateSdiManuale(Integer id) {
+        String sql = "UPDATE fiscal_document SET " +
+                "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'sent_sdi'), " +
+                "sdi_sent_at = NOW(), sdi_file_path = NULL, sdi_error_msg = NULL, updated_at = NOW() WHERE id = ?";
+        jdbcTemplate.update(sql, id);
+        log.info("FiscalDocumentDAO.updateSdiManuale() - id={}", id);
+    }
+
     public Optional<FiscalDocument> findBySdiProgressivo(String progressivo) {
         log.debug("FiscalDocumentDAO.findBySdiProgressivo() - progressivo={}", progressivo);
         List<FiscalDocument> result = jdbcTemplate.query(

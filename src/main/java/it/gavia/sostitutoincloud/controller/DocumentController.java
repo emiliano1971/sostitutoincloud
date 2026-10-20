@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.controller;
 
+import it.gavia.sostitutoincloud.dto.sdi.SdiFileDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentFilterDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
@@ -134,6 +135,53 @@ public class DocumentController {
         } catch (IllegalStateException e) {
             log.warn("DocumentController.downloadPdf() - generazione non possibile: {}", e.getMessage());
             return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * XML SDI del documento generato a runtime (nessun file, nessun progressivo consumato,
+     * nessun cambio di stato). 404 non trovato, 422 ricevuta owner o dati mancanti.
+     */
+    @GetMapping("/{id}/xml")
+    public ResponseEntity<?> scaricaXml(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.scaricaXml() - tenantId={} documentId={}", tenantId, id);
+        try {
+            SdiFileDTO file = sdiXmlService.generaXmlRuntime(tenantId, id);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_XML)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getNomeFile() + "\"")
+                    .body(file.getContenuto());
+        } catch (NoSuchElementException e) {
+            log.warn("DocumentController.scaricaXml() - documento non trovato: id={}", id);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (IllegalStateException e) {
+            log.warn("DocumentController.scaricaXml() - XML non generabile: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Marca fattura / NDC come inviata allo SDI fuori dall'applicazione (stato sent_sdi,
+     * senza file XML). 404 non trovato, 422 invio non ammesso.
+     */
+    @PostMapping("/{id}/sdi-manuale")
+    public ResponseEntity<?> sdiManuale(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.sdiManuale() - tenantId={} documentId={}", tenantId, id);
+        try {
+            sdiXmlService.segnaInviataManualmente(tenantId, id);
+            return ResponseEntity.ok(java.util.Map.of("message", "Documento marcato come inviato manualmente"));
+        } catch (NoSuchElementException e) {
+            log.warn("DocumentController.sdiManuale() - documento non trovato: id={}", id);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (IllegalStateException e) {
+            log.warn("DocumentController.sdiManuale() - non ammesso: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                     .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
         }
     }

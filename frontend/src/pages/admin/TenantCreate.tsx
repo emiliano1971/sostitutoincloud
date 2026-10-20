@@ -1,3 +1,4 @@
+import { isPIVA, isValidCFOrPIVA, normalizzaCF } from '@/lib/fiscalCodeValidator';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -38,9 +39,9 @@ const TenantCreate = () => {
   const validate = (): string | null => {
     if (!form.legalName.trim()) return 'Ragione sociale obbligatoria';
     if (!form.displayName.trim()) return 'Nome display obbligatorio';
-    if (!form.taxCode.trim()) return 'Codice fiscale obbligatorio';
-    if (form.taxCode.trim().length !== 16) return 'Il codice fiscale deve avere esattamente 16 caratteri';
-    if (form.vatNumber.trim() && form.vatNumber.trim().length !== 11) return 'La Partita IVA deve avere esattamente 11 cifre';
+    // P.IVA obbligatoria; CF facoltativo (16 caratteri o 11 cifre), se vuoto il backend usa la P.IVA
+    if (!isPIVA(form.vatNumber)) return 'Partita IVA: 11 cifre numeriche obbligatorie';
+    if (form.taxCode.trim() && !isValidCFOrPIVA(form.taxCode)) return 'Codice fiscale non valido: 16 caratteri alfanumerici o 11 cifre';
     if (!form.administrativeEmail.trim()) return 'Email amministrativa obbligatoria';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.administrativeEmail.trim())) return 'Formato email non valido';
     if (!form.legalAddress.trim()) return 'Indirizzo obbligatorio';
@@ -117,20 +118,20 @@ const TenantCreate = () => {
             <Separator />
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Codice Fiscale * (16 caratteri)</Label>
+                <Label>Codice Fiscale (16 caratteri o 11 cifre)</Label>
                 <Input
                   value={form.taxCode}
-                  onChange={e => update('taxCode', e.target.value.toUpperCase())}
-                  placeholder="CVITRL80A01H501Z"
+                  onChange={e => update('taxCode', normalizzaCF(e.target.value))}
+                  placeholder="RSSMRA80A01H501Z (opzionale)"
                   className="font-mono uppercase"
                   maxLength={16}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Partita IVA (11 cifre)</Label>
+                <Label>Partita IVA * (11 cifre)</Label>
                 <Input
                   value={form.vatNumber}
-                  onChange={e => update('vatNumber', e.target.value)}
+                  onChange={e => update('vatNumber', e.target.value.trim())}
                   placeholder="12345678901"
                   className="font-mono"
                   maxLength={11}

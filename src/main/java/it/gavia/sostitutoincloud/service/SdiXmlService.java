@@ -63,6 +63,9 @@ public class SdiXmlService {
      */
     private static final Set<String> STATI_GIA_INVIATI = Set.of("sent_sdi", "accepted");
 
+    /** ProgressivoInvio / nome file dell'XML scaricato prima di qualsiasi invio. */
+    private static final String PROGRESSIVO_ANTEPRIMA = "ANTEPRIMA";
+
     private static final String VERSIONE = "FPR12";
     private static final String NAMESPACE = "http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2";
     private static final String CODICE_DEST_ITALIA = "0000000";
@@ -136,64 +139,9 @@ public class SdiXmlService {
      */
     public String generaEInvia(Integer tenantId, Integer fiscalDocumentId) {
         // 1. Documento + verifica tenant, tipo e stato
-        FiscalDocument doc = fiscalDocumentDAO.findById(fiscalDocumentId)
-                .filter(d -> tenantId.equals(d.getFkTenantId()))
-                .orElseThrow(() -> new NoSuchElementException("Documento non trovato: id=" + fiscalDocumentId));
-
-        String codiceTipo = tipoDocumentoDAO.findById(doc.getFkTipoDocumentoId())
-                .map(TipoDocumento::getCodice)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Tipo documento non risolvibile per il documento id=" + fiscalDocumentId));
-        if (!CODICE_FATTURA.equals(codiceTipo) && !CODICE_NOTA_CREDITO.equals(codiceTipo)) {
-            throw new IllegalStateException(
-                    "Solo le fatture PM e le note di credito vanno trasmesse allo SDI: la ricevuta owner è un documento interno");
-        }
-        boolean notaCredito = CODICE_NOTA_CREDITO.equals(codiceTipo);
-
-        String statoCodice = statoDocumentoDAO.findById(doc.getFkStatoDocumentoId())
-                .map(StatoDocumento::getCodice)
-                .orElse(null);
-        if (STATI_GIA_INVIATI.contains(statoCodice)) {
-            throw new IllegalStateException(notaCredito ? "Nota di credito già inviata allo SDI" : "Fattura già inviata allo SDI");
-        }
-        if ("annullata".equals(statoCodice)) {
-            throw new IllegalStateException("Documento annullato: non trasmissibile allo SDI");
-        }
-        // Fattura stornata da una NDC attiva (non annullata): non va più trasmessa. Copre anche
-        // il booking 'stornata', che con la NDC sempre totale implica una NDC attiva.
-        if (!notaCredito) {
-            Integer tipoNdcId = tipoDocumentoDAO.findByCodice(CODICE_NOTA_CREDITO)
-                    .map(TipoDocumento::getId).orElse(null);
-            boolean ndcAttiva = doc.getFkBookingId() != null && tipoNdcId != null
-                    && fiscalDocumentDAO.findByBookingId(doc.getFkBookingId()).stream()
-                    .filter(d -> tipoNdcId.equals(d.getFkTipoDocumentoId()))
-                    .filter(d -> fiscalDocumentId.equals(d.getFkDocumentoCollegatoId()))
-                    .anyMatch(d -> !"annullata".equals(statoDocumentoDAO.findById(d.getFkStatoDocumentoId())
-                            .map(StatoDocumento::getCodice).orElse(null)));
-            if (ndcAttiva) {
-                throw new IllegalStateException(
-                        "Impossibile inviare allo SDI: esiste una nota di credito attiva per questa fattura");
-            }
-        }
-
-        // TD04: la fattura stornata va citata in DatiFattureCollegate
-        FiscalDocument fatturaCollegata = null;
-        if (notaCredito) {
-            fatturaCollegata = doc.getFkDocumentoCollegatoId() != null
-                    ? fiscalDocumentDAO.findById(doc.getFkDocumentoCollegatoId()).orElse(null)
-                    : null;
-            if (fatturaCollegata == null) {
-                throw new IllegalStateException("Nota di credito senza fattura collegata: id=" + fiscalDocumentId);
-            }
-            // Un TD04 storna una fattura trasmessa: se la fattura non è mai andata allo SDI
-            // la NDC resta interna (SETUP-NDC-TOTALE.md, punto 2B)
-            String statoFattura = statoDocumentoDAO.findById(fatturaCollegata.getFkStatoDocumentoId())
-                    .map(StatoDocumento::getCodice).orElse(null);
-            if (!STATI_GIA_INVIATI.contains(statoFattura)) {
-                throw new IllegalStateException("La fattura " + fatturaCollegata.getDocumentNumber()
-                        + " non è stata inviata allo SDI: la nota di credito non va trasmessa");
-            }
-        }
+        FiscalDocument doc = caricaTrasmissibile(tenantId, fiscalDocumentId);
+        // TD04: la fattura stornata va citata in DatiFattureCollegate (null per la fattura)
+        FiscalDocument fatturaCollegata = verificaInviabile(doc);
 
         // 2. Dati collegati
         Tenant tenant = tenantDAO.findById(tenantId)
@@ -262,6 +210,151 @@ public class SdiXmlService {
             log.error("SdiXmlService.generaEInvia() - docId={} errore={}", fiscalDocumentId, msg, e);
             throw e;
         }
+    }
+
+    // ────────────────────────────── controlli invio ──────────────────────────────
+
+    /**
+     * Documento del tenant di tipo fattura PM o nota di credito.
+     *
+     * @throws NoSuchElementException documento inesistente o di altro tenant
+     * @throws IllegalStateException  tipo non trasmissibile (ricevuta owner)
+     */
+    private FiscalDocument caricaTrasmissibile(Integer tenantId, Integer fiscalDocumentId) {
+        FiscalDocument doc = fiscalDocumentDAO.findById(fiscalDocumentId)
+                .filter(d -> tenantId.equals(d.getFkTenantId()))
+                .orElseThrow(() -> new NoSuchElementException("Documento non trovato: id=" + fiscalDocumentId));
+        String codiceTipo = codiceTipo(doc);
+        if (!CODICE_FATTURA.equals(codiceTipo) && !CODICE_NOTA_CREDITO.equals(codiceTipo)) {
+            throw new IllegalStateException(
+                    "Solo le fatture PM e le note di credito vanno trasmesse allo SDI: la ricevuta owner è un documento interno");
+        }
+        return doc;
+    }
+
+    private String codiceTipo(FiscalDocument doc) {
+        return tipoDocumentoDAO.findById(doc.getFkTipoDocumentoId())
+                .map(TipoDocumento::getCodice)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Tipo documento non risolvibile per il documento id=" + doc.getId()));
+    }
+
+    /**
+     * Regole di trasmissibilità comuni all'invio (file XML) e alla marcatura manuale:
+     * non già inviato/accettato, non annullato, fattura senza NDC attiva, NDC con fattura
+     * collegata già trasmessa.
+     *
+     * @return la fattura collegata se doc è una nota di credito, altrimenti null
+     * @throws IllegalStateException invio non ammesso
+     */
+    private FiscalDocument verificaInviabile(FiscalDocument doc) {
+        Integer fiscalDocumentId = doc.getId();
+        boolean notaCredito = CODICE_NOTA_CREDITO.equals(codiceTipo(doc));
+
+        String statoCodice = statoDocumentoDAO.findById(doc.getFkStatoDocumentoId())
+                .map(StatoDocumento::getCodice)
+                .orElse(null);
+        if (STATI_GIA_INVIATI.contains(statoCodice)) {
+            throw new IllegalStateException(notaCredito ? "Nota di credito già inviata allo SDI" : "Fattura già inviata allo SDI");
+        }
+        if ("annullata".equals(statoCodice)) {
+            throw new IllegalStateException("Documento annullato: non trasmissibile allo SDI");
+        }
+        // Fattura stornata da una NDC attiva (non annullata): non va più trasmessa. Copre anche
+        // il booking 'stornata', che con la NDC sempre totale implica una NDC attiva.
+        if (!notaCredito) {
+            Integer tipoNdcId = tipoDocumentoDAO.findByCodice(CODICE_NOTA_CREDITO)
+                    .map(TipoDocumento::getId).orElse(null);
+            boolean ndcAttiva = doc.getFkBookingId() != null && tipoNdcId != null
+                    && fiscalDocumentDAO.findByBookingId(doc.getFkBookingId()).stream()
+                    .filter(d -> tipoNdcId.equals(d.getFkTipoDocumentoId()))
+                    .filter(d -> fiscalDocumentId.equals(d.getFkDocumentoCollegatoId()))
+                    .anyMatch(d -> !"annullata".equals(statoDocumentoDAO.findById(d.getFkStatoDocumentoId())
+                            .map(StatoDocumento::getCodice).orElse(null)));
+            if (ndcAttiva) {
+                throw new IllegalStateException(
+                        "Impossibile inviare allo SDI: esiste una nota di credito attiva per questa fattura");
+            }
+            return null;
+        }
+
+        FiscalDocument fatturaCollegata = fatturaCollegata(doc);
+        // Un TD04 storna una fattura trasmessa: se la fattura non è mai andata allo SDI
+        // la NDC resta interna (SETUP-NDC-TOTALE.md, punto 2B)
+        String statoFattura = statoDocumentoDAO.findById(fatturaCollegata.getFkStatoDocumentoId())
+                .map(StatoDocumento::getCodice).orElse(null);
+        if (!STATI_GIA_INVIATI.contains(statoFattura)) {
+            throw new IllegalStateException("La fattura " + fatturaCollegata.getDocumentNumber()
+                    + " non è stata inviata allo SDI: la nota di credito non va trasmessa");
+        }
+        return fatturaCollegata;
+    }
+
+    private FiscalDocument fatturaCollegata(FiscalDocument ndc) {
+        FiscalDocument fattura = ndc.getFkDocumentoCollegatoId() != null
+                ? fiscalDocumentDAO.findById(ndc.getFkDocumentoCollegatoId()).orElse(null)
+                : null;
+        if (fattura == null) {
+            throw new IllegalStateException("Nota di credito senza fattura collegata: id=" + ndc.getId());
+        }
+        return fattura;
+    }
+
+    // ────────────────────────────── XML a runtime / invio manuale ──────────────────────────────
+
+    /**
+     * XML FatturaPA del documento generato al volo, senza scrivere file né consumare
+     * progressivi e senza cambiare stato. Nome file IT{piva}_{progressivo}.xml con il
+     * progressivo già assegnato, altrimenti IT{piva}_ANTEPRIMA.xml (stesso valore in
+     * ProgressivoInvio). Ammesso in qualsiasi stato.
+     *
+     * @throws NoSuchElementException documento inesistente o di altro tenant
+     * @throws IllegalStateException  ricevuta owner o dati mancanti
+     */
+    public SdiFileDTO generaXmlRuntime(Integer tenantId, Integer fiscalDocumentId) {
+        FiscalDocument doc = caricaTrasmissibile(tenantId, fiscalDocumentId);
+        FiscalDocument fatturaCollegata = CODICE_NOTA_CREDITO.equals(codiceTipo(doc)) ? fatturaCollegata(doc) : null;
+
+        Tenant tenant = tenantDAO.findById(tenantId)
+                .orElseThrow(() -> new NoSuchElementException("Tenant non trovato: id=" + tenantId));
+        Booking booking = doc.getFkBookingId() != null
+                ? bookingDAO.findById(doc.getFkBookingId()).orElse(null)
+                : null;
+        if (booking == null) {
+            throw new IllegalStateException("Documento senza prenotazione collegata: id=" + fiscalDocumentId);
+        }
+        Property property = propertyDAO.findById(booking.getFkPropertyId()).orElse(null);
+        TenantSettings settings = tenantSettingsDAO.findByTenantId(tenantId).orElse(null);
+        String piva = identificativoFiscale(tenant);
+        if (piva.isBlank()) {
+            throw new IllegalStateException(
+                    "Partita IVA o codice fiscale del tenant mancanti: obbligatori per l'XML SDI");
+        }
+        String progressivo = notBlank(doc.getSdiProgressivo()) ? doc.getSdiProgressivo() : PROGRESSIVO_ANTEPRIMA;
+        String xml = buildXml(doc, fatturaCollegata, booking, tenant, settings, property, piva, progressivo);
+        String nomeFile = "IT" + piva + "_" + progressivo + ".xml";
+        log.info("SdiXmlService.generaXmlRuntime() - docId={} file={}", fiscalDocumentId, nomeFile);
+        return SdiFileDTO.builder()
+                .nomeFile(nomeFile)
+                .contenuto(xml.getBytes(StandardCharsets.UTF_8))
+                .build();
+    }
+
+    /**
+     * Marca il documento come inviato allo SDI fuori dall'applicazione (es. portale AdE):
+     * stato sent_sdi senza file e senza progressivo. Stesse regole dell'invio.
+     *
+     * @throws NoSuchElementException documento inesistente o di altro tenant
+     * @throws IllegalStateException  invio non ammesso
+     */
+    public void segnaInviataManualmente(Integer tenantId, Integer fiscalDocumentId) {
+        FiscalDocument doc = caricaTrasmissibile(tenantId, fiscalDocumentId);
+        verificaInviabile(doc);
+        fiscalDocumentDAO.updateSdiManuale(fiscalDocumentId);
+        auditService.log("sdi.manuale", "FiscalDocument", fiscalDocumentId,
+                "Marcata come inviata manualmente allo SDI");
+        log.info("SdiXmlService.segnaInviataManualmente() - docId={} numero={}",
+                fiscalDocumentId, doc.getDocumentNumber());
     }
 
     /**

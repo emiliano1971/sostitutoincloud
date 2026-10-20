@@ -1,3 +1,4 @@
+import { isPIVA, isValidCFOrPIVA, normalizzaCF } from '@/lib/fiscalCodeValidator';
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -131,8 +132,10 @@ const TenantDetail = () => {
     if (!editForm.legalAddress.trim())       { setEditError('Indirizzo obbligatorio'); return; }
     if (!editForm.cap.trim())                { setEditError('CAP obbligatorio'); return; }
     if (!editForm.comune.trim())             { setEditError('Comune obbligatorio'); return; }
-    if (editForm.taxCode && editForm.taxCode.trim().length !== 16) {
-      setEditError('Il codice fiscale deve avere esattamente 16 caratteri'); return;
+    // P.IVA obbligatoria; CF facoltativo (16 caratteri o 11 cifre), se vuoto il backend usa la P.IVA
+    if (!isPIVA(editForm.vatNumber)) { setEditError('Partita IVA: 11 cifre numeriche obbligatorie'); return; }
+    if (editForm.taxCode.trim() && !isValidCFOrPIVA(editForm.taxCode)) {
+      setEditError('Codice fiscale non valido: 16 caratteri alfanumerici o 11 cifre'); return;
     }
     setIsSaving(true);
     setEditError(null);
@@ -140,8 +143,9 @@ const TenantDetail = () => {
       const updated = await updateTenant(tenant.id, {
         legalName:          editForm.legalName.trim() || undefined,
         displayName:        editForm.displayName.trim() || undefined,
-        taxCode:            editForm.taxCode.trim() || undefined,
-        vatNumber:          editForm.vatNumber.trim() || undefined,
+        // Stringa vuota (non undefined): CF svuotato = P.IVA
+        taxCode:            editForm.taxCode.trim(),
+        vatNumber:          editForm.vatNumber.trim(),
         administrativeEmail: editForm.administrativeEmail.trim() || undefined,
         pec:                editForm.pec.trim() || undefined,
         phone:              editForm.phone.trim() || undefined,
@@ -386,12 +390,14 @@ const TenantDetail = () => {
                 <Input value={editForm.displayName} onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))} />
               </div>
               <div className="space-y-1">
-                <Label>Codice Fiscale (16 caratteri)</Label>
-                <Input value={editForm.taxCode} onChange={e => setEditForm(f => ({ ...f, taxCode: e.target.value.toUpperCase() }))} className="font-mono uppercase" maxLength={16} />
+                <Label>Codice Fiscale (16 caratteri o 11 cifre)</Label>
+                <Input value={editForm.taxCode} onChange={e => setEditForm(f => ({ ...f, taxCode: normalizzaCF(e.target.value) }))}
+                  placeholder="RSSMRA80A01H501Z (opzionale)" className="font-mono uppercase" maxLength={16} />
               </div>
               <div className="space-y-1">
-                <Label>Partita IVA</Label>
-                <Input value={editForm.vatNumber} onChange={e => setEditForm(f => ({ ...f, vatNumber: e.target.value }))} className="font-mono" maxLength={11} />
+                <Label>Partita IVA *</Label>
+                <Input value={editForm.vatNumber} onChange={e => setEditForm(f => ({ ...f, vatNumber: e.target.value.trim() }))}
+                  placeholder="12345678901" className="font-mono" maxLength={11} />
               </div>
               <div className="space-y-1">
                 <Label>Email Amministrativa *</Label>

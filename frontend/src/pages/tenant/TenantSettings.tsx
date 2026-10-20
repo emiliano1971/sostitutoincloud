@@ -1,3 +1,4 @@
+import { isPIVA, isValidCFOrPIVA, normalizzaCF } from '@/lib/fiscalCodeValidator';
 import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -71,6 +72,15 @@ const TenantSettings = () => {
   // Salvataggio della sezione dati aziendali: il comune è obbligatorio perché
   // alimenta la Sede del CedentePrestatore nell'XML SDI.
   const handleSaveCompany = () => {
+    // Stesse regole del backend: P.IVA obbligatoria, CF facoltativo (16 caratteri o 11 cifre, vuoto = P.IVA)
+    if (!isPIVA(companyForm.vatNumber)) {
+      showStatus({ type: 'error', message: 'Partita IVA: 11 cifre numeriche obbligatorie' });
+      return;
+    }
+    if (companyForm.taxCode.trim() && !isValidCFOrPIVA(companyForm.taxCode)) {
+      showStatus({ type: 'error', message: 'Codice fiscale non valido: 16 caratteri alfanumerici o 11 cifre' });
+      return;
+    }
     if (!companyForm.legalAddress.trim()) {
       showStatus({ type: 'error', message: 'Indirizzo obbligatorio' });
       return;
@@ -129,12 +139,14 @@ const TenantSettings = () => {
                   <Input value={companyForm.displayName} onChange={e => setCompanyForm(f => ({ ...f, displayName: e.target.value }))} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Codice Fiscale</Label>
-                  <Input value={companyForm.taxCode} onChange={e => setCompanyForm(f => ({ ...f, taxCode: e.target.value }))} className="font-mono" />
+                  <Label>Codice Fiscale (16 caratteri o 11 cifre)</Label>
+                  <Input value={companyForm.taxCode} onChange={e => setCompanyForm(f => ({ ...f, taxCode: normalizzaCF(e.target.value) }))}
+                    placeholder="RSSMRA80A01H501Z (opzionale)" className="font-mono uppercase" maxLength={16} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Partita IVA</Label>
-                  <Input value={companyForm.vatNumber} onChange={e => setCompanyForm(f => ({ ...f, vatNumber: e.target.value }))} className="font-mono" />
+                  <Label>Partita IVA *</Label>
+                  <Input value={companyForm.vatNumber} onChange={e => setCompanyForm(f => ({ ...f, vatNumber: e.target.value.trim() }))}
+                    placeholder="12345678901" className="font-mono" maxLength={11} />
                 </div>
                 <div className="space-y-2">
                   <Label>Email Amministrativa</Label>

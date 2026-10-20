@@ -175,6 +175,27 @@ public class BookingSplitEconomicoDAO {
         return result;
     }
 
+    /**
+     * Provvigione PM imponibile per booking (voce commissione_pm), escluse stornate e cancellate.
+     * Una sola query per tutti gli id richiesti; i booking senza voce non sono nella mappa.
+     */
+    public Map<Integer, BigDecimal> sumProvvigionePmPerBooking(Integer tenantId, List<Integer> bookingIds) {
+        Map<Integer, BigDecimal> result = new LinkedHashMap<>();
+        if (bookingIds == null || bookingIds.isEmpty()) {
+            return result;
+        }
+        String sql = loadSql("sql/booking_split_economico/provvigione_pm_per_booking.sql");
+        jdbcTemplate.query(sql, ps -> {
+            ps.setInt(1, tenantId);
+            ps.setArray(2, ps.getConnection().createArrayOf("integer", bookingIds.toArray()));
+        }, rs -> {
+            result.put(rs.getInt("fk_booking_id"), rs.getBigDecimal("provvigione_pm"));
+        });
+        log.debug("BookingSplitEconomicoDAO.sumProvvigionePmPerBooking() - tenantId={} ids={} trovati={}",
+                tenantId, bookingIds.size(), result.size());
+        return result;
+    }
+
     private String loadSql(String classpath) {
         try (InputStream is = new ClassPathResource(classpath).getInputStream()) {
             return StreamUtils.copyToString(is, StandardCharsets.UTF_8);

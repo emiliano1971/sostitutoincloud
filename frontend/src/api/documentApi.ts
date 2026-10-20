@@ -222,13 +222,13 @@ export async function aggiornaStatoDocumento(id: number, stato: string): Promise
 }
 
 /**
- * Scarica il file XML archiviato di un invio SDI (GET /api/sdi/download/{progressivo}).
+ * Download di un XML dal backend: nome file dal Content-Disposition, fallback indicato.
  * Come downloadDocumentPdf non usa apiClient: la risposta è un blob, non JSON.
  */
-export async function downloadSdiXml(progressivo: string): Promise<void> {
+async function scaricaXml(path: string, fallbackName: string): Promise<void> {
   const base = getConfig().apiBaseUrl;
   const token = getToken();
-  const res = await fetch(`${base}/sdi/download/${encodeURIComponent(progressivo)}`, {
+  const res = await fetch(`${base}${path}`, {
     headers: {
       'Accept': 'application/xml',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -244,10 +244,9 @@ export async function downloadSdiXml(progressivo: string): Promise<void> {
     throw new Error(message);
   }
 
-  // Il nome file arriva dal Content-Disposition; fallback sul progressivo.
   const disposition = res.headers.get('Content-Disposition') ?? '';
   const match = disposition.match(/filename="?([^";]+)"?/);
-  const fileName = match ? match[1] : `${progressivo}.xml`;
+  const fileName = match ? match[1] : fallbackName;
 
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -261,6 +260,24 @@ export async function downloadSdiXml(progressivo: string): Promise<void> {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/** Scarica il file XML archiviato di un invio SDI (GET /api/sdi/download/{progressivo}). */
+export async function downloadSdiXml(progressivo: string): Promise<void> {
+  return scaricaXml(`/sdi/download/${encodeURIComponent(progressivo)}`, `${progressivo}.xml`);
+}
+
+/**
+ * XML SDI di fattura / NDC generato al momento (GET /api/documents/{id}/xml):
+ * nessun file scritto, nessun progressivo consumato, qualsiasi stato.
+ */
+export async function downloadXmlRuntime(id: number): Promise<void> {
+  return scaricaXml(`/documents/${id}/xml`, `documento-${id}.xml`);
+}
+
+/** Marca fattura / NDC come inviata allo SDI fuori dall'applicazione (POST /api/documents/{id}/sdi-manuale). */
+export async function segnaInviataManualmente(id: number): Promise<{ message: string }> {
+  return post<{ message: string }>(`/documents/${id}/sdi-manuale`, {});
 }
 
 export interface SdiElaborazioneResult {

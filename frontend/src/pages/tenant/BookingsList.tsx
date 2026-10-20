@@ -55,6 +55,12 @@ const channelColors: Record<string, string> = {
   vrbo: 'bg-[#3B5998]/10 text-[#3B5998]',
 };
 
+const fmtEur = (v: number) => `€${v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Nazione ospite (stessi codici dell'import): 100000100 = Italia, qualsiasi altro valore = estero
+const isItaliano = (country?: string) => country === '100000100';
+const isEstero = (country?: string) => country != null && country !== '' && country !== '100000100';
+
 const isFinalStatus = (status: string) =>
   ['doc_issued', 'settled', 'cancelled', 'stornata'].includes(status);
 
@@ -455,6 +461,9 @@ const BookingsList = () => {
                   <TableHead>Check-out</TableHead>
                   <TableHead className="text-right">Notti</TableHead>
                   <TableHead className="text-right">Lordo €</TableHead>
+                  <TableHead className="text-right text-xs text-muted-foreground font-normal whitespace-nowrap">Netto OW €</TableHead>
+                  <TableHead className="text-right text-xs text-muted-foreground font-normal whitespace-nowrap">Netto PM €</TableHead>
+                  <TableHead className="text-center text-xs text-muted-foreground font-normal">Italiano</TableHead>
                   <TableHead>Stato</TableHead>
                   <TableHead className="w-10"></TableHead>
                   <TableHead className="text-xs text-muted-foreground font-normal">PDF</TableHead>
@@ -518,6 +527,15 @@ const BookingsList = () => {
                             </span>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">
+                        {b.ownerNetAmount != null ? fmtEur(b.ownerNetAmount) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">
+                        {b.pmNetAmount != null && b.pmNetAmount > 0 ? fmtEur(b.pmNetAmount) : '—'}
+                      </TableCell>
+                      <TableCell className="text-center text-sm whitespace-nowrap">
+                        {isItaliano(b.guestCountry) ? 'Sì 🇮🇹' : isEstero(b.guestCountry) ? 'No 🌍' : '—'}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">

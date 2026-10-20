@@ -6,7 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ArrowLeft, Building2, User, Home, Calendar, Receipt, Download, Loader2, AlertCircle, ExternalLink, Send, CheckCircle2, XCircle, AlertTriangle, Landmark, FileCheck, Ban, RotateCcw } from 'lucide-react';
-import { getDocumentById, downloadDocumentPdf, downloadNdcPdf, inviaSdi, downloadSdiXml, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
+import { getDocumentById, downloadDocumentPdf, downloadNdcPdf, inviaSdi, downloadSdiXml, downloadXmlRuntime, segnaInviataManualmente, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { annullaNdc, getBookingById, type BookingDetail, type FiscalDocumentSummary } from '@/api/bookingApi';
 import NdcDialog from '@/components/booking/NdcDialog';
 import { useToast } from '@/hooks/use-toast';
@@ -78,6 +82,10 @@ const DocumentDetail = () => {
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSendingSdi, setIsSendingSdi] = useState(false);
+  const [isScaricandoXml, setIsScaricandoXml] = useState(false);
+  // Conferma "Inviata manualmente" (documento trasmesso fuori dall'applicazione)
+  const [confermaManuale, setConfermaManuale] = useState(false);
+  const [isMarcandoManuale, setIsMarcandoManuale] = useState(false);
   const [isAnnullando, setIsAnnullando] = useState(false);
   // Emissione NDC: il dialog mostra le voci dello split, servono prenotazione e fattura
   // nel formato del dettaglio prenotazione (caricati all'apertura).
@@ -183,6 +191,43 @@ const DocumentDetail = () => {
     }
   };
 
+  // XML SDI generato al momento: nessun file scritto, nessun progressivo, qualsiasi stato
+  const handleScaricaXml = async () => {
+    if (!doc) return;
+    setIsScaricandoXml(true);
+    try {
+      await downloadXmlRuntime(doc.id);
+    } catch (err) {
+      toast({
+        title: 'Errore download XML',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsScaricandoXml(false);
+    }
+  };
+
+  // Trasmissione fatta fuori dall'applicazione: stato sent_sdi senza file né progressivo
+  const handleInviataManualmente = async () => {
+    if (!doc) return;
+    setIsMarcandoManuale(true);
+    try {
+      await segnaInviataManualmente(doc.id);
+      setDoc(await getDocumentById(doc.id));
+      toast({ title: 'Documento marcato come inviato manualmente' });
+    } catch (err) {
+      toast({
+        title: 'Errore',
+        description: err instanceof Error ? err.message : 'Errore imprevisto',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsMarcandoManuale(false);
+      setConfermaManuale(false);
+    }
+  };
+
   // Annullamento NDC: ammesso solo prima dell'invio SDI (il backend risponde 400 altrimenti)
   const handleAnnullaNdc = async () => {
     if (!doc || !window.confirm(`Annullare la nota di credito ${doc.documentNumber}?`)) return;
@@ -252,19 +297,30 @@ const DocumentDetail = () => {
   // La card mostra i dati di trasmissione appena esiste un progressivo, qualunque
   // sia l'esito. 'error' può precedere l'invio (generazione fallita): in quel caso
   // non c'è progressivo e resta il messaggio "non ancora trasmessa".
-  const sdiTrasmesso = Boolean(doc.sdiProgressivo);
+  // Un invio manuale (sent_sdi/accepted senza progressivo) conta come trasmesso.
+  const sdiInviatoManualmente = !doc.sdiProgressivo && ['sent_sdi', 'accepted'].includes(doc.statoDocumento);
+  const sdiTrasmesso = Boolean(doc.sdiProgressivo) || sdiInviatoManualmente;
   // Periodo F24 nel formato "MM/yyyy": lo scompongo per il link con i filtri della lista.
   const [meseF24, annoF24] = (doc.f24Periodo ?? '').split('/');
   const annoDocumento = doc.issueDate ? doc.issueDate.slice(0, 4) : null;
   // Nuovo invio ammesso finché lo SDI non ha confermato: dopo uno scarto o un
   // errore la fattura va corretta e ritrasmessa.
-  const inviabileSdi = isTrasmissibile && !ndcAnnullata && !['sent_sdi', 'accepted'].includes(doc.statoDocumento);
+  // Esclusi anche i documenti annullati e le fatture stornate da una NDC attiva
+  // (stesse regole di SdiXmlService.verificaInviabile, che risponde 422).
+  const inviabileSdi = isTrasmissibile
+    && !['sent_sdi', 'accepted', 'annullata'].includes(doc.statoDocumento)
+    && !(isFatturaPm && ndcAttive.length > 0);
   // NDC: invio solo con la fattura collegata già trasmessa (finché lo stato non è caricato, nascosto)
   const fatturaCollegataInviata = statoFatturaCollegata != null
     && ['sent_sdi', 'accepted'].includes(statoFatturaCollegata);
   const puoInviareSdi = inviabileSdi && (!isNotaCredito || fatturaCollegataInviata);
   const ndcAttendeFattura = inviabileSdi && isNotaCredito && statoFatturaCollegata != null && !fatturaCollegataInviata;
-  const puoRiprovareSdi = isTrasmissibile && (sdiRifiutato || sdiErrore);
+  // Non dipende da inviabileSdi: stessa esclusione della fattura con NDC attiva
+  const puoRiprovareSdi = isTrasmissibile && (sdiRifiutato || sdiErrore) && !(isFatturaPm && ndcAttive.length > 0);
+  // "Inviata manualmente": da bozza o pronto, stesse regole dell'invio (fattura senza NDC
+  // attiva, NDC con fattura già trasmessa). Il backend le ricontrolla (422).
+  const puoMarcareManuale = isTrasmissibile && ['ready', 'draft'].includes(doc.statoDocumento)
+    && (isNotaCredito ? fatturaCollegataInviata : ndcAttive.length === 0);
   const ritenuta = doc.ritenutaAmount ?? 0;
   // Netto = canone - ritenuta. Il bollo NON è scalato: coerente con il PDF
   // (ricevuta-owner.html) e con SettlementService (net = total - withholding).
@@ -637,9 +693,11 @@ const DocumentDetail = () => {
                   ) : (
                     <>
                       <Badge variant="outline" className="bg-success/10 text-success border-success/20 gap-1">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Inviato SDI
+                        <CheckCircle2 className="h-3.5 w-3.5" /> {sdiInviatoManualmente ? 'Inviato manualmente' : 'Inviato SDI'}
                       </Badge>
-                      <span className="text-xs text-muted-foreground">in attesa di risposta AdE</span>
+                      <span className="text-xs text-muted-foreground">
+                        {sdiInviatoManualmente ? 'trasmesso fuori dall\'applicazione' : 'in attesa di risposta AdE'}
+                      </span>
                     </>
                   )}
                 </div>
@@ -657,7 +715,7 @@ const DocumentDetail = () => {
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Progressivo</span>
-                  <span className="font-mono text-xs">{doc.sdiProgressivo}</span>
+                  <span className="font-mono text-xs">{doc.sdiProgressivo ?? '—'}</span>
                 </div>
                 {/* IdentificativoSdI assegnato dallo SDI, letto dalle ricevute di esito */}
                 {doc.sdiIdentifier && (
@@ -748,6 +806,37 @@ const DocumentDetail = () => {
             La fattura originale non è ancora stata inviata allo SDI. Inviare prima la fattura.
           </p>
         )}
+        {isTrasmissibile && (
+          <Button variant="outline" size="sm" className="gap-1 self-center" onClick={handleScaricaXml} disabled={isScaricandoXml}>
+            {isScaricandoXml ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Scarica XML
+          </Button>
+        )}
+        {puoMarcareManuale && (
+          <Button variant="outline" size="sm" className="gap-1 self-center" onClick={() => setConfermaManuale(true)} disabled={isMarcandoManuale}>
+            {isMarcandoManuale ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Inviata manualmente
+          </Button>
+        )}
+        <AlertDialog open={confermaManuale} onOpenChange={open => { if (!open && !isMarcandoManuale) setConfermaManuale(false); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Segnare come inviata manualmente?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Sei sicuro? Il documento verrà marcato come inviato allo SDI senza trasmissione automatica.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isMarcandoManuale}>Annulla</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={e => { e.preventDefault(); void handleInviataManualmente(); }}
+                disabled={isMarcandoManuale}
+              >
+                {isMarcandoManuale ? 'Salvataggio…' : 'Conferma'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {puoInviareSdi && (
           <Button variant="outline" className="gap-2" onClick={handleInviaSdi} disabled={isSendingSdi}>
             {isSendingSdi

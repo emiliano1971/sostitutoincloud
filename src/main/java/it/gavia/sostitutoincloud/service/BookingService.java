@@ -190,8 +190,15 @@ public class BookingService {
         int to = Math.min(from + effectiveSize, tutti.size());
         log.info("BookingService.findPage() - tenantId={} filtro={} page={} size={} totale={}",
                 tenantId, filter, pageNum, effectiveSize, tutti.size());
+
+        // Provvigione PM imponibile dei soli booking della pagina: una query per tutta la pagina
+        List<BookingListDTO> content = new ArrayList<>(tutti.subList(from, to));
+        Map<Integer, BigDecimal> pmMap = splitEconomicoDAO.sumProvvigionePmPerBooking(
+                tenantId, content.stream().map(BookingListDTO::getId).toList());
+        content.forEach(dto -> dto.setPmNetAmount(pmMap.getOrDefault(dto.getId(), BigDecimal.ZERO)));
+
         return BookingPageDTO.builder()
-                .content(new ArrayList<>(tutti.subList(from, to)))
+                .content(content)
                 .page(pageNum)
                 .size(effectiveSize)
                 .totalElements(tutti.size())
@@ -1364,6 +1371,7 @@ public class BookingService {
                 .guests(b.getGuests())
                 .grossAmount(b.getGrossAmount())
                 .ownerNetAmount(b.getOwnerNetAmount())
+                .guestCountry(b.getGuestCountry())
                 .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                 .touristTaxAmount(b.getTouristTaxAmount())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))

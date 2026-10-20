@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.service;
 
+import it.gavia.sostitutoincloud.util.CodiceFiscalePivaValidator;
 import it.gavia.sostitutoincloud.dao.AuditLogDAO;
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
@@ -126,14 +127,18 @@ public class TenantService {
 
     public TenantDetailDTO create(TenantCreateDTO dto) {
         log.info("TenantService.create() - taxCode={}", dto.getTaxCode());
-        tenantDAO.findByTaxCode(dto.getTaxCode()).ifPresent(t -> {
+        // P.IVA obbligatoria; CF a 16 caratteri o 11 cifre, se assente = P.IVA
+        String vatNumber = CodiceFiscalePivaValidator.normalizza(dto.getVatNumber());
+        String taxCode = CodiceFiscalePivaValidator.validaTenant(
+                CodiceFiscalePivaValidator.normalizza(dto.getTaxCode()), vatNumber);
+        tenantDAO.findByTaxCode(taxCode).ifPresent(t -> {
             throw new IllegalArgumentException("Tenant con questo codice fiscale già esistente");
         });
         Tenant tenant = Tenant.builder()
                 .legalName(dto.getLegalName())
                 .displayName(dto.getDisplayName())
-                .taxCode(dto.getTaxCode())
-                .vatNumber(dto.getVatNumber())
+                .taxCode(taxCode)
+                .vatNumber(vatNumber)
                 .stato("draft")
                 .administrativeEmail(dto.getAdministrativeEmail())
                 .pec(dto.getPec())
@@ -154,8 +159,17 @@ public class TenantService {
         log.info("TenantService.update() - id={}", id);
         Tenant existing = tenantDAO.findById(id)
                 .orElseThrow(() -> new RuntimeException("Tenant non trovato: id=" + id));
-        if (dto.getTaxCode() != null && !dto.getTaxCode().equals(existing.getTaxCode())) {
-            tenantDAO.findByTaxCode(dto.getTaxCode())
+        // Valori effettivi (campo assente = invariato; CF vuoto = P.IVA)
+        String vatNumber = dto.getVatNumber() != null
+                ? CodiceFiscalePivaValidator.normalizza(dto.getVatNumber())
+                : existing.getVatNumber();
+        String taxCode = CodiceFiscalePivaValidator.validaTenant(
+                dto.getTaxCode() != null
+                        ? CodiceFiscalePivaValidator.normalizza(dto.getTaxCode())
+                        : existing.getTaxCode(),
+                vatNumber);
+        if (!taxCode.equals(existing.getTaxCode())) {
+            tenantDAO.findByTaxCode(taxCode)
                     .filter(t -> !t.getId().equals(id))
                     .ifPresent(t -> { throw new IllegalArgumentException("Tenant con questo codice fiscale già esistente"); });
         }
@@ -163,8 +177,8 @@ public class TenantService {
                 .id(existing.getId())
                 .legalName(dto.getLegalName() != null ? dto.getLegalName() : existing.getLegalName())
                 .displayName(dto.getDisplayName() != null ? dto.getDisplayName() : existing.getDisplayName())
-                .taxCode(dto.getTaxCode() != null ? dto.getTaxCode() : existing.getTaxCode())
-                .vatNumber(dto.getVatNumber() != null ? dto.getVatNumber() : existing.getVatNumber())
+                .taxCode(taxCode)
+                .vatNumber(vatNumber)
                 .administrativeEmail(dto.getAdministrativeEmail() != null ? dto.getAdministrativeEmail() : existing.getAdministrativeEmail())
                 .pec(dto.getPec() != null ? dto.getPec() : existing.getPec())
                 .phone(dto.getPhone() != null ? dto.getPhone() : existing.getPhone())
@@ -248,7 +262,8 @@ public class TenantService {
                 .bolloAddebitatoCliente(true)
                 .regimeFiscalePm("RF01")
                 .naturaIvaEsente("N2.1")
-                .sdiAutoSend(true)
+                // Default invio SDI manuale: l'auto-invio si attiva dalle impostazioni del tenant
+                .sdiAutoSend(false)
                 .derogaRicevutaEnabled(false)
                 .numerazioneAutomatica(true)
                 .alertScadenzeDocumenti(true)
