@@ -117,7 +117,8 @@ public class SettlementPdfService {
         BigDecimal totOta = BigDecimal.ZERO;
         BigDecimal totPulizie = BigDecimal.ZERO;
         BigDecimal totPm = BigDecimal.ZERO;
-        BigDecimal totBollo = BigDecimal.ZERO;
+        BigDecimal totBolloAddebitato = BigDecimal.ZERO;
+        BigDecimal totBolloInformativo = BigDecimal.ZERO;
 
         StringBuilder righe = new StringBuilder();
         int i = 1;
@@ -127,14 +128,15 @@ public class SettlementPdfService {
             BigDecimal canone = nz(b.getOwnerNetAmount());
             BigDecimal ritenuta = nz(b.getWithholdingAmount());
             BigDecimal netto = canone.subtract(ritenuta).setScale(2, RoundingMode.HALF_UP);
-            BigDecimal bollo = BigDecimal.valueOf(b.getBolloCents() != null ? b.getBolloCents() : 0)
-                    .divide(CENTO, 2, RoundingMode.HALF_UP);
+            BigDecimal bolloAddebitato = centesimi(b.getBolloCentsAddebitato());
+            BigDecimal bolloInformativo = centesimi(b.getBolloCentsInformativo());
 
             totLordo = totLordo.add(nz(b.getGrossAmount()));
             totOta = totOta.add(nz(b.getOtaCommissionAmount()));
             totPulizie = totPulizie.add(nz(b.getCleaningAmount()));
             totPm = totPm.add(nz(b.getPmFeeAmount()));
-            totBollo = totBollo.add(bollo);
+            totBolloAddebitato = totBolloAddebitato.add(bolloAddebitato);
+            totBolloInformativo = totBolloInformativo.add(bolloInformativo);
 
             righe.append("<tr>")
                     .append("<td>").append(i++).append("</td>")
@@ -148,8 +150,10 @@ public class SettlementPdfService {
                     .append(cella("text-right negative", neg(b.getOtaCommissionAmount())))
                     .append(cella("text-right negative", neg(b.getCleaningAmount())))
                     .append(cella("text-right negative", neg(b.getPmFeeAmount())))
+                    // Bollo prima del canone: l'addebitato è una deduzione come le voci PM,
+                    // l'informativo è segnato con * e non entra nei conti
+                    .append(cellaBollo(bolloAddebitato, bolloInformativo))
                     .append(cella("text-right", fmt(canone)))
-                    .append(cella("text-right", fmt(bollo)))
                     .append(cella("text-right negative", neg(ritenuta)))
                     .append(cella("text-right positive", fmt(netto)))
                     .append("</tr>");
@@ -183,7 +187,18 @@ public class SettlementPdfService {
         c.put("TOT_PULIZIE", neg(totPulizie));
         c.put("TOT_PM", neg(totPm));
         c.put("TOT_CANONE", fmt(settlement.getTotalAmount()));
-        c.put("TOT_BOLLO", fmt(totBollo));
+        boolean conAddebitato = totBolloAddebitato.signum() > 0;
+        boolean conInformativo = totBolloInformativo.signum() > 0;
+        c.put("TOT_BOLLO_ADDEBITATO", conAddebitato ? neg(totBolloAddebitato) : "");
+        c.put("TOT_BOLLO_INFORMATIVO", conInformativo
+                ? (conAddebitato ? "<br/>" : "") + fmt(totBolloInformativo) + " *" : "");
+        c.put("TOT_BOLLO_VUOTO", !conAddebitato && !conInformativo ? "&#8212;" : "");
+        c.put("CARD_BOLLO", (conAddebitato ? cardBollo("Bollo addebitato", "-&#8364; " + fmt(totBolloAddebitato)) : "")
+                + (conInformativo ? cardBollo("Bollo *", "&#8364; " + fmt(totBolloInformativo)) : ""));
+        c.put("NOTE_BOLLO", (conAddebitato
+                ? "<div>Bollo addebitato: incluso nella fattura PM e già dedotto dal canone.</div>" : "")
+                + (conInformativo
+                ? "<div>* Bollo informativo: indicato a fini informativi, non dedotto dal netto pagato.</div>" : ""));
         c.put("TOT_RITENUTA", neg(ritenutaTotale));
         c.put("TOT_RITENUTA_EURO", ritenutaTotale.compareTo(BigDecimal.ZERO) > 0
                 ? "-€ " + fmt(ritenutaTotale)
@@ -193,6 +208,22 @@ public class SettlementPdfService {
         c.put("NUM_PRENOTAZIONI", String.valueOf(bookings.size()));
         c.put("DATA_GENERAZIONE", LocalDate.now().format(DATE_IT));
         return c;
+    }
+
+    private BigDecimal centesimi(Integer cents) {
+        return BigDecimal.valueOf(cents != null ? cents : 0).divide(CENTO, 2, RoundingMode.HALF_UP);
+    }
+
+    /** Cella bollo: addebitato come deduzione, informativo con asterisco, altrimenti trattino. */
+    private String cellaBollo(BigDecimal addebitato, BigDecimal informativo) {
+        if (addebitato.signum() > 0) return cella("text-right negative", neg(addebitato));
+        if (informativo.signum() > 0) return cella("text-right muted", fmt(informativo) + " *");
+        return cella("text-right muted", "&#8212;");
+    }
+
+    private String cardBollo(String etichetta, String valore) {
+        return "<div class=\"summary-cell\"><div class=\"summary-label\">" + etichetta
+                + "</div><div class=\"summary-value\">" + valore + "</div></div>";
     }
 
     private String cella(String cssClass, String valore) {

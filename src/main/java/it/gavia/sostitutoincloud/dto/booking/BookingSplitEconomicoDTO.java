@@ -25,6 +25,7 @@ public class BookingSplitEconomicoDTO {
     private BigDecimal importoOriginaleFile;   // commissione OTA grezza dal file di import
     private BigDecimal aliquotaIva;
     private Boolean includeInFatturaPm;
+    private Boolean fuoriCampo;
     private Integer ordinamento;
     private String source;
     private LocalDateTime createdAt;

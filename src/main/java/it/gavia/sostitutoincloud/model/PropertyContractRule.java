@@ -22,6 +22,8 @@ public class PropertyContractRule {
     private String calcMode;
     private BigDecimal valore;
     private Boolean isRemainder;
+    // Solo provvigione_proprietario: addebita il bollo della ricevuta al proprietario (migration 034)
+    private Boolean addebitaBollo;
     private Integer ordine;
     private Boolean attivo;
     private LocalDateTime createdAt;

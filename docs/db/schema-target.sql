@@ -509,6 +509,8 @@ CREATE TABLE property_contract_rule (
     calc_mode           VARCHAR(30)     NOT NULL,   -- fisso, percentuale, fisso_per_notte, fisso_per_persona, percentuale_lordo, rimanenza
     valore              DECIMAL(10,2)   NOT NULL DEFAULT 0,
     is_remainder        BOOLEAN         NOT NULL DEFAULT FALSE,
+    -- migration 034: addebita il bollo della ricevuta al proprietario (solo provvigione_proprietario)
+    addebita_bollo      BOOLEAN         NOT NULL DEFAULT FALSE,
     ordine              INTEGER         NOT NULL DEFAULT 0,
     attivo              BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at          TIMESTAMP       NOT NULL DEFAULT NOW(),
@@ -574,6 +576,9 @@ CREATE TABLE booking (
     -- migration 018: somma delle voci booking_split_economico con include_in_fattura_pm=true,
     -- aggiornata dal service (non da trigger)
     total_costi_pm                  DECIMAL(10,2)           DEFAULT 0,
+    -- migration 035: bollo addebitato al proprietario (voce 'bollo' dello split)
+    bollo_addebitato                BOOLEAN                 NOT NULL DEFAULT FALSE,
+    bollo_importo                   NUMERIC(10,2)           NOT NULL DEFAULT 0,
     created_at                      TIMESTAMP               NOT NULL DEFAULT NOW(),
     updated_at                      TIMESTAMP               NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_checkout_after_checkin   CHECK (checkout_date > checkin_date),
@@ -592,6 +597,12 @@ COMMENT ON TABLE booking IS
 CREATE TRIGGER trg_booking_updated_at
     BEFORE UPDATE ON booking
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+COMMENT ON COLUMN booking.bollo_addebitato IS
+    'True se il bollo è stato addebitato al proprietario come voce dello split economico '
+    '(fuori campo art. 15 in fattura PM). Aggiornato da popolaSplitEconomico.';
+COMMENT ON COLUMN booking.bollo_importo IS
+    'Importo del bollo addebitato in euro. 0 se non addebitato. Aggiornato da popolaSplitEconomico.';
 
 COMMENT ON COLUMN booking.guest_email IS
     'Email ospite, più indirizzi separati da punto e virgola. '
@@ -624,6 +635,8 @@ CREATE TABLE booking_split_economico (
     importo                      DECIMAL(10,2) NOT NULL,
     aliquota_iva                 DECIMAL(5,2)  NOT NULL DEFAULT 0,
     include_in_fattura_pm        BOOLEAN       NOT NULL DEFAULT TRUE,
+    -- migration 034: voce fuori campo IVA art. 15 (bollo): niente IVA, esclusa dall'imponibile
+    fuori_campo                  BOOLEAN       NOT NULL DEFAULT FALSE,
     ordinamento                  SMALLINT      NOT NULL DEFAULT 0,
     source                       VARCHAR(20)   NOT NULL DEFAULT 'calcolato',
     -- 'calcolato' | 'manuale' | 'import'
@@ -646,7 +659,14 @@ COMMENT ON TABLE booking_split_economico IS
 COMMENT ON COLUMN booking_split_economico.tipo_voce IS
     'commissione_ota | pulizie | '
     'cambio_biancheria | commissione_pm | '
-    'extra | tassa_soggiorno';
+    'extra | tassa_soggiorno | bollo';
+COMMENT ON COLUMN booking_split_economico.fuori_campo IS
+    'Se true la voce è fuori campo IVA art. 15 DPR 633/72 (es. bollo): in fattura PM '
+    'senza IVA, esclusa dall imponibile, Natura N1 nell XML SDI.';
+COMMENT ON COLUMN property_contract_rule.addebita_bollo IS
+    'Se true e tipo=provvigione_proprietario, aggiunge la voce bollo allo split economico '
+    '(fuori campo art. 15) sottraendola al netto proprietario. '
+    'Si applica solo se il netto proprietario supera tenant_settings.bollo_soglia.';
 COMMENT ON COLUMN booking_split_economico.source IS
     'calcolato | manuale | import';
 

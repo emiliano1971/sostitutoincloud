@@ -18,4 +18,6 @@ public class DocumentRowDTO {
     private BigDecimal aliquotaIva;
     private BigDecimal importoIva;
     private BigDecimal importoLordo;
+    // Voce fuori campo IVA art. 15 (rimborso bollo): niente IVA, esclusa dall'imponibile
+    private Boolean fuoriCampo;
 }

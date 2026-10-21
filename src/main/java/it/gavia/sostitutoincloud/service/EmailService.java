@@ -1,6 +1,10 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
+import it.gavia.sostitutoincloud.dto.batch.BatchRisultatoDTO;
+import it.gavia.sostitutoincloud.dto.batch.InviaEmailBatchDTO;
+import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
+import it.gavia.sostitutoincloud.dto.document.FiscalDocumentSummaryDTO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
@@ -31,12 +35,14 @@ public class EmailService {
     private static final String CODICE_FATTURA = "fattura";
     private static final String CODICE_RICEVUTA = "ricevuta";
     private static final String STATO_ANNULLATA = "annullata";
+    private static final String CODICE_NOTA_CREDITO = "nota_credito";
 
     private final JavaMailSender mailSender;
     private final DocumentPdfService documentPdfService;
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
+    private final BookingService bookingService;
 
     @Value("${app.mail.from}")
     private String mailFrom;
@@ -45,12 +51,76 @@ public class EmailService {
                         DocumentPdfService documentPdfService,
                         FiscalDocumentDAO fiscalDocumentDAO,
                         TipoDocumentoDAO tipoDocumentoDAO,
-                        StatoDocumentoDAO statoDocumentoDAO) {
+                        StatoDocumentoDAO statoDocumentoDAO,
+                        BookingService bookingService) {
         this.mailSender = mailSender;
         this.documentPdfService = documentPdfService;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.statoDocumentoDAO = statoDocumentoDAO;
+        this.bookingService = bookingService;
+    }
+
+    /**
+     * Invio massivo: per ogni prenotazione manda fattura PM + ricevuta owner all'email
+     * dell'ospite (booking.guest_email), con oggetto e testo comuni. Scartate le prenotazioni
+     * non trovate, senza email ospite, senza fattura attiva (mancante, annullata o stornata da
+     * NDC) o senza ricevuta attiva, e quelle il cui invio fallisce. Ognuna è indipendente.
+     */
+    public BatchRisultatoDTO inviaBatch(Integer tenantId, InviaEmailBatchDTO dto) {
+        if (dto.getBookingIds() == null || dto.getBookingIds().isEmpty()) {
+            throw new IllegalArgumentException("Nessuna prenotazione selezionata");
+        }
+        if (dto.getOggetto() == null || dto.getOggetto().isBlank()) {
+            throw new IllegalArgumentException("Oggetto obbligatorio");
+        }
+        BatchRisultatoDTO risultato = new BatchRisultatoDTO();
+
+        for (Integer bookingId : dto.getBookingIds()) {
+            BookingDetailDTO booking = bookingService.findById(tenantId, bookingId).orElse(null);
+            if (booking == null) {
+                risultato.scarta("#" + bookingId, "prenotazione non trovata");
+                continue;
+            }
+            String codice = booking.getExternalBookingId() != null ? booking.getExternalBookingId() : "#" + bookingId;
+            if (EmailUtils.elenco(booking.getGuestEmail()).isEmpty()) {
+                risultato.scarta(codice, "email ospite non presente");
+                continue;
+            }
+            List<FiscalDocumentSummaryDTO> docs = booking.getDocumenti() != null ? booking.getDocumenti() : List.of();
+            FiscalDocumentSummaryDTO fattura = attivo(docs, CODICE_FATTURA);
+            boolean fatturaStornata = fattura != null && docs.stream()
+                    .anyMatch(d -> CODICE_NOTA_CREDITO.equals(d.getTipoDocumento())
+                            && fattura.getId().equals(d.getFkDocumentoCollegatoId())
+                            && !STATO_ANNULLATA.equals(d.getStatoDocumento()));
+            if (fattura == null || fatturaStornata) {
+                risultato.scarta(codice, "fattura non emessa o stornata");
+                continue;
+            }
+            FiscalDocumentSummaryDTO ricevuta = attivo(docs, CODICE_RICEVUTA);
+            if (ricevuta == null) {
+                risultato.scarta(codice, "ricevuta non emessa o annullata");
+                continue;
+            }
+            try {
+                inviaDocumenti(tenantId, bookingId, booking.getGuestEmail(), dto.getOggetto(), dto.getTesto(),
+                        fattura.getId(), ricevuta.getId());
+                risultato.elaborato();
+            } catch (Exception e) {
+                log.warn("EmailService.inviaBatch() - booking {}: invio fallito: {}", codice, e.getMessage());
+                risultato.scarta(codice, "invio fallito — " + e.getMessage());
+            }
+        }
+        log.info("EmailService.inviaBatch() - tenantId={} richiesti={} inviati={} scartati={}",
+                tenantId, dto.getBookingIds().size(), risultato.getElaborati(), risultato.getScartati());
+        return risultato;
+    }
+
+    private FiscalDocumentSummaryDTO attivo(List<FiscalDocumentSummaryDTO> docs, String codiceTipo) {
+        return docs.stream()
+                .filter(d -> codiceTipo.equals(d.getTipoDocumento()) && !STATO_ANNULLATA.equals(d.getStatoDocumento()))
+                .findFirst()
+                .orElse(null);
     }
 
     /**

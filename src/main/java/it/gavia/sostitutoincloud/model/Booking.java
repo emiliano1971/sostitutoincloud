@@ -41,6 +41,9 @@ public class Booking {
     private String guestPhone;
     /** Email ospite, più indirizzi separati da ; (migration 031). */
     private String guestEmail;
+    // Bollo addebitato al proprietario (voce 'bollo' dello split, migration 035)
+    private Boolean bolloAddebitato;
+    private BigDecimal bolloImporto;
     // Somma delle righe booking_split_economico in fattura PM (migration 018)
     private BigDecimal totalCostiPm;
     private LocalDate checkinDate;

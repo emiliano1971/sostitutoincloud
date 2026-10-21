@@ -903,6 +903,23 @@ public class BookingService {
                     calcolo.getPmFeeAmount(), calcolo.getPmImponibile(), ivaPm, true, ORDINE_PM, pmSource, utenteId));
             righe++;
         }
+        // 4b. Marca da bollo addebitata al proprietario: voce di fattura PM fuori campo IVA
+        //     art. 15 (importo = imponibile, IVA 0), prima della provvigione PM. Riduce il netto
+        //     proprietario tramite total_costi_pm (ricalcolaNettoDaSplit).
+        if (positivo(calcolo.getBolloAmount())) {
+            BookingSplitEconomico rigaBollo = rigaSplit(bookingId, tenantId, calcolo.getFkRegolaBolloId(),
+                    TIPO_VOCE_BOLLO, DESCR_BOLLO,
+                    calcolo.getBolloAmount(), calcolo.getBolloAmount(), BigDecimal.ZERO, true, ORDINE_BOLLO,
+                    "calcolato", utenteId);
+            rigaBollo.setFuoriCampo(true);
+            splitEconomicoDAO.insert(rigaBollo);
+            righe++;
+        }
+        // Riepilogo sul booking per la liquidazione: scritto sempre, così un ricalcolo che
+        // toglie il bollo riporta il booking a false/0
+        boolean bolloAddebitato = positivo(calcolo.getBolloAmount());
+        bookingDAO.updateBolloAddebitato(bookingId, bolloAddebitato,
+                bolloAddebitato ? calcolo.getBolloAmount() : BigDecimal.ZERO);
         // 5. Tassa di soggiorno: incassata per conto del Comune, non entra nella fattura PM.
         //    Impostata a mano o da file la riga c'è anche a 0 (es. ospiti esenti): è il segno
         //    che toDetailDTO() non deve ricalcolarla dalla regola del comune.
@@ -962,6 +979,11 @@ public class BookingService {
     // ── Voci extra dello split (inserite a mano dal PM) ─────────────────────────────
 
     private static final String TIPO_VOCE_EXTRA = "extra";
+    /** Marca da bollo addebitata al proprietario: voce fuori campo IVA art. 15 (migration 034). */
+    public static final String TIPO_VOCE_BOLLO = "bollo";
+    public static final String DESCR_BOLLO = "Rimborso marca da bollo art. 15 DPR 633/72";
+    /** Dopo le voci di servizio, prima della provvigione PM (ORDINE_PM). */
+    private static final int ORDINE_BOLLO = 990;
 
     /**
      * Ordinamento della provvigione PM: fisso e alto, così resta dopo tutte le altre voci
@@ -1185,6 +1207,24 @@ public class BookingService {
                 .build();
     }
 
+    /** Marca da bollo addebitata al proprietario: somma delle righe 'bollo' attive (0 se assente). */
+    private BigDecimal bolloDaRighe(List<BookingSplitEconomico> righe) {
+        return righe.stream()
+                .filter(r -> TIPO_VOCE_BOLLO.equals(r.getTipoVoce()) && r.getDeletedAt() == null)
+                .map(r -> safeVal(r.getImporto()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** Totale delle voci in fattura PM fuori campo IVA art. 15 (bollo): nel totale, non nell'imponibile. */
+    private BigDecimal fuoriCampoInFattura(List<BookingSplitEconomico> righe) {
+        return righe.stream()
+                .filter(r -> Boolean.TRUE.equals(r.getIncludeInFatturaPm()) && Boolean.TRUE.equals(r.getFuoriCampo()))
+                .map(r -> safeVal(r.getImporto()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
     private boolean positivo(BigDecimal v) {
         return v != null && v.signum() > 0;
     }
@@ -1372,6 +1412,7 @@ public class BookingService {
                 .grossAmount(b.getGrossAmount())
                 .ownerNetAmount(b.getOwnerNetAmount())
                 .guestCountry(b.getGuestCountry())
+                .bolloAddebitato(Boolean.TRUE.equals(b.getBolloAddebitato()))
                 .touristTaxIncludedInGross(b.getTouristTaxIncludedInGross())
                 .touristTaxAmount(b.getTouristTaxAmount())
                 .statoPrenotazione(statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById))
@@ -1462,6 +1503,7 @@ public class BookingService {
                     .imponibileFatturaPm(fatturaPm.map(FiscalDocument::getImponibile).orElse(null))
                     .ivaScorporataPm(fatturaPm.map(FiscalDocument::getVatAmount).orElse(null))
                     .fatturaPmTotale(fatturaPm.map(FiscalDocument::getTotalAmount).orElse(lordoServizi))
+                    .bolloAmount(bolloDaRighe(righeSplit))
                     .warnings(List.of())
                     .calcoloCompleto(true)
                     .regimeFiscalePm(regimeFiscalePm(b.getFkTenantId()))
@@ -1525,17 +1567,21 @@ public class BookingService {
                 // Stesso calcolo di DocumentGenerationService (fattura PM): RF19 senza IVA;
                 // RF01 Σ imponibili delle righe in fattura, con scorporo lordo / 1.22 per le
                 // righe senza imponibile (create prima della migration 020).
+                // Le voci fuori campo art. 15 (bollo) sono nel totale ma fuori da imponibile e IVA.
                 boolean forfettario = "RF19".equalsIgnoreCase(calcolo.getRegimeFiscalePm());
+                BigDecimal fuoriCampo = fuoriCampoInFattura(righeSplit);
                 imponibileFatturaPm = forfettario
-                        ? fatturaPmTotale
+                        ? fatturaPmTotale.subtract(fuoriCampo)
                         : righeSplit.stream()
                                 .filter(r -> Boolean.TRUE.equals(r.getIncludeInFatturaPm()))
+                                .filter(r -> !Boolean.TRUE.equals(r.getFuoriCampo()))
                                 .map(r -> r.getImponibile() != null
                                         ? r.getImponibile()
                                         : safeVal(r.getImporto()).divide(new BigDecimal("1.22"), 2, RoundingMode.HALF_UP))
                                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                                 .setScale(2, RoundingMode.HALF_UP);
-                ivaScorporata = fatturaPmTotale.subtract(imponibileFatturaPm).setScale(2, RoundingMode.HALF_UP);
+                ivaScorporata = fatturaPmTotale.subtract(fuoriCampo).subtract(imponibileFatturaPm)
+                        .setScale(2, RoundingMode.HALF_UP);
             }
 
             split = SplitEconomicoDTO.builder()
@@ -1552,6 +1598,7 @@ public class BookingService {
                     .imponibileFatturaPm(imponibileFatturaPm)
                     .ivaScorporataPm(ivaScorporata)
                     .fatturaPmTotale(fatturaPmTotale)
+                    .bolloAmount(daRigheSplit ? bolloDaRighe(righeSplit) : safeVal(calcolo.getBolloAmount()))
                     .warnings(calcolo.getWarnings())
                     .calcoloCompleto(calcolo.getCalcoloCompleto())
                     .regimeFiscalePm(calcolo.getRegimeFiscalePm())
@@ -1579,6 +1626,7 @@ public class BookingService {
                         .importoOriginaleFile(r.getImportoOriginaleFile())
                         .aliquotaIva(r.getAliquotaIva())
                         .includeInFatturaPm(r.getIncludeInFatturaPm())
+                        .fuoriCampo(Boolean.TRUE.equals(r.getFuoriCampo()))
                         .ordinamento(r.getOrdinamento())
                         .source(r.getSource())
                         .createdAt(r.getCreatedAt())
@@ -1604,6 +1652,8 @@ public class BookingService {
                 .guestAddress(b.getGuestAddress())
                 .guestPhone(b.getGuestPhone())
                 .guestEmail(b.getGuestEmail())
+                .bolloAddebitato(Boolean.TRUE.equals(b.getBolloAddebitato()))
+                .bolloImporto(safeVal(b.getBolloImporto()))
                 .propertyName(prop != null ? prop.getDisplayName() : null)
                 .ownerName(resolveOwnerName(b.getFkOwnerId(), maps.ownersById))
                 .channelName(canale != null ? canale.getNome() : null)
@@ -1763,6 +1813,7 @@ public class BookingService {
                     .importoOriginaleFile(r.getImportoOriginaleFile())
                     .aliquotaIva(r.getAliquotaIva())
                     .includeInFatturaPm(r.getIncludeInFatturaPm())
+                    .fuoriCampo(r.getFuoriCampo())
                     .ordinamento(r.getOrdinamento())
                     .source(r.getSource())
                     .createdBy(utenteId)

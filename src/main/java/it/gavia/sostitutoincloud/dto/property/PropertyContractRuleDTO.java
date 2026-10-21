@@ -23,5 +23,6 @@ public class PropertyContractRuleDTO {
     private String calcModeLabel;
     private BigDecimal valore;
     private Boolean isRemainder;
+    private Boolean addebitaBollo;
     private Integer ordine;
 }

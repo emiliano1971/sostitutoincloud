@@ -4,16 +4,18 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getDocuments, downloadDocumentPdf, elaboraRisposteSdi, getStatoFiscaleRicevuta, type DocumentListItem, type StatoFiscaleRicevuta } from '@/api/documentApi';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/utils';
+import { getDocuments, downloadDocumentPdf, elaboraRisposteSdi, getStatoFiscaleRicevuta, scaricaEMarcaBatch, scaricaXmlBatch, inviaSdiBatch, type DocumentListItem, type StatoFiscaleRicevuta } from '@/api/documentApi';
 import { annullaNdc } from '@/api/bookingApi';
 import Paginazione from '@/components/Paginazione';
 import { useToast } from '@/hooks/use-toast';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { labelStatoDocumento, labelTipoDocumento, labelStatoCu } from '@/lib/statiLabels';
 
 // Pannello "Stato fiscale": etichette e colori dei codici di stato restituiti dal backend
@@ -118,31 +120,43 @@ const SortableTh = ({ label, colKey, sortKey, sortDir, onSort, align = 'left' }:
 };
 
 const DocumentsList = () => {
-  const [search, setSearch] = useState('');
-  // Stato SDI iniziale da ?stato= (link dalla dashboard "Fatture da inviare SDI")
-  const [statusFilter, setStatusFilter] = useState(
-    () => new URLSearchParams(window.location.search).get('stato') || 'all');
   const [docs, setDocs] = useState<DocumentListItem[]>([]);
-  // Paginazione lato server (dimensione pagina dalle impostazioni del tenant)
-  const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalElements, setTotalElements] = useState(0);
-  // Ricerca inviata al backend con un breve ritardo: niente richiesta a ogni tasto
-  const [searchQuery, setSearchQuery] = useState('');
-  // Periodo di emissione: mese ('' = tutti) e anno (default l'anno corrente, '' = tutti)
-  const annoCorrente = new Date().getFullYear();
-  const [meseFilter, setMeseFilter] = useState<string>('');
-  const [annoFilter, setAnnoFilter] = useState<string>(String(annoCorrente));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<string>('issueDate');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [isProcessingSdi, setIsProcessingSdi] = useState(false);
   const [sdiDettagli, setSdiDettagli] = useState<string[] | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Selezione multipla per le azioni massive (ZIP XML, invio SDI): solo pagina corrente
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showZipDialog, setShowZipDialog] = useState(false);
+  const [scaricando, setScaricando] = useState(false);
+  // Modalità ZIP: true = scarica e marca "inviati manualmente", false = solo download
+  const [marcaInviati, setMarcaInviati] = useState(true);
+  const [showSdiDialog, setShowSdiDialog] = useState(false);
+  const [inviandoSdi, setInviandoSdi] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  // Tutti i filtri, l'ordinamento e la pagina stanno nell'URL: sopravvivono al reload e
+  // al ritorno dal dettaglio. I valori di default non vengono scritti (URL pulito).
+  // Stato SDI (?stato=, anche dal link della dashboard "Fatture da inviare SDI")
+  const statusFilter = searchParams.get('stato') || 'all';
+  // Ricerca testuale (?q=): l'input è locale e scrive l'URL dopo 300 ms
+  const searchQuery = searchParams.get('q') ?? '';
+  const [search, setSearch] = useState(searchQuery);
+  // Periodo di emissione: mese ('' = tutti) e anno (assente = anno corrente, 'all' = tutti)
+  const annoCorrente = new Date().getFullYear();
+  const meseFilter = searchParams.get('mese') ?? '';
+  const annoParam = searchParams.get('anno');
+  const annoFilter = annoParam === null ? String(annoCorrente) : annoParam === 'all' ? '' : annoParam;
+  // Ordinamento lato server (?sort=&dir=), default data emissione decrescente
+  const sortKey = searchParams.get('sort') || 'issueDate';
+  const sortDir: SortDir = searchParams.get('dir') === 'asc' ? 'asc' : 'desc';
+  // Pagina lato server (?page=, 0-based; dimensione pagina dalle impostazioni del tenant)
+  const page = Math.max(0, parseInt(searchParams.get('page') ?? '0') || 0);
   // Filtro per data emissione persistito nell'URL, stesso pattern di BookingsList.
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo = searchParams.get('dateTo') ?? '';
@@ -165,13 +179,25 @@ const DocumentsList = () => {
   useEffect(() => { setDateToInput(dateTo); }, [dateTo]);
 
   const handleSort = (key: string) => {
-    if (key === sortKey) {
-      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
-      setSortDir(key === 'issueDate' ? 'desc' : 'asc');
-    }
+    const dir: SortDir = key === sortKey
+      ? (sortDir === 'asc' ? 'desc' : 'asc')
+      : (key === 'issueDate' ? 'desc' : 'asc');
+    // Una sola setSearchParams per sort + dir; il default (issueDate desc) non va nell'URL
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (key === 'issueDate') next.delete('sort'); else next.set('sort', key);
+      if (dir === 'desc') next.delete('dir'); else next.set('dir', dir);
+      next.delete('page');
+      return next;
+    }, { replace: true });
   };
+
+  const setPage = (p: number) => updateFilter('page', p > 0 ? String(p) : null);
+  const setStatusFilter = (v: string) => updateFilter('stato', v === 'all' ? null : v);
+  const setMeseFilter = (v: string) => updateFilter('mese', v || null);
+  // anno: assente = anno corrente (default), 'all' = tutti gli anni
+  const setAnnoFilter = (v: string) =>
+    updateFilter('anno', v === String(annoCorrente) ? null : (v || 'all'));
 
   // Filtro rapido sulle ricevute (backend, ?fiscale=… nell'URL): con un filtro attivo la
   // lista contiene solo ricevute owner non annullate. Visibile con tipo 'Tutti' o 'Ricevute'.
@@ -179,20 +205,36 @@ const DocumentsList = () => {
   const filtriFiscaliVisibili = tipoFilter === '' || tipoFilter === 'ricevuta';
   const filtroFiscaleAttivo = filtriFiscaliVisibili ? filtroFiscale : '';
 
+  // Ricerca: l'URL si aggiorna 300 ms dopo l'ultimo tasto, con il valore finale
   useEffect(() => {
-    const t = setTimeout(() => setSearchQuery(search.trim()), 300);
+    const t = setTimeout(() => {
+      if (search.trim() !== searchQuery) updateFilter('q', search.trim() || null);
+    }, 300);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambio dell'input
   }, [search]);
+  // Riallinea l'input quando ?q= cambia dall'esterno (back/forward, link)
+  useEffect(() => {
+    setSearch(prev => (prev.trim() === searchQuery ? prev : searchQuery));
+  }, [searchQuery]);
+
+  // Con un intervallo di date attivo mese e anno non vengono inviati al backend: le date
+  // sono più specifiche e la combinazione (es. anno corrente + date di un altro anno)
+  // darebbe una lista vuota. I select mese/anno restano visibili ma disabilitati.
+  const filtroDateAttivo = Boolean(dateFrom || dateTo);
+  const meseEffettivo = filtroDateAttivo ? '' : meseFilter;
+  const annoEffettivo = filtroDateAttivo ? '' : annoFilter;
 
   // Filtri, ordinamento e paginazione sono tutti lato server. Al cambio di un filtro (o
   // dell'ordinamento) si riparte da pagina 0: se si è su un'altra pagina si azzera e il
   // caricamento parte dal render successivo, senza una richiesta inutile sulla pagina vecchia.
   const filterKey = JSON.stringify([statusFilter, tipoFilter, searchQuery, filtroFiscaleAttivo,
-    dateFrom, dateTo, meseFilter, annoFilter, ownerIdFilter, settlementFilter, sortKey, sortDir]);
+    dateFrom, dateTo, meseEffettivo, annoEffettivo, ownerIdFilter, settlementFilter, sortKey, sortDir]);
   const prevFilterKey = useRef(filterKey);
   useEffect(() => {
     if (prevFilterKey.current !== filterKey) {
       prevFilterKey.current = filterKey;
+      // Le scritture dei filtri tolgono già ?page=; questo copre i casi residui
       if (page !== 0) { setPage(0); return; }
     }
     let annullato = false;   // risposta superata da una richiesta più recente
@@ -205,8 +247,8 @@ const DocumentsList = () => {
       filtroFiscale: filtroFiscaleAttivo || undefined,
       dataFrom: dateFrom || undefined,
       dataTo: dateTo || undefined,
-      mese: meseFilter ? Number(meseFilter) : undefined,
-      anno: annoFilter ? Number(annoFilter) : undefined,
+      mese: meseEffettivo ? Number(meseEffettivo) : undefined,
+      anno: annoEffettivo ? Number(annoEffettivo) : undefined,
       ownerId: ownerIdFilter ?? undefined,
       liquidazione: settlementFilter || undefined,
       sort: sortKey,
@@ -227,6 +269,77 @@ const DocumentsList = () => {
   }, [filterKey, page, reloadKey]);
 
   // Pannello laterale "Stato fiscale" della ricevuta
+  // La selezione vale per la pagina caricata: si azzera a ogni ricarica, pagina o filtro
+  useEffect(() => { setSelectedIds(new Set()); }, [filterKey, page, reloadKey]);
+
+  const toggleId = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const tuttiSelezionati = docs.length > 0 && docs.every(d => selectedIds.has(d.id));
+  const toggleAll = () => setSelectedIds(tuttiSelezionati ? new Set() : new Set(docs.map(d => d.id)));
+
+  const handleScaricaZip = async () => {
+    setScaricando(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = marcaInviati ? await scaricaEMarcaBatch(ids) : await scaricaXmlBatch(ids);
+      const url = URL.createObjectURL(res.blob);
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = res.fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      setShowZipDialog(false);
+      setSelectedIds(new Set());
+      // Ricarica solo se lo stato dei documenti è cambiato
+      if (marcaInviati) setReloadKey(k => k + 1);
+      toast({
+        title: 'Download completato',
+        description: marcaInviati
+          ? `${res.inclusi} XML nello ZIP, ${res.marcati} marcati come inviati manualmente`
+            + (res.scartati > 0 ? `, ${res.scartati} scartati o non marcati` : '')
+          : `${res.inclusi} XML nello ZIP` + (res.scartati > 0 ? `, ${res.scartati} documenti scartati` : ''),
+      });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setScaricando(false);
+    }
+  };
+
+  const handleInviaSdiBatch = async () => {
+    setInviandoSdi(true);
+    try {
+      const res = await inviaSdiBatch(Array.from(selectedIds));
+      toast({
+        title: `Inviati: ${res.elaborati} — Scartati: ${res.scartati}`,
+        description: res.dettagliScartati.length > 0
+          ? <div className="whitespace-pre-line text-xs">
+              {res.dettagliScartati.slice(0, 5).join('\n')}
+              {res.dettagliScartati.length > 5 ? `\n… e altri ${res.dettagliScartati.length - 5}` : ''}
+            </div>
+          : undefined,
+        variant: res.scartati > 0 && res.elaborati === 0 ? 'destructive' : 'default',
+      });
+      setShowSdiDialog(false);
+      setSelectedIds(new Set());
+      setReloadKey(k => k + 1);
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setInviandoSdi(false);
+    }
+  };
+
   const [statoFiscaleDocId, setStatoFiscaleDocId] = useState<number | null>(null);
   const [statoFiscale, setStatoFiscale] = useState<StatoFiscaleRicevuta | null>(null);
   const [loadingStatoFiscale, setLoadingStatoFiscale] = useState(false);
@@ -261,6 +374,8 @@ const DocumentsList = () => {
       const next = new URLSearchParams(prev);
       if (value === null || value === '') next.delete(key);
       else next.set(key, value);
+      // Ogni cambio di filtro riparte dalla prima pagina
+      if (key !== 'page') next.delete('page');
       return next;
     }, { replace: true });
   };
@@ -280,6 +395,7 @@ const DocumentsList = () => {
       if (preset) next.set('preset', preset); else next.delete('preset');
       if (from) next.set('dateFrom', from); else next.delete('dateFrom');
       if (to) next.set('dateTo', to); else next.delete('dateTo');
+      next.delete('page');
       return next;
     }, { replace: true });
   };
@@ -288,6 +404,7 @@ const DocumentsList = () => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.delete('dateFrom'); next.delete('dateTo'); next.delete('preset');
+      next.delete('page');
       return next;
     }, { replace: true });
   };
@@ -412,8 +529,8 @@ const DocumentsList = () => {
               'all' fa da "tutti" e non viene inviato al backend. */}
           <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t">
             <div className="flex items-center gap-2">
-              <Select value={meseFilter || 'all'} onValueChange={v => setMeseFilter(v === 'all' ? '' : v)}>
-                <SelectTrigger className="w-36"><SelectValue placeholder="Mese" /></SelectTrigger>
+              <Select value={meseFilter || 'all'} onValueChange={v => setMeseFilter(v === 'all' ? '' : v)} disabled={filtroDateAttivo}>
+                <SelectTrigger className="w-36" title={filtroDateAttivo ? 'Ignorato: è attivo il filtro per data' : undefined}><SelectValue placeholder="Mese" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tutti i mesi</SelectItem>
                   {MESI.map((m, i) => (
@@ -421,8 +538,8 @@ const DocumentsList = () => {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={annoFilter || 'all'} onValueChange={v => setAnnoFilter(v === 'all' ? '' : v)}>
-                <SelectTrigger className="w-32"><SelectValue placeholder="Anno" /></SelectTrigger>
+              <Select value={annoFilter || 'all'} onValueChange={v => setAnnoFilter(v === 'all' ? '' : v)} disabled={filtroDateAttivo}>
+                <SelectTrigger className="w-32" title={filtroDateAttivo ? 'Ignorato: è attivo il filtro per data' : undefined}><SelectValue placeholder="Anno" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tutti gli anni</SelectItem>
                   {/* dal 2024 all'anno corrente + 1 */}
@@ -447,6 +564,7 @@ const DocumentsList = () => {
                       if (e.target.value) next.set('dateFrom', e.target.value);
                       else next.delete('dateFrom');
                       next.delete('preset');
+                      next.delete('page');
                       return next;
                     }, { replace: true });
                   }
@@ -465,6 +583,7 @@ const DocumentsList = () => {
                       if (e.target.value) next.set('dateTo', e.target.value);
                       else next.delete('dateTo');
                       next.delete('preset');
+                      next.delete('page');
                       return next;
                     }, { replace: true });
                   }
@@ -513,6 +632,7 @@ const DocumentsList = () => {
             onClick={() => setSearchParams(prev => {
               const next = new URLSearchParams(prev);
               next.delete('ownerId');
+              next.delete('page');
               return next;
             }, { replace: true })}
           >
@@ -538,6 +658,87 @@ const DocumentsList = () => {
         </div>
       )}
 
+      {/* Barra azioni massive: visibile con almeno un documento selezionato */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2 bg-muted/50 rounded-lg">
+          <span className="text-sm font-medium">{selectedIds.size} selezionati</span>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowZipDialog(true)}>
+            <Download className="h-4 w-4" /> Scarica ZIP XML
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowSdiDialog(true)}>
+            <Send className="h-4 w-4" /> Invia a SDI
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+            Annulla selezione
+          </Button>
+        </div>
+      )}
+
+      <Dialog open={showZipDialog} onOpenChange={open => { if (!scaricando) setShowZipDialog(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Scarica ZIP XML</DialogTitle>
+            <DialogDescription>
+              Verranno inclusi gli XML SDI dei {selectedIds.size} documenti selezionati idonei (fatture e NDC non stornate).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <label className={cn('flex items-start gap-3 cursor-pointer p-3 rounded-lg border hover:bg-muted/50 transition-colors',
+              marcaInviati && 'border-primary')}>
+              <input
+                type="radio"
+                name="modalitaZip"
+                checked={marcaInviati}
+                onChange={() => setMarcaInviati(true)}
+                className="mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-medium">Scarica e marca come inviati manualmente</p>
+                <p className="text-xs text-muted-foreground mt-0.5">I documenti scaricati verranno marcati come "Inviati manualmente" allo SDI</p>
+              </div>
+            </label>
+            <label className={cn('flex items-start gap-3 cursor-pointer p-3 rounded-lg border hover:bg-muted/50 transition-colors',
+              !marcaInviati && 'border-primary')}>
+              <input
+                type="radio"
+                name="modalitaZip"
+                checked={!marcaInviati}
+                onChange={() => setMarcaInviati(false)}
+                className="mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-medium">Scarica senza marcare</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Solo download — lo stato dei documenti non cambia</p>
+              </div>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowZipDialog(false)} disabled={scaricando}>Annulla</Button>
+            <Button onClick={handleScaricaZip} disabled={scaricando}>
+              {scaricando ? 'Download...' : 'Scarica ZIP'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSdiDialog} onOpenChange={open => { if (!inviandoSdi) setShowSdiDialog(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invia a SDI</DialogTitle>
+            <DialogDescription>
+              Verranno inviati al Sistema di Interscambio i {selectedIds.size} documenti selezionati idonei.
+              L'operazione è irreversibile. Documenti non idonei verranno scartati.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSdiDialog(false)} disabled={inviandoSdi}>Annulla</Button>
+            <Button onClick={handleInviaSdiBatch} disabled={inviandoSdi}>
+              {inviandoSdi ? 'Invio in corso...' : 'Invia a SDI'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -558,6 +759,9 @@ const DocumentsList = () => {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox checked={tuttiSelezionati} onCheckedChange={toggleAll} aria-label="Seleziona tutti" />
+                  </TableHead>
                   <SortableTh label="Numero" colKey="documentNumber" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                   <SortableTh label="Tipo" colKey="documentType" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                   <SortableTh label="Destinatario" colKey="recipientName" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
@@ -573,6 +777,13 @@ const DocumentsList = () => {
               <TableBody>
                 {docs.map(d => (
                   <TableRow key={d.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(d.id)}
+                        onCheckedChange={() => toggleId(d.id)}
+                        aria-label={`Seleziona ${d.documentNumber}`}
+                      />
+                    </TableCell>
                     <TableCell>
                       {/* Numero documento + id prenotazione collegata, cliccabile.
                           stopPropagation: la riga potrebbe diventare cliccabile in futuro. */}
@@ -592,7 +803,7 @@ const DocumentsList = () => {
                         {d.ndcNumber && d.ndcId && (
                           <button
                             type="button"
-                            onClick={e => { e.stopPropagation(); navigate(`/documents/${d.ndcId}`); }}
+                            onClick={e => { e.stopPropagation(); navigate(`/documents/${d.ndcId}`, { state: { listaQuery: location.search } }); }}
                             className="text-xs text-green-600 hover:text-green-700 hover:underline text-left block"
                           >
                             NDC: {d.ndcNumber}
@@ -601,7 +812,7 @@ const DocumentsList = () => {
                         {d.fatturaCollegataNumber && d.fatturaCollegataId && (
                           <button
                             type="button"
-                            onClick={e => { e.stopPropagation(); navigate(`/documents/${d.fatturaCollegataId}`); }}
+                            onClick={e => { e.stopPropagation(); navigate(`/documents/${d.fatturaCollegataId}`, { state: { listaQuery: location.search } }); }}
                             className="text-xs text-muted-foreground hover:text-foreground hover:underline text-left block"
                           >
                             Storno di: {d.fatturaCollegataNumber}
@@ -661,7 +872,7 @@ const DocumentsList = () => {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Dettaglio"
-                                    onClick={() => navigate(`/documents/${d.id}`)}>
+                                    onClick={() => navigate(`/documents/${d.id}`, { state: { listaQuery: location.search } })}>
                               <Eye className="h-3.5 w-3.5" />
                             </Button>
                           </TooltipTrigger>

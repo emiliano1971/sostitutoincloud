@@ -42,6 +42,7 @@ public class BookingDAO {
             "b.nights, b.guests, b.gross_amount, b.ota_commission_amount, b.cleaning_amount, " +
             "b.pm_fee_amount, b.owner_net_amount, b.withholding_amount, b.aliquota_ritenuta, b.tourist_tax_amount, " +
             "b.tourist_tax_included_in_gross, b.tourist_tax_collection, b.total_costi_pm, b.fk_stato_prenotazione_id, " +
+            "b.bollo_addebitato, b.bollo_importo, " +
             "b.payment_status, b.settlement_status, b.created_at, b.updated_at " +
             "FROM booking b";
 
@@ -232,6 +233,18 @@ public class BookingDAO {
                 id, tenantId);
         log.info("BookingDAO.updateSplit() - id={} tenantId={}", id, tenantId);
         return updated;
+    }
+
+    /**
+     * Bollo addebitato al proprietario (voce 'bollo' dello split, migration 035): riscritto a
+     * ogni popolaSplitEconomico(), anche a false/0 quando il ricalcolo toglie il bollo.
+     */
+    public void updateBolloAddebitato(Integer bookingId, boolean addebitato, java.math.BigDecimal importo) {
+        jdbcTemplate.update(
+                "UPDATE booking SET bollo_addebitato = ?, bollo_importo = ?, updated_at = NOW() WHERE id = ?",
+                addebitato, importo != null ? importo : java.math.BigDecimal.ZERO, bookingId);
+        log.debug("BookingDAO.updateBolloAddebitato() - bookingId={} addebitato={} importo={}",
+                bookingId, addebitato, importo);
     }
 
     /** total_costi_pm = somma delle righe booking_split_economico in fattura PM (lo calcola il service). */

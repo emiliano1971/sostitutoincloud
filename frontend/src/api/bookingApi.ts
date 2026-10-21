@@ -14,6 +14,8 @@ export interface SplitEconomico {
   imponibileFatturaPm?: number;
   ivaScorporataPm?: number;
   fatturaPmTotale?: number;
+  /** Marca da bollo addebitata al proprietario (voce fuori campo art. 15 in fattura PM), 0 se assente. */
+  bolloAmount?: number;
   warnings?: string[];
   calcoloCompleto?: boolean;
   // Regola di contratto applicata, mostrata sotto la voce. Assenti sugli split storici
@@ -39,6 +41,8 @@ export interface BookingSplitRiga {
   importoOriginaleFile?: number | null;
   aliquotaIva: number;
   includeInFatturaPm: boolean;
+  /** Voce fuori campo IVA art. 15 (rimborso marca da bollo): niente IVA, fuori imponibile. */
+  fuoriCampo?: boolean;
   ordinamento: number;
   /** 'calcolato' | 'manuale' | 'import' */
   source: string;
@@ -82,6 +86,8 @@ export interface BookingListItem {
   pmNetAmount?: number;
   /** Nazione ospite: 100000100 = Italia, altro = estero. */
   guestCountry?: string;
+  /** Bollo addebitato al proprietario (voce 'bollo' dello split). */
+  bolloAddebitato?: boolean;
   // Assenti (Jackson NON_NULL) sulle prenotazioni senza tassa di soggiorno valorizzata.
   touristTaxIncludedInGross?: boolean;
   touristTaxAmount?: number;
@@ -116,6 +122,9 @@ export interface BookingDetail extends BookingListItem {
   guestPhone?: string;
   /** Email ospite, più indirizzi separati da ; */
   guestEmail?: string;
+  /** Bollo addebitato al proprietario (voce 'bollo' dello split, già dedotto dal netto). */
+  bolloAddebitato?: boolean;
+  bolloImporto?: number;
   regimeFiscaleCodice?: string;
   otaCommissionAmount?: number;
   cleaningAmount?: number;
@@ -307,6 +316,24 @@ export interface GuestUpdateRequest {
 
 export async function updateBookingGuest(id: number, data: GuestUpdateRequest): Promise<BookingDetail> {
   return patch<BookingDetail>(`/bookings/${id}/guest`, data);
+}
+
+/** Esito di un'azione massiva sulle prenotazioni selezionate. */
+export interface BatchRisultato {
+  elaborati: number;
+  scartati: number;
+  /** es. "Booking BC001: documenti già emessi" */
+  dettagliScartati: string[];
+}
+
+/** Genera i documenti mancanti (fattura PM + ricevuta owner) delle prenotazioni indicate. */
+export async function generaDocumentiBatch(bookingIds: number[], dataEmissione: string): Promise<BatchRisultato> {
+  return post<BatchRisultato>('/documents/genera-batch', { bookingIds, dataEmissione });
+}
+
+/** Invia fattura + ricevuta all'email ospite delle prenotazioni indicate. */
+export async function inviaEmailBatch(bookingIds: number[], oggetto: string, testo: string): Promise<BatchRisultato> {
+  return post<BatchRisultato>('/bookings/invia-email-batch', { bookingIds, oggetto, testo });
 }
 
 /** Invio via email di fattura PM + ricevuta owner come allegati PDF. */

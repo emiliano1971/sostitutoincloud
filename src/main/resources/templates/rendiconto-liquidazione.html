@@ -97,6 +97,7 @@
   }
   td.text-right { text-align: right; }
   td.negative { color: #cc0000; }
+  td.muted { color: #999999; }
   /* Non previsto dalla specifica: senza questa regola la colonna Netto
      resterebbe nera pur avendo class="positive" (il CSS del prompt definisce
      solo .summary-value.positive, che vale per le card del riepilogo). */
@@ -258,8 +259,8 @@
         <th class="text-right">Comm. OTA &#8364;</th>
         <th class="text-right">Pulizie &#8364;</th>
         <th class="text-right">Provv. PM &#8364;</th>
-        <th class="text-right">Canone &#8364;</th>
         <th class="text-right">Bollo &#8364;</th>
+        <th class="text-right">Canone &#8364;</th>
         <th class="text-right">Ritenuta &#8364;</th>
         <th class="text-right">Netto &#8364;</th>
       </tr>
@@ -279,8 +280,11 @@
         <td class="text-right negative">
           {TOT_PM}
         </td>
+        <!-- Bollo: addebitato (deduzione) e/o informativo (*), trattino se assente -->
+        <td class="text-right">
+          <span style="color:#cc0000">{TOT_BOLLO_ADDEBITATO}</span>{TOT_BOLLO_INFORMATIVO}{TOT_BOLLO_VUOTO}
+        </td>
         <td class="text-right">{TOT_CANONE}</td>
-        <td class="text-right">{TOT_BOLLO}</td>
         <td class="text-right negative">
           {TOT_RITENUTA}
         </td>
@@ -290,10 +294,9 @@
       </tr>
     </tbody>
   </table>
+  <!-- Note sul bollo: solo quelle pertinenti (addebitato / informativo) -->
   <div class="bollo-note">
-    * La marca da bollo è indicata a fini
-    informativi e non è dedotta dal netto
-    pagato al proprietario.
+    {NOTE_BOLLO}
   </div>
 </div>
 
@@ -318,14 +321,8 @@
       {TOT_RITENUTA_EURO}
     </div>
   </div>
-  <div class="summary-cell">
-    <div class="summary-label">
-      Bollo totale *
-    </div>
-    <div class="summary-value">
-      &#8364; {TOT_BOLLO}
-    </div>
-  </div>
+  <!-- Card bollo: "Bollo addebitato" e/o "Bollo *", assenti se non c'è bollo -->
+  {CARD_BOLLO}
   <div class="summary-cell">
     <div class="summary-label">
       Prenotazioni

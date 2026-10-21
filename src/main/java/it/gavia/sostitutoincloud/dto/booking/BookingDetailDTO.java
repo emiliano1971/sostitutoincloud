@@ -34,6 +34,9 @@ public class BookingDetailDTO {
     private String guestAddress;
     private String guestPhone;
     private String guestEmail;
+    // Bollo addebitato al proprietario (voce 'bollo' dello split, già dedotto dal netto)
+    private Boolean bolloAddebitato;
+    private BigDecimal bolloImporto;
     private String propertyName;
     private String ownerName;
     private String channelName;

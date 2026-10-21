@@ -8,6 +8,8 @@ import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.StatoPrenotazioneDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
+import it.gavia.sostitutoincloud.dto.batch.BatchRisultatoDTO;
+import it.gavia.sostitutoincloud.dto.batch.GeneraDocumentiBatchDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
@@ -35,6 +37,10 @@ public class DocumentGenerationService {
 
     private static final String TIPO_RICEVUTA_OWNER = "ricevuta_owner";
     private static final String TIPO_FATTURA_PM = "fattura_pm";
+    // Codici lookup tipo_documento / stato_prenotazione usati dalla generazione massiva
+    private static final String CODICE_FATTURA = "fattura";
+    private static final String CODICE_RICEVUTA = "ricevuta";
+    private static final String STATO_CANCELLED = "cancelled";
 
     // Moltiplicatore IVA ordinaria e aliquota IVA % di default (regime ordinario RF01).
     // Soglia/importo bollo e aliquota ritenuta sono ora configurabili nei tenant_settings.
@@ -106,6 +112,77 @@ public class DocumentGenerationService {
                 mese, anno);
         return "Attenzione: l'F24 del periodo " + String.format("%02d/%d", mese, anno)
                 + " è già stato pagato. La ritenuta sarà inclusa in un F24 integrativo.";
+    }
+
+    /**
+     * Generazione massiva: per ogni prenotazione emette i documenti mancanti (prima la fattura
+     * PM, poi la ricevuta owner) riusando generate(). Scartate le prenotazioni non trovate,
+     * stornate/cancellate o con entrambi i documenti già emessi (il controllo sul check-out passato
+     * è disabilitato, vedi il commento nel ciclo).
+     * Se la fattura fallisce la ricevuta non viene emessa (è calcolata sul netto dopo la fattura).
+     * Ogni prenotazione è indipendente: un errore non blocca le successive.
+     */
+    public BatchRisultatoDTO generaBatch(Integer tenantId, GeneraDocumentiBatchDTO dto) {
+        if (dto.getBookingIds() == null || dto.getBookingIds().isEmpty()) {
+            throw new IllegalArgumentException("Nessuna prenotazione selezionata");
+        }
+        LocalDate dataEmissione = dto.getDataEmissione() != null ? dto.getDataEmissione() : LocalDate.now();
+        LocalDate oggi = LocalDate.now();   // usato dal controllo check-out (disabilitato)
+        BatchRisultatoDTO risultato = new BatchRisultatoDTO();
+
+        for (Integer bookingId : dto.getBookingIds()) {
+            BookingDetailDTO booking = bookingService.findById(tenantId, bookingId).orElse(null);
+            if (booking == null) {
+                risultato.scarta("#" + bookingId, "prenotazione non trovata");
+                continue;
+            }
+            String codice = booking.getExternalBookingId() != null ? booking.getExternalBookingId() : "#" + bookingId;
+            if (STATO_STORNATA.equals(booking.getStatoPrenotazione()) || STATO_CANCELLED.equals(booking.getStatoPrenotazione())) {
+                risultato.scarta(codice, "prenotazione " + booking.getStatoPrenotazione());
+                continue;
+            }
+            // Controllo check-out passato disabilitato: il singolo documento (generate()) non ha
+            // questo vincolo e il comportamento deve essere coerente.
+            // Per ripristinarlo decommentare il blocco seguente:
+            //
+            // if (booking.getCheckoutDate() == null || !booking.getCheckoutDate().isBefore(oggi)) {
+            //     risultato.scarta(codice, "check-out non ancora passato");
+            //     continue;
+            // }
+            boolean haFattura = haDocumentoAttivo(booking, CODICE_FATTURA);
+            boolean haRicevuta = haDocumentoAttivo(booking, CODICE_RICEVUTA);
+            if (haFattura && haRicevuta) {
+                risultato.scarta(codice, "documenti già emessi");
+                continue;
+            }
+            try {
+                if (!haFattura) {
+                    generate(tenantId, new DocumentGenerateRequestDTO(bookingId, TIPO_FATTURA_PM, dataEmissione));
+                }
+            } catch (Exception e) {
+                log.warn("DocumentGenerationService.generaBatch() - booking {}: fattura non emessa: {}", codice, e.getMessage());
+                risultato.scarta(codice, "fattura PM non emessa — " + e.getMessage());
+                continue;
+            }
+            try {
+                if (!haRicevuta) {
+                    generate(tenantId, new DocumentGenerateRequestDTO(bookingId, TIPO_RICEVUTA_OWNER, dataEmissione));
+                }
+                risultato.elaborato();
+            } catch (Exception e) {
+                log.warn("DocumentGenerationService.generaBatch() - booking {}: ricevuta non emessa: {}", codice, e.getMessage());
+                risultato.scarta(codice, "ricevuta owner non emessa — " + e.getMessage());
+            }
+        }
+        log.info("DocumentGenerationService.generaBatch() - tenantId={} richiesti={} elaborati={} scartati={}",
+                tenantId, dto.getBookingIds().size(), risultato.getElaborati(), risultato.getScartati());
+        return risultato;
+    }
+
+    /** Documento del tipo indicato (codice lookup) presente e non annullato. */
+    private boolean haDocumentoAttivo(BookingDetailDTO booking, String codiceTipo) {
+        return booking.getDocumenti() != null && booking.getDocumenti().stream()
+                .anyMatch(d -> codiceTipo.equals(d.getTipoDocumento()) && !"annullata".equals(d.getStatoDocumento()));
     }
 
     public DocumentGenerateResponseDTO generate(Integer tenantId, DocumentGenerateRequestDTO request) {
@@ -202,7 +279,16 @@ public class DocumentGenerationService {
                         .orElseGet(() -> gross.subtract(otaCommission).subtract(cleaning).subtract(pmFee));
             }
             canone = canone.setScale(2, RoundingMode.HALF_UP);
-            bollo = canone.compareTo(bolloSoglia) > 0 ? bolloImporto : BigDecimal.ZERO.setScale(2);
+            // Bollo addebitato al proprietario (voce 'bollo' nello split): la decisione è dello
+            // split, anche se il canone dopo il bollo scende sotto soglia. Senza voce si applica
+            // la regola della soglia sul canone.
+            BigDecimal bolloSplit = splitEconomicoDAO.findByBookingId(request.getBookingId()).stream()
+                    .filter(r -> BookingService.TIPO_VOCE_BOLLO.equals(r.getTipoVoce()))
+                    .map(BookingSplitEconomico::getImporto)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            bollo = bolloSplit.signum() > 0
+                    ? bolloSplit.setScale(2, RoundingMode.HALF_UP)
+                    : canone.compareTo(bolloSoglia) > 0 ? bolloImporto : BigDecimal.ZERO.setScale(2);
             // Il bollo resta salvato per tracciabilità e compare nel dettaglio come voce
             // informativa, ma NON concorre al total_amount: non fa parte del compenso del
             // proprietario. Coerente con DocumentPdfService (netto = canone - ritenuta, bollo
@@ -245,21 +331,29 @@ public class DocumentGenerationService {
                         + "Verificare le regole contratto dell'immobile oppure la commissione "
                         + "OTA nel file di import.");
             }
+            // Voci fuori campo IVA art. 15 (rimborso bollo): nel totale, fuori da imponibile e IVA
+            BigDecimal fuoriCampo = righeInFattura.stream()
+                    .filter(r -> Boolean.TRUE.equals(r.getFuoriCampo()))
+                    .map(BookingSplitEconomico::getImporto)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal lordoSoggetto = lordoServizi.subtract(fuoriCampo);
             if (forfettario) {
                 // Regime forfettario (RF19): nessuno scorporo IVA — imponibile = lordo, IVA = 0.
-                imponibile = lordoServizi;
+                imponibile = lordoSoggetto;
                 iva = BigDecimal.ZERO.setScale(2);
                 aliquotaIva = BigDecimal.ZERO.setScale(2);
             } else if (!righeInFattura.isEmpty()) {
                 // Regime ordinario (RF01): Σ imponibili delle righe. Le righe create prima
                 // della migration 020 non hanno imponibile: per quelle si scorpora il lordo.
                 imponibile = righeInFattura.stream()
+                        .filter(r -> !Boolean.TRUE.equals(r.getFuoriCampo()))
                         .map(r -> r.getImponibile() != null
                                 ? r.getImponibile()
                                 : r.getImporto().divide(DIVISORE_IVA_22, 2, RoundingMode.HALF_UP))
                         .reduce(BigDecimal.ZERO, BigDecimal::add)
                         .setScale(2, RoundingMode.HALF_UP);
-                iva = lordoServizi.subtract(imponibile).setScale(2, RoundingMode.HALF_UP);
+                iva = lordoSoggetto.subtract(imponibile).setScale(2, RoundingMode.HALF_UP);
                 aliquotaIva = ALIQUOTA_IVA_22;
             } else {
                 // Regime ordinario senza righe split (campi flat pre-018): scorporo IVA dal lordo.

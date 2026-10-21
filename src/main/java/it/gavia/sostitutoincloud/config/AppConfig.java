@@ -39,6 +39,9 @@ public class AppConfig {
         config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        // Intestazioni leggibili dal frontend su origine diversa (Vite :5173): nome file dei
+        // download e riepilogo delle azioni massive sui documenti
+        config.setExposedHeaders(List.of("Content-Disposition", "X-Batch-Inclusi", "X-Batch-Marcati", "X-Batch-Scartati"));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

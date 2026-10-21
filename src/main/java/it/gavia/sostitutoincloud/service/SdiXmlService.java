@@ -1,6 +1,7 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
+import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
 import it.gavia.sostitutoincloud.dao.ComuneItalianoDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
@@ -10,6 +11,7 @@ import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
+import it.gavia.sostitutoincloud.dto.batch.BatchRisultatoDTO;
 import it.gavia.sostitutoincloud.dto.sdi.SdiFileDTO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.ComuneItaliano;
@@ -24,6 +26,9 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.zip.ZipOutputStream;
+import java.util.zip.ZipEntry;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -105,6 +110,7 @@ public class SdiXmlService {
     private final AuditService auditService;
     private final VociFatturaPmService vociFatturaPmService;
     private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
+    private final BookingSplitEconomicoDAO splitEconomicoDAO;
 
     public SdiXmlService(FiscalDocumentDAO fiscalDocumentDAO,
                          BookingDAO bookingDAO,
@@ -117,9 +123,11 @@ public class SdiXmlService {
                          ComuneItalianoDAO comuneItalianoDAO,
                          AuditService auditService,
                          VociFatturaPmService vociFatturaPmService,
-                         FiscalDocumentRigaNdcDAO rigaNdcDAO) {
+                         FiscalDocumentRigaNdcDAO rigaNdcDAO,
+                         BookingSplitEconomicoDAO splitEconomicoDAO) {
         this.vociFatturaPmService = vociFatturaPmService;
         this.rigaNdcDAO = rigaNdcDAO;
+        this.splitEconomicoDAO = splitEconomicoDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingDAO = bookingDAO;
         this.tenantDAO = tenantDAO;
@@ -263,15 +271,7 @@ public class SdiXmlService {
         // Fattura stornata da una NDC attiva (non annullata): non va più trasmessa. Copre anche
         // il booking 'stornata', che con la NDC sempre totale implica una NDC attiva.
         if (!notaCredito) {
-            Integer tipoNdcId = tipoDocumentoDAO.findByCodice(CODICE_NOTA_CREDITO)
-                    .map(TipoDocumento::getId).orElse(null);
-            boolean ndcAttiva = doc.getFkBookingId() != null && tipoNdcId != null
-                    && fiscalDocumentDAO.findByBookingId(doc.getFkBookingId()).stream()
-                    .filter(d -> tipoNdcId.equals(d.getFkTipoDocumentoId()))
-                    .filter(d -> fiscalDocumentId.equals(d.getFkDocumentoCollegatoId()))
-                    .anyMatch(d -> !"annullata".equals(statoDocumentoDAO.findById(d.getFkStatoDocumentoId())
-                            .map(StatoDocumento::getCodice).orElse(null)));
-            if (ndcAttiva) {
+            if (haNdcAttiva(doc)) {
                 throw new IllegalStateException(
                         "Impossibile inviare allo SDI: esiste una nota di credito attiva per questa fattura");
             }
@@ -288,6 +288,18 @@ public class SdiXmlService {
                     + " non è stata inviata allo SDI: la nota di credito non va trasmessa");
         }
         return fatturaCollegata;
+    }
+
+    /** Fattura stornata da una nota di credito collegata non annullata. */
+    private boolean haNdcAttiva(FiscalDocument fattura) {
+        Integer tipoNdcId = tipoDocumentoDAO.findByCodice(CODICE_NOTA_CREDITO)
+                .map(TipoDocumento::getId).orElse(null);
+        return fattura.getFkBookingId() != null && tipoNdcId != null
+                && fiscalDocumentDAO.findByBookingId(fattura.getFkBookingId()).stream()
+                .filter(d -> tipoNdcId.equals(d.getFkTipoDocumentoId()))
+                .filter(d -> fattura.getId().equals(d.getFkDocumentoCollegatoId()))
+                .anyMatch(d -> !"annullata".equals(statoDocumentoDAO.findById(d.getFkStatoDocumentoId())
+                        .map(StatoDocumento::getCodice).orElse(null)));
     }
 
     private FiscalDocument fatturaCollegata(FiscalDocument ndc) {
@@ -357,6 +369,111 @@ public class SdiXmlService {
                 fiscalDocumentId, doc.getDocumentNumber());
     }
 
+    // ────────────────────────────── azioni massive ──────────────────────────────
+
+    /** ZIP degli XML di più documenti con il riepilogo di inclusi / scartati / marcati. */
+    public record ZipXmlBatch(byte[] zip, int inclusi, int marcati, BatchRisultatoDTO scarti) {}
+
+    /**
+     * ZIP degli XML SDI generati a runtime (vedi generaXmlRuntime) per i documenti indicati.
+     * Inclusi solo fatture PM e NDC del tenant; scartate ricevute, documenti non trovati e
+     * fatture stornate da una NDC attiva. Nome file IT{piva}_{progressivo}.xml, oppure
+     * IT{piva}_{numero documento}.xml se il documento non ha progressivo.
+     *
+     * @param marcaManuale true = dopo l'inclusione marca ogni documento come inviato
+     *                     manualmente (segnaInviataManualmente); un errore di marcatura non
+     *                     esclude il file dallo ZIP ed è riportato tra gli scarti
+     * @throws IllegalStateException nessun documento idoneo (ZIP vuoto)
+     */
+    public ZipXmlBatch generaZipXml(Integer tenantId, List<Integer> documentIds, boolean marcaManuale) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            throw new IllegalArgumentException("Nessun documento selezionato");
+        }
+        BatchRisultatoDTO scarti = new BatchRisultatoDTO();
+        int inclusi = 0;
+        int marcati = 0;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
+            for (Integer docId : documentIds) {
+                FiscalDocument doc;
+                try {
+                    doc = caricaTrasmissibile(tenantId, docId);
+                } catch (NoSuchElementException e) {
+                    scarti.scartaVoce("documento #" + docId, "non trovato");
+                    continue;
+                } catch (IllegalStateException e) {
+                    scarti.scartaVoce("documento #" + docId, "tipo non supportato (solo fatture e note di credito)");
+                    continue;
+                }
+                String numero = doc.getDocumentNumber() != null ? doc.getDocumentNumber() : "#" + docId;
+                if (CODICE_FATTURA.equals(codiceTipo(doc)) && haNdcAttiva(doc)) {
+                    scarti.scartaVoce(numero, "fattura stornata da nota di credito");
+                    continue;
+                }
+                SdiFileDTO file;
+                try {
+                    file = generaXmlRuntime(tenantId, docId);
+                } catch (RuntimeException e) {
+                    scarti.scartaVoce(numero, "XML non generabile — " + e.getMessage());
+                    continue;
+                }
+                String nomeFile = notBlank(doc.getSdiProgressivo())
+                        ? file.getNomeFile()
+                        : file.getNomeFile().replace("_" + PROGRESSIVO_ANTEPRIMA + ".xml",
+                                "_" + numero.replaceAll("[^A-Za-z0-9._-]", "_") + ".xml");
+                zip.putNextEntry(new ZipEntry(nomeFile));
+                zip.write(file.getContenuto());
+                zip.closeEntry();
+                inclusi++;
+                if (marcaManuale) {
+                    try {
+                        segnaInviataManualmente(tenantId, docId);
+                        marcati++;
+                    } catch (RuntimeException e) {
+                        scarti.scartaVoce(numero, "incluso nello ZIP ma non marcato — " + e.getMessage());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Errore creazione ZIP: " + e.getMessage(), e);
+        }
+        if (inclusi == 0) {
+            throw new IllegalStateException("Nessun documento idoneo selezionato");
+        }
+        log.info("SdiXmlService.generaZipXml() - tenantId={} richiesti={} inclusi={} marcati={} scartati={}",
+                tenantId, documentIds.size(), inclusi, marcati, scarti.getScartati());
+        return new ZipXmlBatch(out.toByteArray(), inclusi, marcati, scarti);
+    }
+
+    /**
+     * Invio massivo allo SDI: generaEInvia() per ogni documento, con tutti i suoi controlli.
+     * I documenti non trovati o non ammessi sono scartati con il motivo; nessun errore blocca
+     * i successivi.
+     */
+    public BatchRisultatoDTO inviaBatch(Integer tenantId, List<Integer> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            throw new IllegalArgumentException("Nessun documento selezionato");
+        }
+        BatchRisultatoDTO risultato = new BatchRisultatoDTO();
+        for (Integer docId : documentIds) {
+            String numero = fiscalDocumentDAO.findById(docId)
+                    .filter(d -> tenantId.equals(d.getFkTenantId()))
+                    .map(FiscalDocument::getDocumentNumber)
+                    .orElse("documento #" + docId);
+            try {
+                generaEInvia(tenantId, docId);
+                risultato.elaborato();
+            } catch (NoSuchElementException e) {
+                risultato.scartaVoce(numero, "non trovato");
+            } catch (RuntimeException e) {
+                risultato.scartaVoce(numero, e.getMessage());
+            }
+        }
+        log.info("SdiXmlService.inviaBatch() - tenantId={} richiesti={} inviati={} scartati={}",
+                tenantId, documentIds.size(), risultato.getElaborati(), risultato.getScartati());
+        return risultato;
+    }
+
     /**
      * Legge il file XML archiviato di un invio, per il download dal dettaglio documento.
      *
@@ -411,9 +528,12 @@ public class SdiXmlService {
         Indirizzo sedeTenant = sedeTenant(tenant);
         List<Linea> linee = notaCredito ? buildLineeNdc(doc) : buildLinee(doc, booking, aliquota);
 
-        BigDecimal totImponibile = linee.stream().map(l -> l.imponibile)
+        // Riepilogo per aliquota del documento (voci soggette) + riepilogo N1 delle voci fuori campo
+        BigDecimal totImponibile = linee.stream().filter(l -> !l.fuoriCampo()).map(l -> l.imponibile)
                 .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal totImposta = linee.stream().map(l -> l.imposta)
+        BigDecimal totImposta = linee.stream().filter(l -> !l.fuoriCampo()).map(l -> l.imposta)
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totFuoriCampo = linee.stream().filter(Linea::fuoriCampo).map(l -> l.imponibile)
                 .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
         // Importo documento sempre positivo (TD04 compreso)
         BigDecimal totaleDocumento = nz(doc.getTotalAmount()).abs();
@@ -554,9 +674,15 @@ public class SdiXmlService {
             x.append("        <Quantita>1.00</Quantita>\n");
             x.append("        <PrezzoUnitario>").append(imp(l.imponibile)).append("</PrezzoUnitario>\n");
             x.append("        <PrezzoTotale>").append(imp(l.imponibile)).append("</PrezzoTotale>\n");
-            x.append("        <AliquotaIVA>").append(imp(aliquota)).append("</AliquotaIVA>\n");
-            if (aliquota.compareTo(BigDecimal.ZERO) == 0) {
-                x.append("        <Natura>").append(esc(natura)).append("</Natura>\n");
+            if (l.fuoriCampo()) {
+                // AliquotaIVA è obbligatoria in DettaglioLinee: 0.00 con Natura N1
+                x.append("        <AliquotaIVA>0.00</AliquotaIVA>\n");
+                x.append("        <Natura>").append(NATURA_ESCLUSA_ART15).append("</Natura>\n");
+            } else {
+                x.append("        <AliquotaIVA>").append(imp(aliquota)).append("</AliquotaIVA>\n");
+                if (aliquota.compareTo(BigDecimal.ZERO) == 0) {
+                    x.append("        <Natura>").append(esc(natura)).append("</Natura>\n");
+                }
             }
             x.append("      </DettaglioLinee>\n");
         }
@@ -569,6 +695,14 @@ public class SdiXmlService {
         x.append("        <Imposta>").append(imp(totImposta)).append("</Imposta>\n");
         x.append("        <EsigibilitaIVA>I</EsigibilitaIVA>\n");
         x.append("      </DatiRiepilogo>\n");
+        if (totFuoriCampo.signum() > 0) {
+            x.append("      <DatiRiepilogo>\n");
+            x.append("        <AliquotaIVA>0.00</AliquotaIVA>\n");
+            x.append("        <Natura>").append(NATURA_ESCLUSA_ART15).append("</Natura>\n");
+            x.append("        <ImponibileImporto>").append(imp(totFuoriCampo)).append("</ImponibileImporto>\n");
+            x.append("        <Imposta>0.00</Imposta>\n");
+            x.append("      </DatiRiepilogo>\n");
+        }
         x.append("    </DatiBeniServizi>\n");
 
         // DatiPagamento è facoltativo: omesso nella nota di credito (nessun incasso)
@@ -587,7 +721,15 @@ public class SdiXmlService {
     }
 
     /** Riga di dettaglio con imponibile scorporato dal lordo. */
-    private record Linea(String descrizione, BigDecimal imponibile, BigDecimal imposta) { }
+    /** fuoriCampo = voce esclusa art. 15 DPR 633/72 (rimborso bollo): AliquotaIVA 0, Natura N1. */
+    private record Linea(String descrizione, BigDecimal imponibile, BigDecimal imposta, boolean fuoriCampo) {
+        Linea(String descrizione, BigDecimal imponibile, BigDecimal imposta) {
+            this(descrizione, imponibile, imposta, false);
+        }
+    }
+
+    /** Natura delle operazioni escluse ex art. 15 DPR 633/72 (rimborso marca da bollo). */
+    private static final String NATURA_ESCLUSA_ART15 = "N1";
 
     /**
      * Righe della fattura PM. Non esiste una tabella fiscal_document_line: le voci sono
@@ -601,7 +743,15 @@ public class SdiXmlService {
         // L'aliquota resta quella del documento: le righe split hanno sempre 22, anche in RF19.
         List<VociFatturaPmService.VoceFatturaPm> voci = vociFatturaPmService.vociDaSplit(booking.getId());
         if (!voci.isEmpty()) {
-            voci.forEach(v -> aggiungiLinea(linee, v.descrizione(), v.lordo(), aliquota));
+            voci.forEach(v -> {
+                if (v.fuoriCampo()) {
+                    // Fuori campo art. 15: importo senza IVA, nessuno scorporo
+                    linee.add(new Linea(v.descrizione(), v.lordo().setScale(2, RoundingMode.HALF_UP),
+                            BigDecimal.ZERO.setScale(2), true));
+                } else {
+                    aggiungiLinea(linee, v.descrizione(), v.lordo(), aliquota);
+                }
+            });
         } else {
             aggiungiLinea(linee, "Riaddebito commissione OTA", nz(booking.getOtaCommissionAmount()), aliquota);
             aggiungiLinea(linee, "Riaddebito pulizia finale", nz(booking.getCleaningAmount()), aliquota);
@@ -626,7 +776,12 @@ public class SdiXmlService {
             BigDecimal lordo = nz(r.getImportoStornato()).setScale(2, RoundingMode.HALF_UP);
             BigDecimal imponibile = r.getImponibileStornato() != null
                     ? r.getImponibileStornato().setScale(2, RoundingMode.HALF_UP) : lordo;
-            linee.add(new Linea(r.getDescrizione(), imponibile, lordo.subtract(imponibile)));
+            boolean fuoriCampo = r.getFkSplitEconomicoId() != null
+                    && splitEconomicoDAO.findById(r.getFkSplitEconomicoId())
+                            .map(sp -> Boolean.TRUE.equals(sp.getFuoriCampo())).orElse(false);
+            linee.add(fuoriCampo
+                    ? new Linea(r.getDescrizione(), lordo, BigDecimal.ZERO.setScale(2), true)
+                    : new Linea(r.getDescrizione(), imponibile, lordo.subtract(imponibile)));
         }
         if (linee.isEmpty()) {
             throw new IllegalStateException("Nota di credito senza righe: id=" + doc.getId());

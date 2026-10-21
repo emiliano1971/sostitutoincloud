@@ -188,7 +188,9 @@ public class FiscalDocumentService {
             // (booking pre-migrazione 018) si usano i campi flat del booking.
             List<VociFatturaPmService.VoceFatturaPm> voci = vociFatturaPmService.vociDaSplit(booking.getId());
             if (!voci.isEmpty()) {
-                voci.forEach(v -> righe.add(buildRigaScorporata(v.descrizione(), v.lordo(), aliquota)));
+                voci.forEach(v -> righe.add(v.fuoriCampo()
+                        ? buildRigaFuoriCampo(v.descrizione(), v.lordo())
+                        : buildRigaScorporata(v.descrizione(), v.lordo(), aliquota)));
             } else {
                 righe.add(buildRigaScorporata("Riaddebito commissione OTA", booking.getOtaCommissionAmount(), aliquota));
                 righe.add(buildRigaScorporata("Riaddebito pulizie", booking.getCleaningAmount(), aliquota));
@@ -234,20 +236,37 @@ public class FiscalDocumentService {
                 .build();
     }
 
+    /** Riga fuori campo IVA art. 15 (rimborso bollo): importo senza IVA, fuori dall'imponibile. */
+    private DocumentRowDTO buildRigaFuoriCampo(String descrizione, BigDecimal lordo) {
+        BigDecimal l = (lordo != null ? lordo : BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        return DocumentRowDTO.builder()
+                .descrizione(descrizione)
+                .importoNetto(l)
+                .aliquotaIva(BigDecimal.ZERO)
+                .importoIva(BigDecimal.ZERO.setScale(2))
+                .importoLordo(l)
+                .fuoriCampo(true)
+                .build();
+    }
+
     /**
      * Lo scorporo riga per riga può differire di qualche centesimo da quello fatto una volta
      * sola sul totale in fase di emissione. Il residuo va sull'ultima riga, così la somma
      * delle righe coincide esattamente con l'imponibile e l'IVA del documento.
      */
     private void allineaResiduoScorporo(List<DocumentRowDTO> righe, FiscalDocument doc) {
-        if (righe.isEmpty() || doc.getImponibile() == null) return;
-        BigDecimal sommaNetti = righe.stream()
+        // Le righe fuori campo (bollo) non fanno parte dell'imponibile del documento
+        List<DocumentRowDTO> soggette = righe.stream()
+                .filter(r -> !Boolean.TRUE.equals(r.getFuoriCampo()))
+                .toList();
+        if (soggette.isEmpty() || doc.getImponibile() == null) return;
+        BigDecimal sommaNetti = soggette.stream()
                 .map(DocumentRowDTO::getImportoNetto)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal residuo = doc.getImponibile().subtract(sommaNetti);
         if (residuo.compareTo(BigDecimal.ZERO) == 0) return;
 
-        DocumentRowDTO ultima = righe.get(righe.size() - 1);
+        DocumentRowDTO ultima = soggette.get(soggette.size() - 1);
         ultima.setImportoNetto(ultima.getImportoNetto().add(residuo));
         ultima.setImportoIva(ultima.getImportoLordo().subtract(ultima.getImportoNetto()));
         log.debug("FiscalDocumentService.buildRighe() - residuo scorporo {} allocato sull'ultima riga del doc={}",

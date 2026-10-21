@@ -135,7 +135,7 @@ public class NdcService {
 
     /** Riga della NDC ricavata da una voce della fattura. */
     private record RigaCalcolata(Integer fkSplitEconomicoId, String descrizione,
-                                 BigDecimal importo, BigDecimal imponibile) {
+                                 BigDecimal importo, BigDecimal imponibile, boolean fuoriCampo) {
     }
 
     /**
@@ -205,7 +205,8 @@ public class NdcService {
                 .recipientTaxCode(fattura.getRecipientTaxCode())
                 .totalAmount(totale.negate())
                 .imponibile(totaleImponibile.negate())
-                .vatAmount(totale.subtract(totaleImponibile).negate())
+                // IVA della fattura: totale − imponibile includerebbe le voci fuori campo (bollo)
+                .vatAmount(nz(fattura.getVatAmount()).setScale(2, RoundingMode.HALF_UP).negate())
                 .aliquotaIva(aliquota)
                 .bolloAmount(BigDecimal.ZERO.setScale(2))
                 .build());
@@ -219,7 +220,8 @@ public class NdcService {
                     .descrizione(r.descrizione())
                     .importoStornato(r.importo())
                     .imponibileStornato(r.imponibile())
-                    .aliquotaIva(aliquota)
+                    // Voce fuori campo art. 15 (bollo): stornata senza IVA
+                    .aliquotaIva(r.fuoriCampo() ? BigDecimal.ZERO : aliquota)
                     .ordinamento(ordine)
                     .createdBy(utenteId)
                     .build());
@@ -368,7 +370,7 @@ public class NdcService {
         List<RigaCalcolata> righe = new ArrayList<>();
         if (voci.isEmpty()) {
             righe.add(new RigaCalcolata(null, "Storno fattura " + fattura.getDocumentNumber(),
-                    totaleFattura, imponibileFattura));
+                    totaleFattura, imponibileFattura, false));
             return righe;
         }
         BigDecimal sommaImporti = voci.stream().map(BookingSplitEconomico::getImporto)
@@ -380,18 +382,27 @@ public class NdcService {
         BigDecimal sommaImponibili = BigDecimal.ZERO;
         for (BookingSplitEconomico v : voci) {
             BigDecimal importo = v.getImporto().setScale(2, RoundingMode.HALF_UP);
+            if (Boolean.TRUE.equals(v.getFuoriCampo())) {
+                // Fuori campo IVA art. 15 (bollo): importo senza IVA, fuori dall'imponibile della
+                // fattura, quindi escluso dalla quadratura del residuo
+                righe.add(new RigaCalcolata(v.getId(), "Storno " + v.getDescrizione(), importo, importo, true));
+                continue;
+            }
             BigDecimal imponibile = aliquota.signum() <= 0 ? importo
                     : v.getImponibile() != null ? v.getImponibile().setScale(2, RoundingMode.HALF_UP)
                     : importo.divide(BigDecimal.ONE.add(aliquota.divide(CENTO, 10, RoundingMode.HALF_UP)),
                             2, RoundingMode.HALF_UP);
             sommaImponibili = sommaImponibili.add(imponibile);
-            righe.add(new RigaCalcolata(v.getId(), "Storno " + v.getDescrizione(), importo, imponibile));
+            righe.add(new RigaCalcolata(v.getId(), "Storno " + v.getDescrizione(), importo, imponibile, false));
         }
         BigDecimal residuo = imponibileFattura.subtract(sommaImponibili);
         if (residuo.signum() != 0) {
-            RigaCalcolata ultima = righe.remove(righe.size() - 1);
-            righe.add(new RigaCalcolata(ultima.fkSplitEconomicoId(), ultima.descrizione(),
-                    ultima.importo(), ultima.imponibile().add(residuo)));
+            // Residuo sull'ultima riga soggetta a IVA (le righe fuori campo restano invariate)
+            int idx = righe.size() - 1;
+            while (idx > 0 && righe.get(idx).fuoriCampo()) idx--;
+            RigaCalcolata ultima = righe.get(idx);
+            righe.set(idx, new RigaCalcolata(ultima.fkSplitEconomicoId(), ultima.descrizione(),
+                    ultima.importo(), ultima.imponibile().add(residuo), ultima.fuoriCampo()));
         }
         return righe;
     }

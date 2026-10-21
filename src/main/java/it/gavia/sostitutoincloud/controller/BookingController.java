@@ -8,6 +8,8 @@ import it.gavia.sostitutoincloud.dto.booking.BookingPageDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingUpdateSplitDTO;
 import it.gavia.sostitutoincloud.dto.booking.BookingVoceExtraDTO;
 import it.gavia.sostitutoincloud.dto.booking.GuestUpdateDTO;
+import it.gavia.sostitutoincloud.dto.batch.BatchRisultatoDTO;
+import it.gavia.sostitutoincloud.dto.batch.InviaEmailBatchDTO;
 import it.gavia.sostitutoincloud.dto.email.InviaDocumentiDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportConfirmDTO;
 import it.gavia.sostitutoincloud.dto.importing.BookingImportPreviewDTO;
@@ -170,6 +172,18 @@ public class BookingController {
      * Invio via email di fattura PM + ricevuta owner (PDF allegati).
      * 200 {"message"}, 400 dati mancanti o documenti non della prenotazione, 500 errore SMTP.
      */
+    /**
+     * Invio massivo di fattura + ricevuta agli ospiti delle prenotazioni indicate.
+     * 200 sempre con il riepilogo; 400 se manca l'oggetto o la selezione.
+     */
+    @PostMapping("/invia-email-batch")
+    public ResponseEntity<BatchRisultatoDTO> inviaEmailBatch(@RequestBody InviaEmailBatchDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("BookingController.inviaEmailBatch() - tenantId={} bookings={}",
+                tenantId, dto.getBookingIds() != null ? dto.getBookingIds().size() : 0);
+        return ResponseEntity.ok(emailService.inviaBatch(tenantId, dto));
+    }
+
     @PostMapping("/{id}/invia-documenti")
     public ResponseEntity<?> inviaDocumenti(@PathVariable Integer id, @RequestBody InviaDocumentiDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();

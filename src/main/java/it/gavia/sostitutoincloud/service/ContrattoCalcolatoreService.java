@@ -33,6 +33,7 @@ public class ContrattoCalcolatoreService {
     private static final String TIPO_COMMISSIONE_PM = "commissione_pm";
     private static final String TIPO_PULIZIE = "pulizie";
     private static final String TIPO_CAMBIO_BIANCHERIA = "cambio_biancheria";
+    private static final String TIPO_PROVVIGIONE_PROPRIETARIO = "provvigione_proprietario";
     /**
      * Commissione OTA senza regola di contratto, arrivata come override (file di import o PM).
      * Il frontend riconosce "importo impostato" / "importo forzato" per mostrare il ripristino.
@@ -361,6 +362,23 @@ public class ContrattoCalcolatoreService {
                 .add(cambioBiancheria.netto()).add(pm.netto()).add(extraNetti));
         BigDecimal ivaFatturaPm = round(fatturaPmTotale.subtract(imponibileFatturaPm));
 
+        // 6b. Marca da bollo della ricevuta addebitata al proprietario: solo con la regola
+        //     provvigione_proprietario che lo prevede e netto (prima del bollo) oltre la soglia.
+        //     Voce fuori campo IVA art. 15: entra nel totale fattura PM ma non nell'imponibile
+        //     né nell'IVA (già calcolati sopra), e riduce il netto proprietario.
+        PropertyContractRule regolaBollo = rules.stream()
+                .filter(r -> TIPO_PROVVIGIONE_PROPRIETARIO.equals(r.getTipo()))
+                .filter(r -> Boolean.TRUE.equals(r.getAddebitaBollo()))
+                .findFirst()
+                .orElse(null);
+        BigDecimal bollo = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal nettoPrimaDelBollo = grossAmount.subtract(fatturaPmTotale);
+        if (regolaBollo != null && settings.getBolloSoglia() != null && settings.getBolloImporto() != null
+                && nettoPrimaDelBollo.compareTo(settings.getBolloSoglia()) > 0) {
+            bollo = round(settings.getBolloImporto());
+            fatturaPmTotale = round(fatturaPmTotale.add(bollo));
+        }
+
         // 7. Rimanenza (controllo): il proprietario riceve quel che resta dei lordi in fattura
         if (!rules.isEmpty()) {
             BigDecimal rimanenza = grossAmount.subtract(fatturaPmTotale).subtract(altriNonRimanenza);
@@ -404,6 +422,8 @@ public class ContrattoCalcolatoreService {
                 .ivaScorporata(ivaFatturaPm)
                 .fatturaPmTotale(fatturaPmTotale)
                 .ownerNetAmount(ownerNet)
+                .bolloAmount(bollo)
+                .fkRegolaBolloId(bollo.signum() > 0 ? regolaBollo.getId() : null)
                 .withholdingAmount(withholding)
                 .aliquotaRitenuta(round(aliquotaRitenuta))
                 .liquidazioneOwner(liquidazione)

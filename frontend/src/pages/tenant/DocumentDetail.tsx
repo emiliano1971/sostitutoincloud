@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -76,6 +76,12 @@ const settlementBadgeColors: Record<string, string> = {
 const DocumentDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Query della lista documenti da cui si è arrivati (filtri, ordinamento, pagina):
+  // "Torna ai Documenti" la ripristina; passata anche tra dettagli collegati (fattura ↔ NDC).
+  const listaQuery = (location.state as { listaQuery?: string } | null)?.listaQuery ?? '';
+  const tornaAllaLista = () => navigate(`/documents${listaQuery}`);
+  const apriDocumento = (docId: number) => navigate(`/documents/${docId}`, { state: { listaQuery } });
   const { toast } = useToast();
   const [doc, setDoc] = useState<DocumentDetailType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -269,7 +275,7 @@ const DocumentDetail = () => {
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <p className="text-muted-foreground">Documento non trovato</p>
-        <Button variant="link" onClick={() => navigate('/documents')}>Torna ai Documenti</Button>
+        <Button variant="link" onClick={tornaAllaLista}>Torna ai Documenti</Button>
       </div>
     );
   }
@@ -370,7 +376,7 @@ const DocumentDetail = () => {
 
       {/* Back */}
       <div className="flex items-center gap-3 print:hidden">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/documents')}>
+        <Button variant="ghost" size="icon" onClick={tornaAllaLista}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
@@ -401,7 +407,7 @@ const DocumentDetail = () => {
                 A storno della fattura{' '}
                 <button
                   type="button"
-                  onClick={() => navigate(`/documents/${doc.fkDocumentoCollegatoId}`)}
+                  onClick={() => apriDocumento(doc.fkDocumentoCollegatoId!)}
                   className="text-primary hover:underline font-mono"
                 >
                   {doc.documentoCollegatoNumber ?? doc.fkDocumentoCollegatoId}
@@ -415,7 +421,7 @@ const DocumentDetail = () => {
                   <button
                     key={n.id}
                     type="button"
-                    onClick={() => navigate(`/documents/${n.id}`)}
+                    onClick={() => apriDocumento(n.id)}
                     className="text-primary hover:underline font-mono mr-2"
                   >
                     {n.documentNumber}
@@ -651,8 +657,8 @@ const DocumentDetail = () => {
                 {doc.righe.map((r, i) => (
                   <TableRow key={i}>
                     <TableCell className="text-sm">{r.descrizione}</TableCell>
-                    <TableCell className="text-right text-sm">{fmt(r.importoNetto)}</TableCell>
-                    <TableCell className="text-right text-sm">{fmt(r.importoIva)}</TableCell>
+                    <TableCell className="text-right text-sm">{r.fuoriCampo ? '—' : fmt(r.importoNetto)}</TableCell>
+                    <TableCell className="text-right text-sm">{r.fuoriCampo ? 'Escl. art. 15' : fmt(r.importoIva)}</TableCell>
                     <TableCell className="text-right text-sm font-medium">{fmt(r.importoLordo)}</TableCell>
                   </TableRow>
                 ))}
@@ -767,7 +773,7 @@ const DocumentDetail = () => {
 
       {/* Azioni */}
       <div className="flex flex-wrap gap-3 justify-end print:hidden">
-        <Button variant="outline" className="gap-2" onClick={() => navigate('/documents')}>
+        <Button variant="outline" className="gap-2" onClick={tornaAllaLista}>
           <ArrowLeft className="h-4 w-4" />
           Torna ai Documenti
         </Button>

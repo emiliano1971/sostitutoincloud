@@ -1,5 +1,6 @@
 import { get, post, patch, getToken } from '@/lib/apiClient';
 import { getConfig } from '@/config/AppConfig';
+import type { BatchRisultato } from '@/api/bookingApi';
 
 export interface DocumentListItem {
   id: number;
@@ -53,6 +54,8 @@ export interface DocumentRow {
   aliquotaIva: number;
   importoIva: number;
   importoLordo: number;
+  /** Voce fuori campo IVA art. 15 (rimborso bollo): niente IVA, fuori imponibile. */
+  fuoriCampo?: boolean;
 }
 
 export interface DocumentDetail extends DocumentListItem {
@@ -273,6 +276,66 @@ export async function downloadSdiXml(progressivo: string): Promise<void> {
  */
 export async function downloadXmlRuntime(id: number): Promise<void> {
   return scaricaXml(`/documents/${id}/xml`, `documento-${id}.xml`);
+}
+
+/** ZIP degli XML SDI scaricato da un'azione massiva, con il riepilogo dal backend. */
+export interface ZipXmlBatch {
+  blob: Blob;
+  fileName: string;
+  inclusi: number;
+  marcati: number;
+  scartati: number;
+}
+
+/**
+ * ZIP degli XML SDI dei documenti indicati + marcatura "inviata manualmente" degli inclusi
+ * (POST /api/documents/scarica-e-marca-batch). 422 se nessun documento è idoneo.
+ */
+export async function scaricaEMarcaBatch(documentIds: number[]): Promise<ZipXmlBatch> {
+  return scaricaZipXml('/documents/scarica-e-marca-batch', documentIds);
+}
+
+/** Solo ZIP degli XML SDI, nessun cambio di stato (POST /api/documents/scarica-xml-batch). */
+export async function scaricaXmlBatch(documentIds: number[]): Promise<ZipXmlBatch> {
+  return scaricaZipXml('/documents/scarica-xml-batch', documentIds);
+}
+
+async function scaricaZipXml(path: string, documentIds: number[]): Promise<ZipXmlBatch> {
+  const base = getConfig().apiBaseUrl;
+  const token = getToken();
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/zip',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ documentIds }),
+  });
+  if (!res.ok) {
+    let message = `Errore ${res.status} durante la creazione dello ZIP`;
+    try {
+      const json = await res.json();
+      if (json.message) message = json.message;
+    } catch { /* body non JSON */ }
+    throw new Error(message);
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const now = new Date();
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const match = (res.headers.get('Content-Disposition') ?? '').match(/filename="?([^";]+)"?/);
+  return {
+    blob: await res.blob(),
+    fileName: match ? match[1] : `xml-sdi-${ts}.zip`,
+    inclusi: Number(res.headers.get('X-Batch-Inclusi') ?? 0),
+    marcati: Number(res.headers.get('X-Batch-Marcati') ?? 0),
+    scartati: Number(res.headers.get('X-Batch-Scartati') ?? 0),
+  };
+}
+
+/** Invio massivo allo SDI tramite tunnel (POST /api/documents/invia-sdi-batch). */
+export async function inviaSdiBatch(documentIds: number[]): Promise<BatchRisultato> {
+  return post<BatchRisultato>('/documents/invia-sdi-batch', { documentIds });
 }
 
 /** Marca fattura / NDC come inviata allo SDI fuori dall'applicazione (POST /api/documents/{id}/sdi-manuale). */

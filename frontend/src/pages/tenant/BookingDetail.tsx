@@ -669,6 +669,10 @@ const BookingDetail = () => {
           ? { editable: 'cambio_biancheria' as const }
         : r.tipoVoce === 'commissione_pm'
           ? { editable: 'pm' as const, descrizione: split.pmFeeDescrizione }
+        : r.tipoVoce === 'bollo'
+          // Bollo addebitato al proprietario: voce fuori campo, non modificabile, niente %
+          ? { label: 'Marca da bollo (art. 15)', descrizione: 'Fuori campo IVA art. 15 — addebitata in fattura PM',
+              pct: undefined, source: undefined }
           : {}),
   });
   const vistaExtra = (r: BookingSplitRiga): RigaSplitView => ({
@@ -719,9 +723,12 @@ const BookingDetail = () => {
   const righeInFattura = (booking.righeSplit ?? []).filter(r => r.includeInFatturaPm);
   const riepilogoIva = righeInFattura.length > 0
     ? (() => {
-        const imponibile = righeInFattura.reduce((s, r) => s + nettoRiga(r), 0);
+        // Voci fuori campo art. 15 (bollo): nel totale, ma fuori da imponibile e IVA
+        const soggette = righeInFattura.filter(r => !r.fuoriCampo);
+        const imponibile = soggette.reduce((s, r) => s + nettoRiga(r), 0);
+        const lordoSoggetto = soggette.reduce((s, r) => s + r.importo, 0);
         const lordo = righeInFattura.reduce((s, r) => s + r.importo, 0);
-        return { imponibile, iva: lordo - imponibile, lordo };
+        return { imponibile, iva: lordoSoggetto - imponibile, lordo };
       })()
     : {
         imponibile: split.imponibileFatturaPm ?? 0,

@@ -22,6 +22,7 @@ public class PropertyContractRuleRowMapper implements RowMapper<PropertyContract
                 .calcMode(rs.getString("calc_mode"))
                 .valore((BigDecimal) rs.getObject("valore"))
                 .isRemainder(rs.getBoolean("is_remainder"))
+                .addebitaBollo(rs.getBoolean("addebita_bollo"))
                 .ordine(rs.getInt("ordine"))
                 .attivo(rs.getBoolean("attivo"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))

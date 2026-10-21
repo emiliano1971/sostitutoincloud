@@ -89,7 +89,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
   // comprese, righe a zero escluse — come DocumentGenerationService, PDF e XML SDI).
   // Senza righe split (booking pre-migrazione 018) si ripiega sui campi flat, con le
   // etichette storiche di PDF / XML per quel caso.
-  const righe: { key: string; descrizione: string; nota?: string; lordo: number; imponibile: number; iva: number }[] =
+  const righe: { key: string; descrizione: string; nota?: string; lordo: number; imponibile: number; iva: number; fuoriCampo?: boolean }[] =
     (righeFattura?.length ?? 0) > 0
       ? righeFattura!.map(r => ({
           key: String(r.id),
@@ -99,7 +99,10 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
             : r.tipoVoce === 'commissione_pm'
               ? `Periodo: ${booking.checkin_date} → ${booking.checkout_date}`
               : undefined,
-          ...scorpora(r.importo),
+          // Voce fuori campo art. 15 (rimborso bollo): niente scorporo, fuori imponibile
+          ...(r.fuoriCampo
+            ? { lordo: r.importo, imponibile: 0, iva: 0, fuoriCampo: true }
+            : scorpora(r.importo)),
         }))
       : [
           { key: 'ota', descrizione: 'Riaddebito commissione OTA', nota: `Canale: ${booking.channel_name}`,
@@ -115,16 +118,20 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
   // Servizi PM tutti a zero: non c'è nulla da fatturare e il server rifiuta l'emissione
   // (DocumentGenerationService). Si avvisa prima, spiegando dove guardare.
   const servizioTotale = somma(r => r.lordo);
+  // Voci fuori campo art. 15 (bollo): nel totale fattura, fuori da imponibile e IVA
+  const fuoriCampoTotale = somma(r => (r.fuoriCampo ? r.lordo : 0));
+  const servizioSoggetto = Math.round((servizioTotale - fuoriCampoTotale) * 100) / 100;
 
   // Totali: dal documento generato (DB, già corretti) se disponibile, altrimenti calcolati.
   // Il server scorpora l'IVA una volta sola sul totale (lordo / 1.22), non riga per riga:
   // stesso calcolo qui, così il totale imponibile dell'anteprima coincide al centesimo.
-  const imponibileCalcolato = Math.round(servizioTotale / divisore * 100) / 100;
+  const imponibileCalcolato = Math.round(servizioSoggetto / divisore * 100) / 100;
   // Residuo dello scorporo riga per riga sull'ultima riga, come FiscalDocumentService
   // (allineaResiduoScorporo): la somma delle righe coincide con l'imponibile del documento.
   const residuo = Math.round((imponibileCalcolato - somma(r => r.imponibile)) * 100) / 100;
-  if (residuo !== 0 && righe.length > 0) {
-    const ultima = righe[righe.length - 1];
+  const soggette = righe.filter(r => !r.fuoriCampo);
+  if (residuo !== 0 && soggette.length > 0) {
+    const ultima = soggette[soggette.length - 1];
     ultima.imponibile = Math.round((ultima.imponibile + residuo) * 100) / 100;
     ultima.iva = Math.round((ultima.lordo - ultima.imponibile) * 100) / 100;
   }
@@ -132,7 +139,7 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
   const totaleImponibile = generatedDoc ? generatedDoc.imponibile : imponibileCalcolato;
   const totaleIva = generatedDoc
     ? generatedDoc.iva
-    : Math.round((servizioTotale - totaleImponibile) * 100) / 100;
+    : Math.round((servizioSoggetto - totaleImponibile) * 100) / 100;
 
   // Semantica bottoni: se QUESTA fattura esiste già solo stampa/download, altrimenti
   // emissione (azione irreversibile).
@@ -247,8 +254,8 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
                     {r.descrizione}
                     {r.nota && (<><br /><span className="text-muted-foreground">{r.nota}</span></>)}
                   </div>
-                  <div className="col-span-2 text-right">{fmt(r.imponibile)}</div>
-                  <div className="col-span-2 text-right">{fmt(r.iva)}</div>
+                  <div className="col-span-2 text-right">{r.fuoriCampo ? '—' : fmt(r.imponibile)}</div>
+                  <div className="col-span-2 text-right">{r.fuoriCampo ? 'Escl. art. 15' : fmt(r.iva)}</div>
                   <div className="col-span-2 text-right">{fmt(r.lordo)}</div>
                 </div>
               ))}
@@ -267,6 +274,12 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
                 <span className="text-muted-foreground">IVA ({aliquotaLabel})</span>
                 <span>{fmt(totaleIva)}</span>
               </div>
+              {fuoriCampoTotale > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Fuori campo IVA art. 15</span>
+                  <span>{fmt(fuoriCampoTotale)}</span>
+                </div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-sm">
                 <span>Totale Fattura</span>

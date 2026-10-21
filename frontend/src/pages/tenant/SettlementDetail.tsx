@@ -109,10 +109,11 @@ const SettlementDetail = () => {
   const sumPm = bookings.reduce((acc, b) => acc + (b.pmFeeAmount ?? 0), 0);
   const sumIva = bookings.reduce((acc, b) => acc + (b.ivaAmount ?? 0), 0);
   const sumCanone = bookings.reduce((acc, b) => acc + (b.ownerNetAmount ?? 0), 0);
-  const sumBolloCents = bookings.reduce((acc, b) => acc + (b.bolloCents ?? 0), 0);
+  // Bollo in due quote esclusive: addebitato (già dentro il canone) e informativo (*)
+  const sumBolloAddebitato = bookings.reduce((acc, b) => acc + (b.bolloCentsAddebitato ?? 0), 0) / 100;
+  const sumBolloInformativo = bookings.reduce((acc, b) => acc + (b.bolloCentsInformativo ?? 0), 0) / 100;
   const sumRitenuta = bookings.reduce((acc, b) => acc + (b.withholdingAmount ?? 0), 0);
   const sumNetto = bookings.reduce((acc, b) => acc + nettoRiga(b), 0);
-  const sumBollo = sumBolloCents / 100;
 
   return (
     <div className="space-y-6">
@@ -160,8 +161,8 @@ const SettlementDetail = () => {
                   <TableHead className={`text-right ${COST_BG}`}>Pulizie €</TableHead>
                   <TableHead className={`text-right ${COST_BG}`}>Provv. PM €</TableHead>
                   <TableHead className={`text-right ${COST_BG}`}>di cui IVA €</TableHead>
-                  <TableHead className="text-right">Canone €</TableHead>
                   <TableHead className={`text-right ${FISCAL_BG}`}>Bollo €</TableHead>
+                  <TableHead className="text-right">Canone €</TableHead>
                   <TableHead className={`text-right ${FISCAL_BG}`}>Ritenuta €</TableHead>
                   <TableHead className={`text-right ${NET_BG}`}>Netto €</TableHead>
                 </TableRow>
@@ -201,9 +202,21 @@ const SettlementDetail = () => {
                       <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.cleaningAmount)}</TableCell>
                       <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(b.pmFeeAmount)}</TableCell>
                       <TableCell className={`text-right text-muted-foreground text-xs ${COST_BG}`}>{fmtEuro(b.ivaAmount)}</TableCell>
+                      {/* Bollo: addebitato (già dedotto dal canone) oppure informativo (*, non incide sul netto) */}
+                      <TableCell className={`text-right ${FISCAL_BG}`}>
+                        {(b.bolloCentsAddebitato ?? 0) > 0 ? (
+                          <span className="text-destructive" title="Addebitato in fattura PM, già dedotto dal canone">
+                            {fmtCost(b.bolloCentsAddebitato / 100)}
+                          </span>
+                        ) : (b.bolloCentsInformativo ?? 0) > 0 ? (
+                          <span className="text-muted-foreground" title="Informativo — non dedotto dal netto">
+                            {fmtEuro(b.bolloCentsInformativo / 100)} *
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-semibold">{fmtEuro(b.ownerNetAmount)}</TableCell>
-                      {/* Bollo: informativo, non incide sul netto */}
-                      <TableCell className={`text-right text-muted-foreground ${FISCAL_BG}`}>{fmtEuro((b.bolloCents ?? 0) / 100)}</TableCell>
                       <TableCell className={`text-right text-destructive ${FISCAL_BG}`}>{fmtCost(b.withholdingAmount)}</TableCell>
                       <TableCell className={`text-right font-semibold text-success ${NET_BG}`}>{fmtEuro(nettoRiga(b))}</TableCell>
                     </TableRow>
@@ -233,8 +246,16 @@ const SettlementDetail = () => {
                     <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(sumCleaning)}</TableCell>
                     <TableCell className={`text-right text-destructive ${COST_BG}`}>{fmtCost(sumPm)}</TableCell>
                     <TableCell className={`text-right text-muted-foreground text-xs ${COST_BG}`}>{fmtEuro(sumIva)}</TableCell>
+                    <TableCell className={`text-right ${FISCAL_BG}`}>
+                      {sumBolloAddebitato > 0 && (
+                        <span className="block text-destructive" title="Bollo addebitato totale">{fmtCost(sumBolloAddebitato)}</span>
+                      )}
+                      {sumBolloInformativo > 0 && (
+                        <span className="block text-muted-foreground font-normal" title="Bollo informativo totale">{fmtEuro(sumBolloInformativo)} *</span>
+                      )}
+                      {sumBolloAddebitato === 0 && sumBolloInformativo === 0 && <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell className="text-right">{fmtEuro(sumCanone)}</TableCell>
-                    <TableCell className={`text-right text-muted-foreground ${FISCAL_BG}`}>{fmtEuro(sumBollo)}</TableCell>
                     <TableCell className={`text-right text-destructive ${FISCAL_BG}`}>{fmtCost(sumRitenuta)}</TableCell>
                     <TableCell className={`text-right text-success ${NET_BG}`}>{fmtEuro(sumNetto)}</TableCell>
                   </TableRow>
@@ -242,9 +263,16 @@ const SettlementDetail = () => {
               )}
             </Table>
           </div>
-          <p className="px-4 py-2 text-xs text-muted-foreground">
-            Il bollo è mostrato a titolo informativo e non è dedotto dal netto pagato al proprietario.
-          </p>
+          {(sumBolloAddebitato > 0 || sumBolloInformativo > 0) && (
+            <div className="px-4 py-2 text-xs text-muted-foreground space-y-0.5">
+              {sumBolloAddebitato > 0 && (
+                <p>Il bollo addebitato è incluso nella fattura PM e già dedotto dal canone.</p>
+              )}
+              {sumBolloInformativo > 0 && (
+                <p>* Il bollo è mostrato a titolo informativo e non è dedotto dal netto pagato al proprietario.</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -275,13 +303,24 @@ const SettlementDetail = () => {
             <p className="text-xs text-muted-foreground mt-0.5">di cui IVA {fmtEuro(sumIva)}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Bollo totale</p>
-            <p className="text-xl font-bold mt-1 text-muted-foreground">{fmtEuro(sumBollo)}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">informativo</p>
-          </CardContent>
-        </Card>
+        {sumBolloAddebitato > 0 && (
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Bollo addebitato</p>
+              <p className="text-xl font-bold mt-1 text-destructive">{fmtCost(sumBolloAddebitato)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">già dedotto dal canone</p>
+            </CardContent>
+          </Card>
+        )}
+        {sumBolloInformativo > 0 && (
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">Bollo *</p>
+              <p className="text-xl font-bold mt-1 text-muted-foreground">{fmtEuro(sumBolloInformativo)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">informativo</p>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Ritenute totali</p>

@@ -24,8 +24,12 @@ import java.util.List;
 @Log4j2
 public class VociFatturaPmService {
 
-    /** Voce di fattura: descrizione e importo LORDO (IVA inclusa, da scorporare). */
-    public record VoceFatturaPm(String descrizione, BigDecimal lordo) { }
+    /**
+     * Voce di fattura: descrizione e importo LORDO (IVA inclusa, da scorporare).
+     * fuoriCampo = voce fuori campo IVA art. 15 DPR 633/72 (rimborso bollo): niente scorporo,
+     * esclusa dall'imponibile, Natura N1 nell'XML SDI.
+     */
+    public record VoceFatturaPm(String descrizione, BigDecimal lordo, boolean fuoriCampo) { }
 
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
 
@@ -38,7 +42,8 @@ public class VociFatturaPmService {
         List<VoceFatturaPm> voci = splitEconomicoDAO.findByBookingId(bookingId).stream()
                 .filter(r -> Boolean.TRUE.equals(r.getIncludeInFatturaPm()))
                 .filter(r -> r.getImporto() != null && r.getImporto().signum() > 0)
-                .map(r -> new VoceFatturaPm(r.getDescrizione(), r.getImporto().setScale(2, RoundingMode.HALF_UP)))
+                .map(r -> new VoceFatturaPm(r.getDescrizione(), r.getImporto().setScale(2, RoundingMode.HALF_UP),
+                        Boolean.TRUE.equals(r.getFuoriCampo())))
                 .toList();
         log.debug("VociFatturaPmService.vociDaSplit() - bookingId={} voci={}", bookingId, voci.size());
         return voci;

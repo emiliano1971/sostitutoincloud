@@ -12,6 +12,7 @@
   - destinatario = ospite: nome, C.F.
   - nessuna colonna IVA (canone fuori campo IVA)
   - totale = solo canone; nessuna ritenuta; bollo indicato ma non sommato
+  - bollo addebitato al proprietario (voce fuori campo nello split): niente riga, nota a piè pagina (NOTA_BOLLO)
   - il tenant (PM) compare solo nelle note come sostituto d'imposta
 
   NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox:
@@ -196,7 +197,7 @@
 
 <div class="note">
   Operazione fuori campo IVA — canone di locazione breve ai sensi dell'art. 4 D.L. 50/2017.<br/>
-  Sostituto d'imposta: {TENANT_NAME} — P.IVA {TENANT_PIVA}
+  Sostituto d'imposta: {TENANT_NAME} — P.IVA {TENANT_PIVA}{NOTA_BOLLO}
 </div>
 
 <div class="footer">

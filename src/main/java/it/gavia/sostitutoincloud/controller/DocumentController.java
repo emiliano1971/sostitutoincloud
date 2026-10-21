@@ -1,6 +1,9 @@
 package it.gavia.sostitutoincloud.controller;
 
 import it.gavia.sostitutoincloud.dto.sdi.SdiFileDTO;
+import it.gavia.sostitutoincloud.dto.batch.BatchRisultatoDTO;
+import it.gavia.sostitutoincloud.dto.batch.GeneraDocumentiBatchDTO;
+import it.gavia.sostitutoincloud.dto.batch.InviaSdiBatchDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentDetailDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentFilterDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
@@ -96,6 +99,65 @@ public class DocumentController {
         return fiscalDocumentService.findById(tenantId, id)
                 .map(ResponseEntity::ok)
                 .orElseThrow(() -> new RuntimeException("Documento non trovato: id=" + id));
+    }
+
+    /**
+     * Generazione massiva dei documenti mancanti (fattura PM + ricevuta owner).
+     * 200 sempre con il riepilogo, anche se tutte le prenotazioni sono scartate.
+     */
+    @PostMapping("/genera-batch")
+    public ResponseEntity<BatchRisultatoDTO> generaBatch(@RequestBody GeneraDocumentiBatchDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.generaBatch() - tenantId={} bookings={} dataEmissione={}",
+                tenantId, dto.getBookingIds() != null ? dto.getBookingIds().size() : 0, dto.getDataEmissione());
+        return ResponseEntity.ok(documentGenerationService.generaBatch(tenantId, dto));
+    }
+
+    /** ZIP degli XML SDI dei documenti selezionati (solo download, nessun cambio di stato). */
+    @PostMapping("/scarica-xml-batch")
+    public ResponseEntity<?> scaricaXmlBatch(@RequestBody InviaSdiBatchDTO dto) {
+        return zipXml(dto, false);
+    }
+
+    /** ZIP degli XML SDI + marcatura "inviata manualmente" dei documenti inclusi. */
+    @PostMapping("/scarica-e-marca-batch")
+    public ResponseEntity<?> scaricaEMarcaBatch(@RequestBody InviaSdiBatchDTO dto) {
+        return zipXml(dto, true);
+    }
+
+    /**
+     * Risposta ZIP con il riepilogo in intestazione (X-Batch-Inclusi / -Marcati / -Scartati);
+     * 422 se nessun documento è idoneo.
+     */
+    private ResponseEntity<?> zipXml(InviaSdiBatchDTO dto, boolean marca) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.zipXml() - tenantId={} documenti={} marca={}", tenantId,
+                dto.getDocumentIds() != null ? dto.getDocumentIds().size() : 0, marca);
+        try {
+            SdiXmlService.ZipXmlBatch batch = sdiXmlService.generaZipXml(tenantId, dto.getDocumentIds(), marca);
+            String filename = "xml-sdi-" + java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".zip";
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("application/zip"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                    .header("X-Batch-Inclusi", String.valueOf(batch.inclusi()))
+                    .header("X-Batch-Marcati", String.valueOf(batch.marcati()))
+                    .header("X-Batch-Scartati", String.valueOf(batch.scarti().getScartati()))
+                    .body(batch.zip());
+        } catch (IllegalStateException e) {
+            log.warn("DocumentController.zipXml() - {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
+    }
+
+    /** Invio massivo allo SDI (tunnel). 200 sempre con il riepilogo. */
+    @PostMapping("/invia-sdi-batch")
+    public ResponseEntity<BatchRisultatoDTO> inviaSdiBatch(@RequestBody InviaSdiBatchDTO dto) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.inviaSdiBatch() - tenantId={} documenti={}", tenantId,
+                dto.getDocumentIds() != null ? dto.getDocumentIds().size() : 0);
+        return ResponseEntity.ok(sdiXmlService.inviaBatch(tenantId, dto.getDocumentIds()));
     }
 
     @PostMapping("/generate")

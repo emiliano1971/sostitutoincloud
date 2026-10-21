@@ -2,15 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Search, Filter, Eye, Upload, Plus, AlertTriangle, Trash2, X, ChevronDown, FileText, Receipt, FileX } from 'lucide-react';
+import { Search, Filter, Eye, Upload, Plus, AlertTriangle, Trash2, X, ChevronDown, FileText, Receipt, FileX, Send } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { downloadDocumentPdf } from '@/api/documentApi';
-import { getBookings, deleteBooking, type BookingListItem } from '@/api/bookingApi';
+import { getBookings, deleteBooking, generaDocumentiBatch, inviaEmailBatch, type BookingListItem, type BatchRisultato } from '@/api/bookingApi';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
 import Paginazione from '@/components/Paginazione';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -94,6 +99,14 @@ const BookingsList = () => {
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<TenantSettingsDTO | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // Azioni massive sulle prenotazioni selezionate
+  const [showGeneraDialog, setShowGeneraDialog] = useState(false);
+  const [dataEmissione, setDataEmissione] = useState(() => toLocalISO(new Date()));
+  const [generando, setGenerando] = useState(false);
+  const [showEmailDialog, setShowEmailDialog] = useState(false);
+  const [emailOggetto, setEmailOggetto] = useState('');
+  const [emailTesto, setEmailTesto] = useState('');
+  const [inviandoEmail, setInviandoEmail] = useState(false);
 
   // Aggiorna un singolo parametro URL (replace:true → non riempie la history).
   const updateFilter = useCallback((key: string, value: string | null) => {
@@ -223,6 +236,55 @@ const BookingsList = () => {
     : statiSelezionati.size === 1
       ? (statiSelezionati.has('da_completare') ? 'Da completare' : getStatusLabel([...statiSelezionati][0]))
       : `${statiSelezionati.size} stati`;
+
+  // Riepilogo di un'azione massiva: conteggi nel titolo, primi 5 scarti nel testo
+  const mostraRisultato = (titolo: string, res: BatchRisultato) => {
+    toast({
+      title: titolo,
+      description: res.dettagliScartati.length > 0
+        ? <div className="whitespace-pre-line text-xs">
+            {res.dettagliScartati.slice(0, 5).join('\n')}
+            {res.dettagliScartati.length > 5 ? `\n… e altri ${res.dettagliScartati.length - 5}` : ''}
+          </div>
+        : undefined,
+      variant: res.scartati > 0 && res.elaborati === 0 ? 'destructive' : 'default',
+    });
+  };
+
+  const handleGeneraBatch = async () => {
+    setGenerando(true);
+    try {
+      const res = await generaDocumentiBatch(Array.from(selectedIds), dataEmissione);
+      mostraRisultato(`Elaborati: ${res.elaborati} — Scartati: ${res.scartati}`, res);
+      setShowGeneraDialog(false);
+      setSelectedIds(new Set());
+      setReloadKey(k => k + 1);
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setGenerando(false);
+    }
+  };
+
+  // All'apertura il testo parte da quello predefinito del tenant
+  const apriEmailDialog = () => {
+    setEmailTesto(settings?.emailTestoPredefinito ?? '');
+    setShowEmailDialog(true);
+  };
+
+  const handleInviaEmailBatch = async () => {
+    setInviandoEmail(true);
+    try {
+      const res = await inviaEmailBatch(Array.from(selectedIds), emailOggetto, emailTesto);
+      mostraRisultato(`Inviate: ${res.elaborati} — Non inviate: ${res.scartati}`, res);
+      setShowEmailDialog(false);
+      setSelectedIds(new Set());
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setInviandoEmail(false);
+    }
+  };
 
   const handleDeleteSelected = async () => {
     const ids = Array.from(selectedIds);
@@ -424,10 +486,16 @@ const BookingsList = () => {
         </CardContent>
       </Card>
 
-      {/* Barra azioni selezione (solo local/test: la delete backend è @Profile) */}
+      {/* Barra azioni selezione: azioni massive + eliminazione */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 rounded-md border border-destructive/20 bg-destructive/5 p-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 p-3">
           <span className="text-sm font-medium">{selectedIds.size} selezionati</span>
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowGeneraDialog(true)}>
+            <FileText className="h-4 w-4" /> Genera documenti
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1" onClick={apriEmailDialog}>
+            <Send className="h-4 w-4" /> Invia email ospiti
+          </Button>
           <Button variant="destructive" size="sm" className="gap-2" onClick={handleDeleteSelected}>
             <Trash2 className="h-4 w-4" /> Elimina selezionati
           </Button>
@@ -436,6 +504,57 @@ const BookingsList = () => {
           </Button>
         </div>
       )}
+
+      <Dialog open={showGeneraDialog} onOpenChange={open => { if (!generando) setShowGeneraDialog(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Genera documenti</DialogTitle>
+            <DialogDescription>
+              Verranno generati i documenti mancanti (fattura PM e ricevuta) per le {selectedIds.size} prenotazioni
+              selezionate. Quelle non idonee verranno scartate.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Data emissione</Label>
+            <Input type="date" value={dataEmissione} onChange={e => setDataEmissione(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowGeneraDialog(false)} disabled={generando}>Annulla</Button>
+            <Button onClick={handleGeneraBatch} disabled={generando || !dataEmissione}>
+              {generando ? 'Generazione...' : 'Genera documenti'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEmailDialog} onOpenChange={open => { if (!inviandoEmail) setShowEmailDialog(open); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Invia email documenti</DialogTitle>
+            <DialogDescription>
+              Verranno inviate le email agli ospiti delle {selectedIds.size} prenotazioni selezionate
+              che hanno fattura, ricevuta e email ospite.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>Oggetto *</Label>
+              <Input value={emailOggetto} onChange={e => setEmailOggetto(e.target.value)}
+                placeholder="Documenti del suo soggiorno" />
+            </div>
+            <div className="space-y-1">
+              <Label>Testo</Label>
+              <Textarea value={emailTesto} onChange={e => setEmailTesto(e.target.value)} rows={6} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEmailDialog(false)} disabled={inviandoEmail}>Annulla</Button>
+            <Button onClick={handleInviaEmailBatch} disabled={inviandoEmail || !emailOggetto.trim()}>
+              {inviandoEmail ? 'Invio in corso...' : 'Invia email'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Table */}
       <Card>

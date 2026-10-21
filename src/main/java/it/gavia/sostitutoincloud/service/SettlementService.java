@@ -222,7 +222,14 @@ public class SettlementService {
                             .ivaAmount(calcolaIva(booking.getPmFeeAmount()))
                             .ownerNetAmount(booking.getOwnerNetAmount())
                             .withholdingAmount(booking.getWithholdingAmount())
-                            .bolloCents(bolloCentsPerBooking(booking.getId(), tipiDocumentoById))
+                            // Bollo addebitato (booking.bollo_addebitato, migration 035): già dentro
+                            // il canone ridotto. Altrimenti il bollo della ricevuta, solo informativo.
+                            .bolloCentsAddebitato(Boolean.TRUE.equals(booking.getBolloAddebitato())
+                                    ? nullSafe(booking.getBolloImporto()).multiply(BigDecimal.valueOf(100)).intValue()
+                                    : 0)
+                            .bolloCentsInformativo(Boolean.TRUE.equals(booking.getBolloAddebitato())
+                                    ? 0
+                                    : bolloCentsPerBooking(booking.getId(), tipiDocumentoById))
                             .touristTaxAmount(nullSafe(booking.getTouristTaxAmount()))
                             .touristTaxIncludedInGross(
                                     Boolean.TRUE.equals(booking.getTouristTaxIncludedInGross()))

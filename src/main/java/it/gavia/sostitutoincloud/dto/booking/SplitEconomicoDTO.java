@@ -26,7 +26,8 @@ public class SplitEconomicoDTO {
     private Boolean touristTaxIncludedInGross;
     private BigDecimal imponibileFatturaPm;  // base imponibile scorporata (lordo / 1.22)
     private BigDecimal ivaScorporataPm;      // IVA scorporata sui servizi PM (informativa, non detrazione)
-    private BigDecimal fatturaPmTotale;      // totale lordo della fattura PM
+    private BigDecimal fatturaPmTotale;      // totale lordo della fattura PM (bollo fuori campo compreso)
+    private BigDecimal bolloAmount;          // marca da bollo addebitata al proprietario (voce fuori campo art. 15), 0 se assente
     private List<String> warnings;
     private Boolean calcoloCompleto;
     // Descrizione della regola di contratto applicata, mostrata sotto la voce nel dettaglio.

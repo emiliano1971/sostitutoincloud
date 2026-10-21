@@ -27,7 +27,10 @@ export interface SettlementBookingItem {
   ivaAmount: number;    // IVA scorporata dalla provvigione PM
   ownerNetAmount: number;
   withholdingAmount: number;
-  bolloCents: number;   // bollo in centesimi (0 o 200)
+  /** Bollo addebitato al proprietario (centesimi): voce di fattura PM, già dedotto dal canone. */
+  bolloCentsAddebitato: number;
+  /** Bollo informativo della ricevuta (centesimi): NON dedotto dal netto. */
+  bolloCentsInformativo: number;
   /**
    * Tassa di soggiorno della prenotazione. Se inclusa nel lordo è già stata scorporata
    * dalla base dello split, quindi non incide sul canone: serve solo a spiegare perché

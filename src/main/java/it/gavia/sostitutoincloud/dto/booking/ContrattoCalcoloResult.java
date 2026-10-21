@@ -32,6 +32,10 @@ public class ContrattoCalcoloResult {
     private BigDecimal ivaScorporata;       // fatturaPmTotale - imponibileFatturaPm (IVA della fattura PM)
     private BigDecimal fatturaPmTotale;     // Σ lordi delle voci in fattura PM (extra comprese)
     private BigDecimal ownerNetAmount;      // gross - fatturaPmTotale
+    // Marca da bollo addebitata al proprietario (regola provvigione_proprietario con
+    // addebita_bollo, netto > soglia): voce fuori campo art. 15 compresa in fatturaPmTotale
+    private BigDecimal bolloAmount;
+    private Integer fkRegolaBolloId;
     private BigDecimal withholdingAmount;   // ownerNet * aliquotaRitenuta
     private BigDecimal aliquotaRitenuta;    // % ritenuta applicata (21.00 o 26.00)
     private BigDecimal liquidazioneOwner;   // ownerNet - withholding

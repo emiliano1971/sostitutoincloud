@@ -177,7 +177,9 @@ public class DocumentPdfService {
         // senza righe split (booking pre-migrazione 018) si usano i campi flat del booking.
         List<VociFatturaPmService.VoceFatturaPm> voci = vociFatturaPmService.vociDaSplit(booking.getId());
         if (!voci.isEmpty()) {
-            voci.forEach(v -> righe.append(rigaFattura(v.descrizione(), v.lordo(), aliquotaIva)));
+            voci.forEach(v -> righe.append(v.fuoriCampo()
+                    ? rigaFuoriCampo(v.descrizione(), v.lordo())
+                    : rigaFattura(v.descrizione(), v.lordo(), aliquotaIva)));
         } else {
             righe.append(rigaFattura("Riaddebito commissione OTA", nz(booking.getOtaCommissionAmount()), aliquotaIva));
             righe.append(rigaFattura("Riaddebito pulizia finale", nz(booking.getCleaningAmount()), aliquotaIva));
@@ -207,6 +209,7 @@ public class DocumentPdfService {
         c.put("TOTAL_IMPONIBILE", importo(doc.getImponibile()));
         c.put("TOTAL_IVA", importo(doc.getVatAmount()));
         c.put("TOTAL_AMOUNT", importo(doc.getTotalAmount()));
+        c.put("RIGA_FUORI_CAMPO", rigaTotaleFuoriCampo(doc));
         c.put("DOC_TITLE", "FATTURA");
         c.put("TOTAL_LABEL", "TOTALE FATTURA");
         c.put("RIFERIMENTO_DOCUMENTO", "");
@@ -239,6 +242,7 @@ public class DocumentPdfService {
         c.put("TOTAL_IMPONIBILE", importo(nz(doc.getImponibile()).abs()));
         c.put("TOTAL_IVA", importo(nz(doc.getVatAmount()).abs()));
         c.put("TOTAL_AMOUNT", importo(nz(doc.getTotalAmount()).abs()));
+        c.put("RIGA_FUORI_CAMPO", rigaTotaleFuoriCampo(doc));
         c.put("DOC_TITLE", "NOTA DI CREDITO");
         c.put("TOTAL_LABEL", "TOTALE NOTA DI CREDITO");
         c.put("RIFERIMENTO_DOCUMENTO", fattura == null ? "" :
@@ -270,8 +274,11 @@ public class DocumentPdfService {
                         + (booking.getNights() != null
                         ? " — " + booking.getNights() + (booking.getNights() == 1 ? " notte" : " notti") : ""),
                 canone));
-        // Bollo valorizzato in emissione solo se canone > soglia (tenant_settings.bollo_soglia)
-        if (bollo.compareTo(BigDecimal.ZERO) > 0) {
+        // Bollo addebitato al proprietario (voce fuori campo nello split, fatturata dal PM):
+        // nessuna riga in ricevuta, solo la nota. Altrimenti la riga informativa come prima.
+        boolean bolloAddebitato = vociFatturaPmService.vociDaSplit(booking.getId()).stream()
+                .anyMatch(VociFatturaPmService.VoceFatturaPm::fuoriCampo);
+        if (bollo.compareTo(BigDecimal.ZERO) > 0 && !bolloAddebitato) {
             righe.append(rigaRicevuta("Marca da bollo", bollo));
         }
 
@@ -296,6 +303,9 @@ public class DocumentPdfService {
         c.put("PROPERTY_CITY", esc(property != null ? property.getCity() : null));
         c.put("RIGHE_RICEVUTA", righe.toString());
         c.put("CANONE", importo(canone));
+        c.put("NOTA_BOLLO", bollo.compareTo(BigDecimal.ZERO) > 0 && bolloAddebitato
+                ? "<br/>Marca da bollo anticipata dal sostituto d'imposta e addebitata nella fattura di gestione."
+                : "");
         return c;
     }
 
@@ -317,6 +327,32 @@ public class DocumentPdfService {
                 + "<td class=\"text-right\">" + importo(iva) + "</td>"
                 + "<td class=\"text-right\">" + importo(lordo) + "</td>"
                 + "</tr>";
+    }
+
+    /** Riga di fattura fuori campo IVA art. 15 (rimborso bollo): nessuna IVA, fuori imponibile. */
+    private String rigaFuoriCampo(String descrizione, BigDecimal importo) {
+        return "<tr>"
+                + "<td>" + esc(descrizione) + "</td>"
+                + "<td class=\"text-right\">&#8212;</td>"
+                + "<td class=\"text-right\">Escl. art. 15</td>"
+                + "<td class=\"text-right\">" + importo(importo) + "</td>"
+                + "</tr>";
+    }
+
+    /**
+     * Riga dei totali per le voci fuori campo art. 15: totale − imponibile − IVA (valori
+     * assoluti, vale anche per la nota di credito). Vuota se non ci sono voci fuori campo.
+     */
+    private String rigaTotaleFuoriCampo(FiscalDocument doc) {
+        BigDecimal fuoriCampo = nz(doc.getTotalAmount()).abs()
+                .subtract(nz(doc.getImponibile()).abs())
+                .subtract(nz(doc.getVatAmount()).abs())
+                .setScale(2, RoundingMode.HALF_UP);
+        if (fuoriCampo.signum() <= 0) {
+            return "";
+        }
+        return "<tr><td>Fuori campo IVA art. 15</td><td class=\"text-right\">"
+                + importo(fuoriCampo) + " &#8364;</td></tr>";
     }
 
     private String rigaRicevuta(String descrizione, BigDecimal importo) {

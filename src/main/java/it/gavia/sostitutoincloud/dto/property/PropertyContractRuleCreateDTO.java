@@ -17,5 +17,7 @@ public class PropertyContractRuleCreateDTO {
     private String calcMode;
     private BigDecimal valore;
     private Boolean isRemainder = false;
+    // Solo provvigione_proprietario. null in modifica = valore invariato; in creazione = false
+    private Boolean addebitaBollo;
     private Integer ordine = 0;
 }

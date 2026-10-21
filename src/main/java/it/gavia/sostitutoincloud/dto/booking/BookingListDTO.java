@@ -33,6 +33,8 @@ public class BookingListDTO {
     private BigDecimal pmNetAmount;
     // Nazione ospite (100000100 = Italia, altro = estero)
     private String guestCountry;
+    // Bollo addebitato al proprietario (voce 'bollo' dello split)
+    private Boolean bolloAddebitato;
     // Tassa di soggiorno: servono in lista per segnalare quando è già dentro il lordo
     // (il lordo mostrato comprende un importo che non è reddito del proprietario).
     private Boolean touristTaxIncludedInGross;

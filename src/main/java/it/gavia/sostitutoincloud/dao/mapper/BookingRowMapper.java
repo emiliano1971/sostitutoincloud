@@ -36,6 +36,8 @@ public class BookingRowMapper implements RowMapper<Booking> {
                 .guestAddress(rs.getString("guest_address"))
                 .guestPhone(rs.getString("guest_phone"))
                 .guestEmail(rs.getString("guest_email"))
+                .bolloAddebitato(rs.getBoolean("bollo_addebitato"))
+                .bolloImporto(rs.getBigDecimal("bollo_importo"))
                 .checkinDate(rs.getObject("checkin_date", LocalDate.class))
                 .checkoutDate(rs.getObject("checkout_date", LocalDate.class))
                 .nights(rs.getInt("nights"))

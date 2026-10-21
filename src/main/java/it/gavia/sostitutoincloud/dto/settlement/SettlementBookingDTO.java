@@ -26,7 +26,9 @@ public class SettlementBookingDTO {
     private BigDecimal ivaAmount;             // IVA scorporata dalla provvigione PM (pmFee * 0.22 / 1.22)
     private BigDecimal ownerNetAmount;        // canone al proprietario
     private BigDecimal withholdingAmount;
-    private Integer bolloCents;   // bollo in centesimi (0 o 200) dai fiscal_document "ricevuta" del booking
+    // Bollo in centesimi, in due colonne esclusive:
+    private Integer bolloCentsAddebitato;   // addebitato al proprietario (voce split, già dedotto dal canone)
+    private Integer bolloCentsInformativo;  // informativo dalla ricevuta, NON dedotto dal netto
 
     /**
      * Tassa di soggiorno della prenotazione e sua collocazione rispetto al lordo.

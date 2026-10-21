@@ -28,6 +28,8 @@ public class PropertyContractService {
             "fisso", "percentuale", "fisso_per_notte",
             "fisso_per_persona", "percentuale_lordo", "percentuale_netto", "rimanenza");
 
+    private static final String TIPO_PROVVIGIONE_PROPRIETARIO = "provvigione_proprietario";
+
     private static final Set<String> TIPI_RIMANENZA_AMMESSA = Set.of(
             "commissione_pm", "provvigione_proprietario");
 
@@ -90,6 +92,8 @@ public class PropertyContractService {
                 .calcMode(dto.getCalcMode())
                 .valore(dto.getValore() != null ? dto.getValore() : BigDecimal.ZERO)
                 .isRemainder(Boolean.TRUE.equals(dto.getIsRemainder()))
+                .addebitaBollo(TIPO_PROVVIGIONE_PROPRIETARIO.equals(dto.getTipo())
+                        && Boolean.TRUE.equals(dto.getAddebitaBollo()))
                 .ordine(dto.getOrdine() != null ? dto.getOrdine() : 0)
                 .attivo(true)
                 .build();
@@ -113,6 +117,9 @@ public class PropertyContractService {
         existing.setCalcMode(dto.getCalcMode());
         existing.setValore(dto.getValore() != null ? dto.getValore() : BigDecimal.ZERO);
         existing.setIsRemainder(Boolean.TRUE.equals(dto.getIsRemainder()));
+        // Bollo: solo sulla provvigione proprietario; non inviato = invariato
+        existing.setAddebitaBollo(TIPO_PROVVIGIONE_PROPRIETARIO.equals(dto.getTipo())
+                && (dto.getAddebitaBollo() != null ? dto.getAddebitaBollo() : Boolean.TRUE.equals(existing.getAddebitaBollo())));
         existing.setFkCanaleOtaId(dto.getFkCanaleOtaId());
         existing.setOrdine(dto.getOrdine() != null ? dto.getOrdine() : 0);
         PropertyContractRule saved = contractRuleDAO.update(existing);
@@ -199,6 +206,7 @@ public class PropertyContractService {
                 .calcModeLabel(CALC_MODE_LABELS.getOrDefault(rule.getCalcMode(), rule.getCalcMode()))
                 .valore(rule.getValore())
                 .isRemainder(rule.getIsRemainder())
+                .addebitaBollo(Boolean.TRUE.equals(rule.getAddebitaBollo()))
                 .ordine(rule.getOrdine())
                 .build();
     }

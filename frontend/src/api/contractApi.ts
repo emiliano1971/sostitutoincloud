@@ -11,6 +11,8 @@ export interface ContractRule {
   calcModeLabel: string;
   valore: number;
   isRemainder: boolean;
+  /** Solo provvigione_proprietario: addebita la marca da bollo della ricevuta al proprietario. */
+  addebitaBollo?: boolean;
   ordine: number;
 }
 
@@ -21,6 +23,8 @@ export interface ContractRuleCreate {
   calcMode: string;
   valore: number;
   isRemainder: boolean;
+  /** Assente in modifica = valore invariato. */
+  addebitaBollo?: boolean;
   ordine: number;
 }
 

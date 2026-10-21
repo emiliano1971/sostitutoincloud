@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -103,6 +104,9 @@ const PropertyContracts = () => {
   const [simGuests, setSimGuests] = useState('2');
   // IVA delle voci PM dal regime del tenant, come il calcolatore: RF19 forfettario → 0, altrimenti 22%
   const [ivaPmPct, setIvaPmPct] = useState(22);
+  // Soglia bollo del tenant (tenant_settings.bollo_soglia), mostrata accanto all'opzione bollo
+  const [bolloSoglia, setBolloSoglia] = useState<number>(77.47);
+  const [aggiornandoBolloId, setAggiornandoBolloId] = useState<number | null>(null);
 
   // New rule form state
   const [newType, setNewType] = useState<CostRuleType>('pulizie');
@@ -132,11 +136,40 @@ const PropertyContracts = () => {
   // (es. permessi) la simulazione resta al 22%, il caso RF01.
   useEffect(() => {
     getSettings()
-      .then(st => setIvaPmPct(st.regimeFiscalePm?.toUpperCase() === 'RF19' ? 0 : 22))
+      .then(st => {
+        setIvaPmPct(st.regimeFiscalePm?.toUpperCase() === 'RF19' ? 0 : 22);
+        if (st.bolloSoglia != null) setBolloSoglia(st.bolloSoglia);
+      })
       .catch(() => { /* default 22% */ });
   }, []);
 
   const reloadRules = () => getContractRules(propertyId).then(setRules);
+
+  // Bollo addebitato al proprietario: aggiorna solo il flag della regola provvigione_proprietario
+  const handleToggleBollo = async (rule: ContractRule, addebitaBollo: boolean) => {
+    setAggiornandoBolloId(rule.id);
+    try {
+      await updateContractRule(propertyId, rule.id, {
+        fkPropertyId: propertyId,
+        fkCanaleOtaId: rule.fkCanaleOtaId,
+        tipo: rule.tipo,
+        calcMode: rule.calcMode,
+        valore: rule.valore,
+        isRemainder: rule.isRemainder,
+        addebitaBollo,
+        ordine: rule.ordine,
+      });
+      await reloadRules();
+      toast({
+        title: addebitaBollo ? 'Bollo addebitato al proprietario' : 'Bollo non più addebitato',
+        description: 'Vale per i nuovi calcoli: le prenotazioni senza documenti si aggiornano con "Ricalcola".',
+      });
+    } catch (err) {
+      toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setAggiornandoBolloId(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -378,6 +411,22 @@ const PropertyContracts = () => {
                   <TableCell>
                     <span className="font-medium text-sm">{rule.tipoLabel}</span>
                     {rule.isRemainder && <Badge variant="default" className="ml-2 text-[10px]">RIMANENZA</Badge>}
+                    {rule.tipo === 'provvigione_proprietario' && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <Checkbox
+                          id={`bollo-${rule.id}`}
+                          checked={rule.addebitaBollo ?? false}
+                          disabled={aggiornandoBolloId === rule.id}
+                          onCheckedChange={v => handleToggleBollo(rule, v === true)}
+                        />
+                        <label htmlFor={`bollo-${rule.id}`} className="text-sm cursor-pointer">
+                          Addebita marca da bollo al proprietario
+                          <span className="text-xs text-muted-foreground ml-1">
+                            (fuori campo art. 15, se canone {'>'} €{bolloSoglia.toLocaleString('it-IT', { minimumFractionDigits: 2 })})
+                          </span>
+                        </label>
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {rule.canaleName ? <Badge variant="outline" className="text-xs">{rule.canaleName}</Badge> : <span className="text-muted-foreground text-xs">—</span>}
