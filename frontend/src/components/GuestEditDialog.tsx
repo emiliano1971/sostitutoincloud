@@ -230,10 +230,12 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
             <Label className="text-xs">Codice Fiscale</Label>
             <div className="flex gap-2">
               <Input
-                value={taxCode}
-                readOnly
+                value={taxCode ?? ''}
+                onChange={e => setTaxCode(e.target.value.trim().toUpperCase())}
                 className="font-mono"
-                placeholder={nazione === '999999999' ? 'Verrà generato automaticamente' : '—'}
+                placeholder={nazione === '999999999' ? 'Inserisci o genera CF' : 'Inserisci o calcola CF'}
+                // 20 come guest_tax_code (VARCHAR(20)): ammette anche codici fiscali esteri
+                maxLength={20}
               />
               {nazione === '100000100' ? (
                 <Button type="button" variant="outline" onClick={handleCalcCf} disabled={!canCalc || calcolando} className="gap-2 shrink-0">
@@ -247,6 +249,9 @@ const GuestEditDialog = ({ bookingId, guest, open, onClose, onSaved }: GuestEdit
                 </Button>
               )}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Inseribile manualmente o tramite i pulsanti. Il CF calcolato sovrascrive quello inserito.
+            </p>
           </div>
 
           {error && (

@@ -79,6 +79,8 @@ const BOOKING_FIELDS: FieldDef[] = [
   { key: 'TELEFONO',       label: 'Telefono ospite' },
   // Paese di provenienza dell'ospite (es. Italia, Francia): usato se il file ospiti non ha la nazione
   { key: 'PAESE',          label: 'Nazione ospite' },
+  // CF ospite: usato se il file ospiti non lo fornisce
+  { key: 'CF',             label: 'Codice fiscale ospite' },
 ];
 
 const GUEST_FIELDS: FieldDef[] = [

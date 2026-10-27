@@ -358,7 +358,14 @@ public class BookingService {
 
         // CF: se manca sia nel body sia a DB, prova a calcolarlo dai dati anagrafici già
         // mergiati (come nel flusso import). Un CF già presente non viene mai ricalcolato.
-        String guestTaxCode = merge(dto.getGuestTaxCode(), existing.getGuestTaxCode());
+        // CF dalla richiesta: normalizzato prima del merge. Un formato non standard si accetta
+        // (CF esteri o particolari), ma viene segnalato nel log.
+        String cfRichiesta = isNotBlank(dto.getGuestTaxCode()) ? dto.getGuestTaxCode().trim().toUpperCase() : null;
+        if (cfRichiesta != null && cfRichiesta.length() != 16 && !cfRichiesta.startsWith("EST")) {
+            log.warn("BookingService.updateBookingGuest() - CF non standard: {}, lunghezza {}",
+                    cfRichiesta, cfRichiesta.length());
+        }
+        String guestTaxCode = merge(cfRichiesta, existing.getGuestTaxCode());
         String comune = emptyToNull(guestBirthPlace);
         if (comune == null) comune = emptyToNull(guestBirthBelfiore);
         if (emptyToNull(guestTaxCode) == null && isNotBlank(guestName)

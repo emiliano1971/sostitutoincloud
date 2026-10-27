@@ -173,7 +173,20 @@ public class BookingImportService {
             Map.entry("nazione ospite", "PAESE"),
             Map.entry("country", "PAESE"),
             Map.entry("nazionalita", "PAESE"),
-            Map.entry("nazionalità", "PAESE")
+            Map.entry("nazionalità", "PAESE"),
+            // CF ospite: usato solo se il file ospiti non lo fornisce. normalize() non toglie
+            // i punti, quindi "c.f." e "cod. fiscale" servono come chiavi esatte.
+            Map.entry("codice fiscale", "CF"),
+            Map.entry("codice_fiscale", "CF"),
+            Map.entry("codicefiscale", "CF"),
+            Map.entry("cod. fiscale", "CF"),
+            Map.entry("cod fiscale", "CF"),
+            Map.entry("cf", "CF"),
+            Map.entry("c.f.", "CF"),
+            Map.entry("fiscal code", "CF"),
+            Map.entry("fiscalcode", "CF"),
+            Map.entry("tax code", "CF"),
+            Map.entry("taxcode", "CF")
     ));
 
     /** Copia ordinata per lunghezza chiave decrescente (a parità, alfabetica: ordine stabile). */
@@ -843,11 +856,16 @@ public class BookingImportService {
                     EmailUtils.normalizza(mapVal(row, bMap, "EMAIL")),
                     guest != null ? EmailUtils.normalizza(guest.getEmail()) : null);
 
-            // CF ospite: il valore presente nel file ha la precedenza sul calcolo.
+            // CF ospite: il valore presente nei file ha la precedenza sul calcolo. Prima quello
+            // del file ospiti, poi quello del file prenotazioni; un valore vuoto non conta.
             String cfOspite = null;
+            String cfFilePrenotazioni = mapVal(row, bMap, "CF");
             if (guest != null && !blank(guest.getCodiceFiscale())) {
                 cfOspite = guest.getCodiceFiscale().trim().toUpperCase();
                 log.debug("BookingImportService - riga {}: CF dal file: {}", rowNum, cfOspite);
+            } else if (!blank(cfFilePrenotazioni)) {
+                cfOspite = cfFilePrenotazioni.trim().toUpperCase();
+                log.debug("BookingImportService - riga {}: CF dal file prenotazioni: {}", rowNum, cfOspite);
             }
 
             // warning informativi (non cambiano lo stato riga): split + dati anagrafici incompleti.
