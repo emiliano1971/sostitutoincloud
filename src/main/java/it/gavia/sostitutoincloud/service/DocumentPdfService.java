@@ -274,8 +274,7 @@ public class DocumentPdfService {
                         + (booking.getNights() != null
                         ? " — " + booking.getNights() + (booking.getNights() == 1 ? " notte" : " notti") : ""),
                 canone));
-        // Il bollo non ha mai una riga in ricevuta. Se è addebitato al proprietario (voce fuori
-        // campo nello split, fatturata dal PM) compare solo la nota; altrimenti non compare affatto.
+        // Il bollo non ha mai una riga in ricevuta: compare solo nella nota (NOTA_BOLLO, sotto).
         boolean bolloAddebitato = vociFatturaPmService.vociDaSplit(booking.getId()).stream()
                 .anyMatch(VociFatturaPmService.VoceFatturaPm::fuoriCampo);
 
@@ -300,9 +299,15 @@ public class DocumentPdfService {
         c.put("PROPERTY_CITY", esc(property != null ? property.getCity() : null));
         c.put("RIGHE_RICEVUTA", righe.toString());
         c.put("CANONE", importo(canone));
-        c.put("NOTA_BOLLO", bollo.compareTo(BigDecimal.ZERO) > 0 && bolloAddebitato
-                ? "<br/>Marca da bollo anticipata dal sostituto d'imposta e addebitata nella fattura di gestione."
-                : "");
+        // Nota bollo: addebitato al proprietario (voce fuori campo nello split) → anticipato e
+        // fatturato dal PM; altrimenti, se c'è un bollo, assolto dal sostituto d'imposta.
+        String notaBollo = "";
+        if (bolloAddebitato) {
+            notaBollo = "<br/>Marca da bollo anticipata dal sostituto d'imposta e addebitata nella fattura di gestione.";
+        } else if (bollo.compareTo(BigDecimal.ZERO) > 0) {
+            notaBollo = "<br/>Imposta di bollo di &#8364; " + importo(bollo) + " assolta dal sostituto d'imposta.";
+        }
+        c.put("NOTA_BOLLO", notaBollo);
         return c;
     }
 

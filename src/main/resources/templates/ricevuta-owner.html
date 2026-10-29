@@ -12,8 +12,8 @@
   - destinatario = ospite: nome, C.F.
   - nessuna colonna IVA (canone fuori campo IVA)
   - totale = solo canone; nessuna ritenuta; nessuna riga per il bollo
-  - bollo addebitato al proprietario (voce fuori campo nello split): nota a piè pagina (NOTA_BOLLO);
-    bollo non addebitato: non compare
+  - bollo addebitato al proprietario (voce fuori campo nello split): nota "anticipata e addebitata" (NOTA_BOLLO)
+    bollo non addebitato ma presente: nota "assolta dal sostituto d'imposta"; bollo assente: nessuna nota
   - il tenant (PM) compare solo nelle note come sostituto d'imposta
 
   NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox:
