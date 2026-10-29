@@ -11,8 +11,9 @@
     (owner_profile non ha un indirizzo: non viene stampato)
   - destinatario = ospite: nome, C.F.
   - nessuna colonna IVA (canone fuori campo IVA)
-  - totale = solo canone; nessuna ritenuta; bollo indicato ma non sommato
-  - bollo addebitato al proprietario (voce fuori campo nello split): niente riga, nota a piè pagina (NOTA_BOLLO)
+  - totale = solo canone; nessuna ritenuta; nessuna riga per il bollo
+  - bollo addebitato al proprietario (voce fuori campo nello split): nota a piè pagina (NOTA_BOLLO);
+    bollo non addebitato: non compare
   - il tenant (PM) compare solo nelle note come sostituto d'imposta
 
   NB layout: OpenHTMLToPDF è un renderer CSS 2.1 e NON supporta flexbox:
@@ -165,7 +166,7 @@
   </div>
 </div>
 
-<!-- DETTAGLIO SOGGIORNO — canone + eventuale marca da bollo, nessuna colonna IVA -->
+<!-- DETTAGLIO SOGGIORNO — solo canone, nessuna colonna IVA -->
 <div class="section">
   <div class="section-title">
     Dettaglio soggiorno
