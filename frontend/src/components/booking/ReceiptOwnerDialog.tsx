@@ -6,7 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Receipt, Send, Download, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
-import { downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
+import { downloadDocumentPdf, type AvvisoEmissione, type DocumentGenerateResponse } from '@/api/documentApi';
+import { useEmissioneConData } from './useEmissioneConData';
 import type { FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface ReceiptOwnerDialogProps {
@@ -20,7 +21,10 @@ interface ReceiptOwnerDialogProps {
   generatedDoc?: DocumentGenerateResponse | null;
   existingDoc?: FiscalDocumentSummary;
   isSaving?: boolean;
-  onEmetti?: () => void;
+  /** Id della prenotazione: serve al controllo della data di emissione. */
+  bookingId: number;
+  /** Emissione con la data scelta; un errore lanciato viene mostrato sotto il campo data. */
+  onEmetti?: (dataEmissione: string, avvisi: AvvisoEmissione[]) => Promise<void>;
   /** Canone oltre il quale si applica il bollo (tenant_settings.bollo_soglia). */
   sogliaBollo?: number;
   /** Importo del bollo (tenant_settings.bollo_importo). */
@@ -38,9 +42,15 @@ const statoDocLabels: Record<string, string> = {
   error: 'Errore',
 };
 
-const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tenantData, generatedDoc, existingDoc, isSaving, onEmetti,
+const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tenantData, generatedDoc, existingDoc, isSaving, bookingId, onEmetti,
   sogliaBollo = 77.47, importoBollo: importoBolloTenant = 2.00 }: ReceiptOwnerDialogProps) => {
   const [isDownloading, setIsDownloading] = useState(false);
+  // Data di emissione manuale: attiva solo finché la ricevuta non è emessa
+  const daEmettere = open && !existingDoc && !generatedDoc && !!onEmetti;
+  const emissione = useEmissioneConData({
+    attivo: daEmettere, bookingId, tipoDocumento: 'ricevuta_owner',
+    onEmetti: onEmetti ?? (async () => { /* nessuna emissione senza handler */ }),
+  });
   const receiptNumber = existingDoc?.documentNumber
     ?? generatedDoc?.documentNumber
     ?? `RIC-${new Date().getFullYear()}-${String(booking.booking_id).padStart(4, '0')}`;
@@ -230,6 +240,9 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
           </div>
         )}
 
+        {daEmettere && emissione.campoData}
+        {emissione.conferma}
+
         <div className="flex gap-3 justify-end pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
           {isDocIssued ? (
@@ -246,7 +259,8 @@ const ReceiptOwnerDialog = ({ open, onOpenChange, booking, owner, property, tena
               Già emesso il {receiptDate}
             </Button>
           ) : !generatedDoc ? (
-            <Button className="gap-2" onClick={onEmetti} disabled={isSaving}>
+            <Button className="gap-2" onClick={emissione.emetti}
+              disabled={isSaving || emissione.verificando || emissione.dataNonValida}>
               <Receipt className="h-4 w-4" />
               {isSaving ? 'Emissione…' : 'Emetti Documento'}
             </Button>

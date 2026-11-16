@@ -1271,6 +1271,8 @@ CREATE TABLE tenant_settings (
     page_size                   INTEGER         NOT NULL DEFAULT 50,
     -- migration 031: testo predefinito dell'email di invio documenti
     email_testo_predefinito     TEXT,
+    -- migration 036: oggetto predefinito dell'email di invio documenti
+    email_oggetto_predefinito   VARCHAR(200),
     created_at                  TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at                  TIMESTAMP       NOT NULL DEFAULT NOW()
 );
@@ -1286,6 +1288,10 @@ COMMENT ON COLUMN tenant_settings.page_size IS
 COMMENT ON COLUMN tenant_settings.email_testo_predefinito IS
     'Testo predefinito per l email di invio documenti fiscali '
     '(fattura PM e ricevuta owner). Editabile prima dell invio.';
+COMMENT ON COLUMN tenant_settings.email_oggetto_predefinito IS
+    'Oggetto predefinito per l invio email dei documenti fiscali. '
+    'Se NULL o vuoto il frontend usa "Documenti fiscali soggiorno". '
+    'Editabile prima di ogni invio.';
 
 CREATE TRIGGER trg_tenant_settings_updated_at
     BEFORE UPDATE ON tenant_settings

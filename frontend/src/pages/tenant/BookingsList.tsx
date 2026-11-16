@@ -22,6 +22,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLookup } from '@/contexts/LookupContext';
 import { useToast } from '@/hooks/use-toast';
 import { STATI_PRENOTAZIONE } from '@/lib/statiLabels';
+import { oggettoEmailIniziale } from '@/lib/emailDocumenti';
+
+// Stati scartati dalla generazione massiva: stessi codici di
+// DocumentGenerationService.generaBatch() (STATO_STORNATA, STATO_CANCELLED)
+const STATI_NON_ELABORABILI = ['stornata', 'cancelled'];
 
 // Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
 // nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
@@ -101,7 +106,12 @@ const BookingsList = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Azioni massive sulle prenotazioni selezionate
   const [showGeneraDialog, setShowGeneraDialog] = useState(false);
-  const [dataEmissione, setDataEmissione] = useState(() => toLocalISO(new Date()));
+  // Una data per tipo documento: il backend la verifica contro l'ultimo documento dello stesso tipo e anno
+  const [dataFattura, setDataFattura] = useState(() => toLocalISO(new Date()));
+  const [dataRicevuta, setDataRicevuta] = useState(() => toLocalISO(new Date()));
+  // Righe già caricate (la selezione sopravvive al cambio pagina): servono al conteggio delle
+  // fatture che avrebbero data anteriore al check-out, mostrato nel dialog "Genera documenti"
+  const righeViste = useRef(new Map<number, { checkoutDate: string; fatturaId?: number; statoPrenotazione?: string }>());
   const [generando, setGenerando] = useState(false);
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [emailOggetto, setEmailOggetto] = useState('');
@@ -165,6 +175,9 @@ const BookingsList = () => {
       .then(r => {
         if (annullato) return;
         setBookings(r.content);
+        r.content.forEach(b => righeViste.current.set(b.id, {
+          checkoutDate: b.checkoutDate, fatturaId: b.fatturaId, statoPrenotazione: b.statoPrenotazione,
+        }));
         setTotalPages(r.totalPages);
         setTotalElements(r.totalElements);
       })
@@ -176,6 +189,15 @@ const BookingsList = () => {
 
   const visible = bookings;
   const allSelected = visible.length > 0 && visible.every(b => selectedIds.has(b.id));
+  // Selezionate elaborabili da generaBatch() (stato noto e non stornata/cancelled), senza fattura
+  // non annullata, con check-out successivo alla data fattura scelta: stessa condizione
+  // dell'avviso DATA_PRECEDE_CHECKOUT (date ISO confrontabili come stringhe). Riga o stato non
+  // noti → non contata, per non sovrastimare.
+  const fattureAnteCheckout = Array.from(selectedIds).filter(id => {
+    const r = righeViste.current.get(id);
+    return !!r && !!r.statoPrenotazione && !STATI_NON_ELABORABILI.includes(r.statoPrenotazione)
+      && r.fatturaId == null && !!r.checkoutDate && dataFattura < r.checkoutDate;
+  }).length;
 
   const toggleId = (id: number) => {
     setSelectedIds(prev => {
@@ -239,10 +261,13 @@ const BookingsList = () => {
 
   // Riepilogo di un'azione massiva: conteggi nel titolo, primi 5 scarti nel testo
   const mostraRisultato = (titolo: string, res: BatchRisultato) => {
+    const avvisi = res.avvisi ?? [];
     toast({
       title: titolo,
-      description: res.dettagliScartati.length > 0
+      description: res.dettagliScartati.length > 0 || avvisi.length > 0
         ? <div className="whitespace-pre-line text-xs">
+            {avvisi.map(a => `⚠ ${a}`).join('\n')}
+            {avvisi.length > 0 && res.dettagliScartati.length > 0 ? '\n' : ''}
             {res.dettagliScartati.slice(0, 5).join('\n')}
             {res.dettagliScartati.length > 5 ? `\n… e altri ${res.dettagliScartati.length - 5}` : ''}
           </div>
@@ -254,7 +279,7 @@ const BookingsList = () => {
   const handleGeneraBatch = async () => {
     setGenerando(true);
     try {
-      const res = await generaDocumentiBatch(Array.from(selectedIds), dataEmissione);
+      const res = await generaDocumentiBatch(Array.from(selectedIds), dataFattura, dataRicevuta);
       mostraRisultato(`Elaborati: ${res.elaborati} — Scartati: ${res.scartati}`, res);
       setShowGeneraDialog(false);
       setSelectedIds(new Set());
@@ -266,8 +291,9 @@ const BookingsList = () => {
     }
   };
 
-  // All'apertura il testo parte da quello predefinito del tenant
+  // All'apertura oggetto e testo partono da quelli predefiniti del tenant
   const apriEmailDialog = () => {
+    setEmailOggetto(oggettoEmailIniziale(settings));
     setEmailTesto(settings?.emailTestoPredefinito ?? '');
     setShowEmailDialog(true);
   };
@@ -514,13 +540,28 @@ const BookingsList = () => {
               selezionate. Quelle non idonee verranno scartate.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label>Data emissione</Label>
-            <Input type="date" value={dataEmissione} onChange={e => setDataEmissione(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Data fattura</Label>
+              <Input type="date" value={dataFattura} max={toLocalISO(new Date())} onChange={e => setDataFattura(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Data ricevuta</Label>
+              <Input type="date" value={dataRicevuta} max={toLocalISO(new Date())} onChange={e => setDataRicevuta(e.target.value)} />
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground">
+            Una data anteriore all'ultimo documento dello stesso tipo scarta la prenotazione (motivo nel riepilogo).
+          </p>
+          {fattureAnteCheckout > 0 && (
+            <p className="flex items-center gap-1 text-xs text-warning">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              {fattureAnteCheckout} {fattureAnteCheckout === 1 ? 'fattura avrà' : 'fatture avranno'} data anteriore al check-out
+            </p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGeneraDialog(false)} disabled={generando}>Annulla</Button>
-            <Button onClick={handleGeneraBatch} disabled={generando || !dataEmissione}>
+            <Button onClick={handleGeneraBatch} disabled={generando || !dataFattura || !dataRicevuta}>
               {generando ? 'Generazione...' : 'Genera documenti'}
             </Button>
           </DialogFooter>

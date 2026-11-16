@@ -161,7 +161,7 @@ const PropertyContracts = () => {
       });
       await reloadRules();
       toast({
-        title: addebitaBollo ? 'Bollo addebitato al proprietario' : 'Bollo non più addebitato',
+        title: addebitaBollo ? 'Bollo a carico del proprietario' : 'Bollo non più a carico del proprietario',
         description: 'Vale per i nuovi calcoli: le prenotazioni senza documenti si aggiornano con "Ricalcola".',
       });
     } catch (err) {
@@ -420,7 +420,7 @@ const PropertyContracts = () => {
                           onCheckedChange={v => handleToggleBollo(rule, v === true)}
                         />
                         <label htmlFor={`bollo-${rule.id}`} className="text-sm cursor-pointer">
-                          Addebita marca da bollo al proprietario
+                          Bollo a carico del proprietario (anticipato dal PM)
                           <span className="text-xs text-muted-foreground ml-1">
                             (fuori campo art. 15, se canone {'>'} €{bolloSoglia.toLocaleString('it-IT', { minimumFractionDigits: 2 })})
                           </span>

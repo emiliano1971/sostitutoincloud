@@ -6,7 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { FileText, Send, Download, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
-import { aggiornaStatoDocumento, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
+import { aggiornaStatoDocumento, downloadDocumentPdf, type AvvisoEmissione, type DocumentGenerateResponse } from '@/api/documentApi';
+import { useEmissioneConData } from './useEmissioneConData';
 import type { BookingSplitRiga, FiscalDocumentSummary } from '@/api/bookingApi';
 
 interface InvoicePMDialogProps {
@@ -28,7 +29,10 @@ interface InvoicePMDialogProps {
   generatedDoc?: DocumentGenerateResponse | null;
   existingDoc?: FiscalDocumentSummary;
   isSaving?: boolean;
-  onEmetti?: () => void;
+  /** Id della prenotazione: serve al controllo della data di emissione. */
+  bookingId: number;
+  /** Emissione con la data scelta; un errore lanciato viene mostrato sotto il campo data. */
+  onEmetti?: (dataEmissione: string, avvisi: AvvisoEmissione[]) => Promise<void>;
   onSent?: () => void;
 }
 
@@ -43,7 +47,13 @@ const statoDocLabels: Record<string, string> = {
   error: 'Errore',
 };
 
-const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, righeFattura, generatedDoc, existingDoc, isSaving, onEmetti, onSent }: InvoicePMDialogProps) => {
+const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantData, righeFattura, generatedDoc, existingDoc, isSaving, bookingId, onEmetti, onSent }: InvoicePMDialogProps) => {
+  // Data di emissione manuale: attiva solo finché la fattura non è emessa
+  const daEmettere = open && !existingDoc && !generatedDoc && !!onEmetti;
+  const emissione = useEmissioneConData({
+    attivo: daEmettere, bookingId, tipoDocumento: 'fattura_pm',
+    onEmetti: onEmetti ?? (async () => { /* nessuna emissione senza handler */ }),
+  });
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleInvia = async (documentId: number) => {
@@ -317,6 +327,9 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
           </div>
         )}
 
+        {daEmettere && emissione.campoData}
+        {emissione.conferma}
+
         <div className="flex gap-3 justify-end pt-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Chiudi</Button>
           {isDocIssued ? (
@@ -341,7 +354,8 @@ const InvoicePMDialog = ({ open, onOpenChange, booking, owner, property, tenantD
               )}
             </>
           ) : !generatedDoc ? (
-            <Button className="gap-2" onClick={onEmetti} disabled={isSaving}>
+            <Button className="gap-2" onClick={emissione.emetti}
+              disabled={isSaving || emissione.verificando || emissione.dataNonValida}>
               <FileText className="h-4 w-4" />
               {isSaving ? 'Emissione…' : 'Emetti Documento'}
             </Button>

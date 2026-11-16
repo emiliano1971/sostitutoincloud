@@ -25,7 +25,9 @@ import {
   type BookingDetail as BookingDetailType,
   type BookingUpdateSplitRequest,
 } from '@/api/bookingApi';
-import { generateDocument, downloadDocumentPdf, type DocumentGenerateResponse } from '@/api/documentApi';
+import { generateDocument, downloadDocumentPdf, type AvvisoEmissione, type DocumentGenerateResponse } from '@/api/documentApi';
+import { ricalcolaF24 } from '@/api/f24Api';
+import { ToastAction } from '@/components/ui/toast';
 import type { Booking, OwnerProfile, Property } from '@/types';
 import { toast } from '@/hooks/use-toast';
 import { useLookup } from '@/contexts/LookupContext';
@@ -33,6 +35,7 @@ import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
 import { labelStatoPrenotazione } from '@/lib/statiLabels';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
+import { oggettoEmailIniziale } from '@/lib/emailDocumenti';
 
 const paymentLabels: Record<string, string> = {
   pending: 'In attesa',
@@ -332,7 +335,12 @@ const BookingDetail = () => {
   const [showInvioEmail, setShowInvioEmail] = useState(false);
   const [emailDest, setEmailDest] = useState('');
   const [emailOggetto, setEmailOggetto] = useState('');
+  // Oggetto toccato dall'utente: alla riapertura del box non si sovrascrive col predefinito
+  const [emailOggettoModificato, setEmailOggettoModificato] = useState(false);
   const [emailTesto, setEmailTesto] = useState('');
+  // Allegati selezionati: entrambi di default, si possono togliere e ripristinare
+  const [allegaFattura, setAllegaFattura] = useState(true);
+  const [allegaRicevuta, setAllegaRicevuta] = useState(true);
   const [inviando, setInviando] = useState(false);
 
   // Booking stornato con NDC totale: la copia riparte dai dati originali con split ricalcolato
@@ -476,11 +484,20 @@ const BookingDetail = () => {
     tipoDocumento: 'ricevuta_owner' | 'fattura_pm',
     setSaving: (v: boolean) => void,
     setGenerated: (d: DocumentGenerateResponse) => void,
+    dataEmissione: string,
+    avvisi: AvvisoEmissione[],
   ) => {
     if (!id) return;
     setSaving(true);
+    let doc: DocumentGenerateResponse;
     try {
-      const doc = await generateDocument({ bookingId: Number(id), tipoDocumento });
+      doc = await generateDocument({ bookingId: Number(id), tipoDocumento, dataEmissione });
+    } catch (err) {
+      // Errore di emissione (es. 422 della data): lo mostra il dialog sotto il campo data
+      setSaving(false);
+      throw err;
+    }
+    try {
       setGenerated(doc);
       toast({ title: 'Documento emesso', description: `Numero ${doc.documentNumber}` });
       // Avviso non bloccante (ricevuta in un periodo con F24 già pagato)
@@ -507,12 +524,34 @@ const BookingDetail = () => {
           description: `${doc.sdiAutoSendError}. Riprovare manualmente.`,
         });
       }
+      // F24 del periodo non pagato: il totale non si aggiorna da solo, si propone il ricalcolo
+      for (const a of avvisi.filter(x => x.codice === 'F24_NON_PAGATO' && x.f24Id != null)) {
+        const f24Id = a.f24Id!;
+        toast({
+          title: 'F24 da ricalcolare',
+          description: a.messaggio,
+          duration: 15000,
+          action: (
+            <ToastAction altText="Ricalcola F24" onClick={() => {
+              ricalcolaF24(f24Id)
+                .then(r => toast({
+                  title: 'F24 ricalcolato',
+                  description: `${r.numeroRitenute} ritenute, totale € ${r.totaleRitenute.toLocaleString('it-IT', { minimumFractionDigits: 2 })}`,
+                }))
+                .catch(e => toast({ title: 'Ricalcolo F24 non riuscito', description: (e as Error).message, variant: 'destructive' }));
+            }}>
+              Ricalcola F24
+            </ToastAction>
+          ),
+        });
+      }
       // ricarica il booking per aggiornare i badge di stato
       const refreshed = await getBookingById(Number(id));
       setBooking(refreshed);
     } catch (err) {
+      // Documento già emesso: qui può fallire solo il ricaricamento della prenotazione
       toast({
-        title: 'Errore generazione documento',
+        title: 'Documento emesso, aggiornamento pagina non riuscito',
         description: err instanceof Error ? err.message : 'Errore imprevisto',
       });
     } finally {
@@ -886,12 +925,17 @@ const BookingDetail = () => {
     && !!existingReceipt
     && existingReceipt.statoDocumento !== 'annullata';
 
-  // All'apertura del box: destinatari dall'email ospite, testo dalle impostazioni, oggetto vuoto
+  // All'apertura del box: destinatari dall'email ospite, testo e oggetto dalle impostazioni
+  // (l'oggetto solo se l'utente non l'ha già modificato), entrambi gli allegati selezionati
   const toggleInvioEmail = () => {
     if (!showInvioEmail) {
       setEmailDest(booking.guestEmail ?? '');
       setEmailTesto(tenantSettings?.emailTestoPredefinito ?? '');
-      setEmailOggetto('');
+      if (!emailOggettoModificato) {
+        setEmailOggetto(oggettoEmailIniziale(tenantSettings));
+      }
+      setAllegaFattura(true);
+      setAllegaRicevuta(true);
     }
     setShowInvioEmail(!showInvioEmail);
   };
@@ -904,8 +948,9 @@ const BookingDetail = () => {
         destinatari: emailDest,
         oggetto: emailOggetto,
         testo: emailTesto,
-        fatturaId: existingInvoice.id,
-        ricevutaId: existingReceipt.id,
+        // Allegato rimosso → null: il backend non genera quel PDF
+        fatturaId: allegaFattura ? existingInvoice.id : null,
+        ricevutaId: allegaRicevuta ? existingReceipt.id : null,
       });
       toast({ title: 'Email inviata', description: `Documenti inviati a ${emailDest}` });
       setShowInvioEmail(false);
@@ -1433,7 +1478,7 @@ const BookingDetail = () => {
                 <Label className="text-xs">Oggetto *</Label>
                 <Input
                   value={emailOggetto}
-                  onChange={e => setEmailOggetto(e.target.value)}
+                  onChange={e => { setEmailOggetto(e.target.value); setEmailOggettoModificato(true); }}
                   placeholder={`Documenti prenotazione ${booking.externalBookingId}`}
                   className="text-sm"
                 />
@@ -1447,14 +1492,37 @@ const BookingDetail = () => {
                   className="text-sm"
                 />
               </div>
-              <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-3">
-                <span>Allegati:</span>
-                <span className="flex items-center gap-1"><FileText className="h-3.5 w-3.5" />{existingInvoice.documentNumber}</span>
-                <span className="flex items-center gap-1"><ReceiptText className="h-3.5 w-3.5" />{existingReceipt.documentNumber}</span>
+              <div className="space-y-1">
+                <Label className="text-xs">Allegati</Label>
+                {[
+                  { key: 'fattura', icon: FileText, label: `Fattura ${existingInvoice.documentNumber}`,
+                    attivo: allegaFattura, set: setAllegaFattura },
+                  { key: 'ricevuta', icon: ReceiptText, label: `Ricevuta ${existingReceipt.documentNumber}`,
+                    attivo: allegaRicevuta, set: setAllegaRicevuta },
+                ].map(({ key, icon: Icon, label, attivo, set }) => (
+                  <div key={key} className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm">
+                    <Icon className={cn('h-4 w-4 shrink-0', !attivo && 'text-muted-foreground')} />
+                    <span className={cn('flex-1', !attivo && 'line-through text-muted-foreground')}>{label}</span>
+                    {attivo ? (
+                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6"
+                        onClick={() => set(false)} title="Rimuovi allegato">
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs gap-1"
+                        onClick={() => set(true)}>
+                        <RotateCcw className="h-3 w-3" /> Ripristina
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                {!allegaFattura && !allegaRicevuta && (
+                  <p className="text-xs text-destructive">Seleziona almeno un allegato</p>
+                )}
               </div>
               <Button
                 onClick={handleInviaEmail}
-                disabled={inviando || !emailDest.trim() || !emailOggetto.trim()}
+                disabled={inviando || !emailDest.trim() || !emailOggetto.trim() || (!allegaFattura && !allegaRicevuta)}
                 className="w-full"
                 size="sm"
               >
@@ -1478,7 +1546,8 @@ const BookingDetail = () => {
           generatedDoc={generatedInvoice}
           existingDoc={existingInvoice}
           isSaving={savingInvoice}
-          onEmetti={() => handleEmetti('fattura_pm', setSavingInvoice, setGeneratedInvoice)}
+          bookingId={booking.id}
+          onEmetti={(data, avvisi) => handleEmetti('fattura_pm', setSavingInvoice, setGeneratedInvoice, data, avvisi)}
           onSent={reloadBooking}
         />
         {booking.statoPrenotazione === 'stornata' && (
@@ -1507,7 +1576,8 @@ const BookingDetail = () => {
           generatedDoc={generatedReceipt}
           existingDoc={existingReceipt}
           isSaving={savingReceipt}
-          onEmetti={() => handleEmetti('ricevuta_owner', setSavingReceipt, setGeneratedReceipt)}
+          bookingId={booking.id}
+          onEmetti={(data, avvisi) => handleEmetti('ricevuta_owner', setSavingReceipt, setGeneratedReceipt, data, avvisi)}
           sogliaBollo={tenantSettings?.bolloSoglia ?? 77.47}
           importoBollo={tenantSettings?.bolloImporto ?? 2.00}
         />

@@ -220,6 +220,38 @@ export async function generateDocument(
   return post<DocumentGenerateResponse>('/documents/generate', data);
 }
 
+/** Avviso non bloccante sulla data di emissione scelta. */
+export interface AvvisoEmissione {
+  codice: 'F24_PAGATO' | 'F24_NON_PAGATO' | 'CU_EMESSA' | 'ANNO_PRECEDENTE' | 'INVIO_SDI_TARDIVO'
+    | 'DATA_PRECEDE_CHECKOUT';
+  messaggio: string;
+  /** Solo F24_NON_PAGATO: F24 da ricalcolare dopo l'emissione. */
+  f24Id?: number;
+}
+
+/** Esito di GET /documents/emissione-controllo (i campi null sono omessi dal backend). */
+export interface EmissioneControllo {
+  dataMinima: string;
+  dataMassima: string;
+  ultimoDocumentoNumero?: string;
+  ultimoDocumentoData?: string;
+  data: string;
+  /** Assente se la data è ammessa; altrimenti lo stesso messaggio del 422 di emissione. */
+  erroreData?: string;
+  avvisi?: AvvisoEmissione[];
+}
+
+/** Intervallo ammesso e avvisi per la data di emissione: non scrive nulla. data assente = oggi. */
+export async function getEmissioneControllo(
+  bookingId: number,
+  tipoDocumento: DocumentGenerateRequest['tipoDocumento'],
+  data?: string,
+): Promise<EmissioneControllo> {
+  const q = new URLSearchParams({ bookingId: String(bookingId), tipoDocumento });
+  if (data) q.set('data', data);
+  return get<EmissioneControllo>(`/documents/emissione-controllo?${q}`);
+}
+
 export async function aggiornaStatoDocumento(id: number, stato: string): Promise<void> {
   await patch<void>(`/documents/${id}/stato`, { stato });
 }

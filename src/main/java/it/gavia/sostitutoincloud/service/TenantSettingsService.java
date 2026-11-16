@@ -19,6 +19,8 @@ public class TenantSettingsService {
     // Limiti della dimensione pagina impostabile dal tenant
     private static final int PAGE_SIZE_MIN = 10;
     private static final int PAGE_SIZE_MAX = 200;
+    /** Lunghezza massima di tenant_settings.email_oggetto_predefinito (VARCHAR(200)). */
+    private static final int EMAIL_OGGETTO_MAX = 200;
 
     private final TenantSettingsDAO tenantSettingsDAO;
     private final TenantDAO tenantDAO;
@@ -183,6 +185,8 @@ public class TenantSettingsService {
                 .emailTestoPredefinito(dto.getEmailTestoPredefinito() == null
                         ? existing.getEmailTestoPredefinito()
                         : dto.getEmailTestoPredefinito().isBlank() ? null : dto.getEmailTestoPredefinito())
+                .emailOggettoPredefinito(validaEmailOggetto(dto.getEmailOggettoPredefinito(),
+                        existing.getEmailOggettoPredefinito()))
                 .build();
 
         TenantSettings saved = tenantSettingsDAO.save(updated);
@@ -272,6 +276,7 @@ public class TenantSettingsService {
                 .codiceTributoCreditoImposta(s.getCodiceTributoCreditoImposta())
                 .pageSize(s.getPageSize())
                 .emailTestoPredefinito(s.getEmailTestoPredefinito())
+                .emailOggettoPredefinito(s.getEmailOggettoPredefinito())
                 .build();
     }
 
@@ -284,6 +289,25 @@ public class TenantSettingsService {
     }
 
     /** null = non modificare; fuori da 10..200 → 400. */
+    /**
+     * Oggetto predefinito dell'email documenti: null = non modificare, vuoto o blank = NULL
+     * (il frontend usa il default), altrimenti trim e massimo {@value #EMAIL_OGGETTO_MAX} caratteri.
+     */
+    private String validaEmailOggetto(String richiesto, String attuale) {
+        if (richiesto == null) {
+            return attuale;
+        }
+        String oggetto = richiesto.trim();
+        if (oggetto.isEmpty()) {
+            return null;
+        }
+        if (oggetto.length() > EMAIL_OGGETTO_MAX) {
+            throw new IllegalArgumentException("Oggetto email: massimo " + EMAIL_OGGETTO_MAX
+                    + " caratteri (inseriti " + oggetto.length() + ")");
+        }
+        return oggetto;
+    }
+
     private Integer validaPageSize(Integer richiesto, Integer attuale) {
         if (richiesto == null) {
             return attuale;

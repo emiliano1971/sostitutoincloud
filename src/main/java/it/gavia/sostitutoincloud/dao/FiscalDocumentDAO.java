@@ -116,6 +116,33 @@ public class FiscalDocumentDAO {
     }
 
     /**
+     * Ultimo documento per data di emissione di tenant + tipo + anno (annullati compresi): a parità
+     * di data quello col progressivo più alto. Fissa la data minima ammessa per un nuovo documento.
+     */
+    public Optional<FiscalDocument> findUltimoPerData(Integer tenantId, Integer tipoDocumentoId, Integer anno) {
+        log.debug("FiscalDocumentDAO.findUltimoPerData() - tenantId={}, tipoDocumentoId={}, anno={}",
+                tenantId, tipoDocumentoId, anno);
+        String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_tipo_documento_id = ? " +
+                "AND EXTRACT(YEAR FROM issue_date) = ? " +
+                "ORDER BY issue_date DESC, CAST(SPLIT_PART(document_number, '-', 3) AS INTEGER) DESC LIMIT 1";
+        List<FiscalDocument> result = jdbcTemplate.query(sql, fiscalDocumentRowMapper, tenantId, tipoDocumentoId, anno);
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /**
+     * Lock di numerazione per tenant + tipo + anno: serializza controllo della data e assegnazione
+     * del numero tra emissioni concorrenti. pg_advisory_xact_lock si rilascia al commit/rollback,
+     * quindi va chiamato DENTRO una transazione (fuori verrebbe rilasciato subito).
+     */
+    public void lockNumerazione(Integer tenantId, Integer tipoDocumentoId, Integer anno) {
+        log.debug("FiscalDocumentDAO.lockNumerazione() - tenantId={}, tipoDocumentoId={}, anno={}",
+                tenantId, tipoDocumentoId, anno);
+        // Chiave a due int4: (tenant, tipo*10000 + anno)
+        jdbcTemplate.query("SELECT pg_advisory_xact_lock(?, ?)", rs -> { },
+                tenantId, tipoDocumentoId * 10000 + anno);
+    }
+
+    /**
      * Genera il numero documento nel formato "{prefix}-{anno}-{numero:04d}", es. "RIC-2026-0003".
      * Il prefix dipende dal tipo logico (RIC per ricevuta, FT per fattura) ed è scelto dal Service.
      */

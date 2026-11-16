@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Body di POST /api/bookings/{id}/invia-documenti: invio via email di fattura PM e ricevuta owner.
+ * Body di POST /api/bookings/{id}/invia-documenti: invio via email di fattura PM e/o ricevuta owner.
  * Il bookingId del path ha la precedenza su quello del body.
  */
 @Data
@@ -20,6 +20,8 @@ public class InviaDocumentiDTO {
     private String oggetto;
     /** Testo semplice (non HTML) */
     private String testo;
+    /** Fattura PM da allegare; null = non allegarla. Almeno uno tra fatturaId e ricevutaId. */
     private Integer fatturaId;
+    /** Ricevuta owner da allegare; null = non allegarla. Almeno uno tra fatturaId e ricevutaId. */
     private Integer ricevutaId;
 }

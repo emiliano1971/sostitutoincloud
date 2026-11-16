@@ -2,6 +2,7 @@ package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.dao.BookingDAO;
 import it.gavia.sostitutoincloud.dao.BookingSplitEconomicoDAO;
+import it.gavia.sostitutoincloud.dao.CuRecordDAO;
 import it.gavia.sostitutoincloud.dao.F24RecordDAO;
 import it.gavia.sostitutoincloud.dao.FiscalDocumentDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
@@ -14,8 +15,10 @@ import it.gavia.sostitutoincloud.dto.booking.BookingDetailDTO;
 import it.gavia.sostitutoincloud.dto.booking.SplitEconomicoDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
+import it.gavia.sostitutoincloud.dto.document.EmissioneControlloDTO;
 import it.gavia.sostitutoincloud.dto.settings.TenantSettingsDTO;
 import it.gavia.sostitutoincloud.model.BookingSplitEconomico;
+import it.gavia.sostitutoincloud.model.F24Record;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.StatoDocumento;
@@ -23,10 +26,15 @@ import it.gavia.sostitutoincloud.model.StatoPrenotazione;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -53,6 +61,11 @@ public class DocumentGenerationService {
     private static final String STATO_SENT_SDI = "sent_sdi";
     private static final String STATO_DOC_ISSUED = "doc_issued";
     private static final String STATO_STORNATA = "stornata";
+    private static final String STATO_F24_PAID = "paid";
+    private static final List<String> STATI_CU_EMESSA = List.of("sent", "delivered");
+    // Fattura immediata: trasmissione allo SDI entro 12 giorni dalla data del documento
+    private static final int GIORNI_INVIO_SDI = 12;
+    private static final DateTimeFormatter DATA_IT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final BookingService bookingService;
@@ -67,6 +80,9 @@ public class DocumentGenerationService {
     private final SdiXmlService sdiXmlService;
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
     private final F24RecordDAO f24RecordDAO;
+    private final CuRecordDAO cuRecordDAO;
+    // Controllo data + numero + insert in una transazione breve, sotto lock di numerazione
+    private final TransactionTemplate transactionTemplate;
 
     public DocumentGenerationService(FiscalDocumentDAO fiscalDocumentDAO,
                                      BookingService bookingService,
@@ -80,8 +96,12 @@ public class DocumentGenerationService {
                                      StatoPrenotazioneDAO statoPrenotazioneDAO,
                                      SdiXmlService sdiXmlService,
                                      BookingSplitEconomicoDAO splitEconomicoDAO,
-                                     F24RecordDAO f24RecordDAO) {
+                                     F24RecordDAO f24RecordDAO,
+                                     CuRecordDAO cuRecordDAO,
+                                     PlatformTransactionManager transactionManager) {
         this.f24RecordDAO = f24RecordDAO;
+        this.cuRecordDAO = cuRecordDAO;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.bookingService = bookingService;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
@@ -126,9 +146,21 @@ public class DocumentGenerationService {
         if (dto.getBookingIds() == null || dto.getBookingIds().isEmpty()) {
             throw new IllegalArgumentException("Nessuna prenotazione selezionata");
         }
-        LocalDate dataEmissione = dto.getDataEmissione() != null ? dto.getDataEmissione() : LocalDate.now();
-        LocalDate oggi = LocalDate.now();   // usato dal controllo check-out (disabilitato)
+        LocalDate oggi = LocalDate.now();   // usato anche dal controllo check-out (disabilitato)
+        // Date per tipo; dataEmissione resta come ripiego comune per i client che mandano solo quella
+        LocalDate dataComune = dto.getDataEmissione() != null ? dto.getDataEmissione() : oggi;
+        LocalDate dataFattura = dto.getDataFattura() != null ? dto.getDataFattura() : dataComune;
+        LocalDate dataRicevuta = dto.getDataRicevuta() != null ? dto.getDataRicevuta() : dataComune;
+        // Data futura: nessuna prenotazione potrebbe passare, si rifiuta l'intero lotto (422).
+        // La data anteriore al minimo invece è uno scarto per prenotazione, sollevato da generate().
+        if (dataFattura.isAfter(oggi) || dataRicevuta.isAfter(oggi)) {
+            throw new DataEmissioneNonValidaException("La data di emissione non può essere futura (oggi è "
+                    + oggi.format(DATA_IT) + ")");
+        }
         BatchRisultatoDTO risultato = new BatchRisultatoDTO();
+        // Fatture emesse con data anteriore al check-out: nel lotto non c'è conferma per riga,
+        // si segnalano nel riepilogo (nessuno scarto)
+        List<String> fattureAnteCheckout = new ArrayList<>();
 
         for (Integer bookingId : dto.getBookingIds()) {
             BookingDetailDTO booking = bookingService.findById(tenantId, bookingId).orElse(null);
@@ -157,7 +189,10 @@ public class DocumentGenerationService {
             }
             try {
                 if (!haFattura) {
-                    generate(tenantId, new DocumentGenerateRequestDTO(bookingId, TIPO_FATTURA_PM, dataEmissione));
+                    generate(tenantId, new DocumentGenerateRequestDTO(bookingId, TIPO_FATTURA_PM, dataFattura));
+                    if (precedeCheckout(dataFattura, booking.getCheckoutDate())) {
+                        fattureAnteCheckout.add(codice);
+                    }
                 }
             } catch (Exception e) {
                 log.warn("DocumentGenerationService.generaBatch() - booking {}: fattura non emessa: {}", codice, e.getMessage());
@@ -166,7 +201,7 @@ public class DocumentGenerationService {
             }
             try {
                 if (!haRicevuta) {
-                    generate(tenantId, new DocumentGenerateRequestDTO(bookingId, TIPO_RICEVUTA_OWNER, dataEmissione));
+                    generate(tenantId, new DocumentGenerateRequestDTO(bookingId, TIPO_RICEVUTA_OWNER, dataRicevuta));
                 }
                 risultato.elaborato();
             } catch (Exception e) {
@@ -174,9 +209,121 @@ public class DocumentGenerationService {
                 risultato.scarta(codice, "ricevuta owner non emessa — " + e.getMessage());
             }
         }
-        log.info("DocumentGenerationService.generaBatch() - tenantId={} richiesti={} elaborati={} scartati={}",
-                tenantId, dto.getBookingIds().size(), risultato.getElaborati(), risultato.getScartati());
+        if (!fattureAnteCheckout.isEmpty()) {
+            int n = fattureAnteCheckout.size();
+            risultato.avvisa(n + (n == 1 ? " fattura" : " fatture") + " con data anteriore al check-out: "
+                    + String.join(", ", fattureAnteCheckout.subList(0, Math.min(5, n)))
+                    + (n > 5 ? " e altre " + (n - 5) : ""));
+        }
+        log.info("DocumentGenerationService.generaBatch() - tenantId={} richiesti={} elaborati={} scartati={} fattureAnteCheckout={}",
+                tenantId, dto.getBookingIds().size(), risultato.getElaborati(), risultato.getScartati(), fattureAnteCheckout.size());
         return risultato;
+    }
+
+    /**
+     * Messaggio di errore se la data di emissione non è ammessa per il tipo documento, null se va
+     * bene. Ammessa da: data dell'ultimo documento dello stesso tenant, tipo e anno (annullati
+     * compresi, uguale ammessa; 1 gennaio se nessuno) fino a oggi. Così la numerazione progressiva
+     * dell'anno resta in ordine di data.
+     */
+    private String erroreDataEmissione(Integer tenantId, TipoDocumento tipoDocumento, LocalDate data) {
+        LocalDate oggi = LocalDate.now();
+        if (data.isAfter(oggi)) {
+            return "La data di emissione non può essere futura (oggi è " + oggi.format(DATA_IT) + ")";
+        }
+        Optional<FiscalDocument> ultimo = fiscalDocumentDAO.findUltimoPerData(tenantId, tipoDocumento.getId(), data.getYear());
+        if (ultimo.isPresent() && data.isBefore(ultimo.get().getIssueDate())) {
+            return "La data non può precedere il " + ultimo.get().getIssueDate().format(DATA_IT)
+                    + " (" + ultimo.get().getDocumentNumber() + ")";
+        }
+        return null;
+    }
+
+    /**
+     * Controllo preventivo della data di emissione (GET /api/documents/emissione-controllo):
+     * intervallo ammesso, eventuale errore e avvisi non bloccanti sul periodo della data.
+     * Non scrive nulla. Gli avvisi F24/CU valgono solo per la ricevuta (è lei a generare la
+     * ritenuta); l'invio SDI tardivo solo per la fattura PM.
+     */
+    public EmissioneControlloDTO controlloEmissione(Integer tenantId, Integer bookingId, String tipo, LocalDate dataRichiesta) {
+        if (bookingId == null) {
+            throw new IllegalArgumentException("bookingId obbligatorio");
+        }
+        if (!TIPO_RICEVUTA_OWNER.equals(tipo) && !TIPO_FATTURA_PM.equals(tipo)) {
+            throw new IllegalArgumentException("tipoDocumento non valido: " + tipo);
+        }
+        BookingDetailDTO booking = bookingService.findById(tenantId, bookingId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Prenotazione non trovata per questo tenant: id=" + bookingId));
+        TipoDocumento tipoDocumento = tipoDocumentoDAO.findByCodice(TIPO_RICEVUTA_OWNER.equals(tipo) ? CODICE_RICEVUTA : CODICE_FATTURA)
+                .orElseThrow(() -> new IllegalArgumentException("Tipo documento lookup non trovato: " + tipo));
+
+        LocalDate oggi = LocalDate.now();
+        LocalDate data = dataRichiesta != null ? dataRichiesta : oggi;
+        int anno = data.getYear();
+        int mese = data.getMonthValue();
+        Optional<FiscalDocument> ultimo = fiscalDocumentDAO.findUltimoPerData(tenantId, tipoDocumento.getId(), anno);
+
+        List<EmissioneControlloDTO.Avviso> avvisi = new ArrayList<>();
+        if (anno < oggi.getYear()) {
+            avvisi.add(avviso("ANNO_PRECEDENTE", "Documento datato nell'anno " + anno + ", diverso da quello corrente: "
+                    + "rientra nella numerazione, nell'IVA e nella CU di un anno già chiuso. Verificare con il commercialista.", null));
+        }
+        if (TIPO_FATTURA_PM.equals(tipo)) {
+            long giorni = ChronoUnit.DAYS.between(data, oggi);
+            if (giorni > GIORNI_INVIO_SDI) {
+                avvisi.add(avviso("INVIO_SDI_TARDIVO", "La fattura immediata va trasmessa allo SDI entro "
+                        + GIORNI_INVIO_SDI + " giorni dalla sua data: con il " + data.format(DATA_IT)
+                        + " l'invio sarà tardivo di " + (giorni - GIORNI_INVIO_SDI) + " giorni. Verificare con il commercialista.", null));
+            }
+            // Fattura con data anteriore al check-out: prestazione non ancora conclusa (solo avviso)
+            if (precedeCheckout(data, booking.getCheckoutDate())) {
+                avvisi.add(avviso("DATA_PRECEDE_CHECKOUT", "La data (" + data.format(DATA_IT) + ") precede il check-out ("
+                        + booking.getCheckoutDate().format(DATA_IT) + "): la prestazione non risulta ancora conclusa.", null));
+            }
+        } else {
+            String periodo = String.format("%02d/%d", mese, anno);
+            List<F24Record> f24 = f24RecordDAO.findByTenantAndPeriodo(tenantId, anno, mese);
+            f24.stream().filter(f -> !f.isIntegrativo() && STATO_F24_PAID.equals(f.getStato())).findFirst()
+                    .ifPresent(principale -> {
+                        String msg = "L'F24 del periodo " + periodo + " è già stato pagato: la ritenuta andrà in un F24 integrativo.";
+                        if (principale.getDeadlineDate() != null && oggi.isAfter(principale.getDeadlineDate())) {
+                            msg += " La scadenza del " + principale.getDeadlineDate().format(DATA_IT)
+                                    + " è superata: l'integrativo non è più generabile, serve il commercialista.";
+                        }
+                        avvisi.add(avviso("F24_PAGATO", msg, null));
+                    });
+            // Principale o integrativo non pagato: il totale non si aggiorna da solo
+            f24.stream().filter(f -> !STATO_F24_PAID.equals(f.getStato())).forEach(f ->
+                    avvisi.add(avviso("F24_NON_PAGATO", "L'F24 " + (f.isIntegrativo() ? "integrativo " : "")
+                            + "del periodo " + periodo + " (stato " + f.getStato() + ") non si aggiorna da solo: "
+                            + "dopo l'emissione va ricalcolato.", f.getId())));
+            if (booking.getFkOwnerId() != null) {
+                cuRecordDAO.findByTenantOwnerYear(tenantId, booking.getFkOwnerId(), anno)
+                        .filter(cu -> STATI_CU_EMESSA.contains(cu.getStato()))
+                        .ifPresent(cu -> avvisi.add(avviso("CU_EMESSA", "La CU " + anno + " del proprietario è già "
+                                + cu.getStato() + ": non verrà aggiornata con questa ritenuta.", null)));
+            }
+        }
+
+        return EmissioneControlloDTO.builder()
+                .dataMinima(ultimo.map(FiscalDocument::getIssueDate).orElse(LocalDate.of(anno, 1, 1)))
+                .dataMassima(oggi)
+                .ultimoDocumentoNumero(ultimo.map(FiscalDocument::getDocumentNumber).orElse(null))
+                .ultimoDocumentoData(ultimo.map(FiscalDocument::getIssueDate).orElse(null))
+                .data(data)
+                .erroreData(erroreDataEmissione(tenantId, tipoDocumento, data))
+                .avvisi(avvisi)
+                .build();
+    }
+
+    /** Data del documento strettamente anteriore al check-out; false se il check-out manca. */
+    private static boolean precedeCheckout(LocalDate data, LocalDate checkout) {
+        return checkout != null && data.isBefore(checkout);
+    }
+
+    private static EmissioneControlloDTO.Avviso avviso(String codice, String messaggio, Integer f24Id) {
+        return EmissioneControlloDTO.Avviso.builder().codice(codice).messaggio(messaggio).f24Id(f24Id).build();
     }
 
     /** Documento del tipo indicato (codice lookup) presente e non annullato. */
@@ -369,36 +516,47 @@ public class DocumentGenerationService {
             fkDocumentoCollegatoId = null;
         }
 
-        // 4. Numero documento progressivo
-        LocalDate dataEmissione = request.getDataEmissione() != null ? request.getDataEmissione() : LocalDate.now();
+        // 4-5. Controllo data, numero progressivo e insert in una transazione breve, sotto lock di
+        // numerazione (tenant, tipo, anno): due emissioni contemporanee non leggono lo stesso
+        // minimo né lo stesso numero. Calcoli sopra e passi successivi (ledger, stato, audit,
+        // auto-invio SDI) restano fuori dal lock. Data non valida → rollback, nulla scritto (422).
+        LocalDate oggi = LocalDate.now();
+        LocalDate dataEmissione = request.getDataEmissione() != null ? request.getDataEmissione() : oggi;
         Integer anno = dataEmissione.getYear();
-        String documentNumber = fiscalDocumentDAO.generateDocumentNumber(
-                tenantId, tipoDocumento.getId(), prefix, anno);
+        FiscalDocument saved = transactionTemplate.execute(status -> {
+            fiscalDocumentDAO.lockNumerazione(tenantId, tipoDocumento.getId(), anno);
+            String erroreData = erroreDataEmissione(tenantId, tipoDocumento, dataEmissione);
+            if (erroreData != null) {
+                throw new DataEmissioneNonValidaException(erroreData);
+            }
+            String numero = fiscalDocumentDAO.generateDocumentNumber(
+                    tenantId, tipoDocumento.getId(), prefix, anno);
 
-        // 5. Crea e salva FiscalDocument.
-        // Le colonne imponibile/ritenuta_amount/bollo_amount sono persistite.
-        // vat_amount contiene l'IVA del documento (0 per ricevute fuori campo IVA).
-        FiscalDocument doc = FiscalDocument.builder()
-                .fkTenantId(tenantId)
-                .fkBookingId(booking.getId())
-                // Proprietario denormalizzato: risalito da booking → property (property già caricata sopra).
-                .fkOwnerId(property.getFkOwnerId())
-                .fkTipoDocumentoId(tipoDocumento.getId())
-                .fkStatoDocumentoId(statoIniziale.getId())
-                .documentNumber(documentNumber)
-                .issueDate(dataEmissione)
-                .recipientName(booking.getGuestName())
-                .recipientTaxCode(booking.getGuestTaxCode())
-                .totalAmount(importoTotale)
-                .vatAmount(iva)
-                .aliquotaIva(aliquotaIva)
-                .imponibile(imponibile)
-                .ritenutaAmount(ritenuta)
-                .bolloAmount(bollo)
-                .canoneLocazione(canoneLocazione)
-                .fkDocumentoCollegatoId(fkDocumentoCollegatoId)
-                .build();
-        FiscalDocument saved = fiscalDocumentDAO.insert(doc);
+            // Le colonne imponibile/ritenuta_amount/bollo_amount sono persistite.
+            // vat_amount contiene l'IVA del documento (0 per ricevute fuori campo IVA).
+            FiscalDocument doc = FiscalDocument.builder()
+                    .fkTenantId(tenantId)
+                    .fkBookingId(booking.getId())
+                    // Proprietario denormalizzato: risalito da booking → property (property già caricata sopra).
+                    .fkOwnerId(property.getFkOwnerId())
+                    .fkTipoDocumentoId(tipoDocumento.getId())
+                    .fkStatoDocumentoId(statoIniziale.getId())
+                    .documentNumber(numero)
+                    .issueDate(dataEmissione)
+                    .recipientName(booking.getGuestName())
+                    .recipientTaxCode(booking.getGuestTaxCode())
+                    .totalAmount(importoTotale)
+                    .vatAmount(iva)
+                    .aliquotaIva(aliquotaIva)
+                    .imponibile(imponibile)
+                    .ritenutaAmount(ritenuta)
+                    .bolloAmount(bollo)
+                    .canoneLocazione(canoneLocazione)
+                    .fkDocumentoCollegatoId(fkDocumentoCollegatoId)
+                    .build();
+            return fiscalDocumentDAO.insert(doc);
+        });
+        String documentNumber = saved.getDocumentNumber();
 
         // 6. Collegamento ricevuta <-> fattura PM.
         // Se sto emettendo la fattura e la ricevuta esiste già (ricevuta emessa prima della fattura),
@@ -444,6 +602,22 @@ public class DocumentGenerationService {
         auditService.log("document.issue", "FiscalDocument", saved.getId(),
                 "Emesso documento " + saved.getDocumentNumber()
                         + " per prenotazione " + booking.getExternalBookingId());
+        // Data scelta diversa da quella reale di emissione: traccia per i controlli successivi.
+        // Fattura PM con data anteriore al check-out (avviso DATA_PRECEDE_CHECKOUT confermato):
+        // nota nella stessa riga, oppure riga dedicata se la data è quella di oggi.
+        boolean anteCheckout = TIPO_FATTURA_PM.equals(tipo) && precedeCheckout(dataEmissione, booking.getCheckoutDate());
+        String notaCheckout = anteCheckout
+                ? "la data precede il check-out (" + booking.getCheckoutDate().format(DATA_IT) + ")" : null;
+        if (!dataEmissione.equals(oggi)) {
+            auditService.log("documento.data_manuale", "FiscalDocument", saved.getId(),
+                    "Documento " + documentNumber + " emesso il " + oggi.format(DATA_IT)
+                            + " con data " + dataEmissione.format(DATA_IT)
+                            + (notaCheckout != null ? "; " + notaCheckout : ""));
+        } else if (notaCheckout != null) {
+            auditService.log("documento.data_precede_checkout", "FiscalDocument", saved.getId(),
+                    "Documento " + documentNumber + " emesso con data " + dataEmissione.format(DATA_IT)
+                            + ": " + notaCheckout);
+        }
 
         // 7. Response
         DocumentGenerateResponseDTO result = DocumentGenerateResponseDTO.builder()

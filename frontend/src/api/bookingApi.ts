@@ -324,11 +324,16 @@ export interface BatchRisultato {
   scartati: number;
   /** es. "Booking BC001: documenti già emessi" */
   dettagliScartati: string[];
+  /** Segnalazioni non bloccanti sul lotto, es. "2 fatture con data anteriore al check-out: …" */
+  avvisi?: string[];
 }
 
-/** Genera i documenti mancanti (fattura PM + ricevuta owner) delle prenotazioni indicate. */
-export async function generaDocumentiBatch(bookingIds: number[], dataEmissione: string): Promise<BatchRisultato> {
-  return post<BatchRisultato>('/documents/genera-batch', { bookingIds, dataEmissione });
+/**
+ * Genera i documenti mancanti (fattura PM + ricevuta owner) delle prenotazioni indicate, con una
+ * data per tipo. Data futura → 422 per tutto il lotto; data anteriore all'ultimo documento → scarto.
+ */
+export async function generaDocumentiBatch(bookingIds: number[], dataFattura: string, dataRicevuta: string): Promise<BatchRisultato> {
+  return post<BatchRisultato>('/documents/genera-batch', { bookingIds, dataFattura, dataRicevuta });
 }
 
 /** Invia fattura + ricevuta all'email ospite delle prenotazioni indicate. */
@@ -339,7 +344,8 @@ export async function inviaEmailBatch(bookingIds: number[], oggetto: string, tes
 /** Invio via email di fattura PM + ricevuta owner come allegati PDF. */
 export async function inviaDocumenti(
   bookingId: number,
-  data: { destinatari: string; oggetto: string; testo: string; fatturaId: number; ricevutaId: number },
+  // null = documento non allegato; il backend richiede almeno uno dei due
+  data: { destinatari: string; oggetto: string; testo: string; fatturaId?: number | null; ricevutaId?: number | null },
 ): Promise<{ message: string }> {
   return post<{ message: string }>(`/bookings/${bookingId}/invia-documenti`, data);
 }

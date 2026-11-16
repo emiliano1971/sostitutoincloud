@@ -65,4 +65,7 @@ public class TenantSettingsUpdateDTO {
 
     // Testo predefinito dell'email di invio documenti; null = non modificare, "" = svuota
     private String emailTestoPredefinito;
+
+    // Oggetto predefinito dell'email di invio documenti (max 200); null = non modificare, "" = svuota
+    private String emailOggettoPredefinito;
 }

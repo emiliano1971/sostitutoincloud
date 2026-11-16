@@ -22,7 +22,9 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Invio via email dei documenti fiscali di una prenotazione (fattura PM + ricevuta owner)
@@ -124,9 +126,12 @@ public class EmailService {
     }
 
     /**
-     * Invia fattura PM e ricevuta owner della prenotazione ai destinatari indicati.
+     * Invia fattura PM e/o ricevuta owner della prenotazione ai destinatari indicati.
+     * Allega solo i documenti con id valorizzato: almeno uno dei due è obbligatorio.
      *
      * @param destinatari uno o più indirizzi separati da ; (anche , o spazio)
+     * @param fatturaId   fattura PM da allegare, null = non allegarla
+     * @param ricevutaId  ricevuta owner da allegare, null = non allegarla
      * @throws IllegalArgumentException dati mancanti/non validi o documenti non coerenti con la prenotazione
      * @throws MessagingException       errore nella composizione del messaggio
      * @throws org.springframework.mail.MailException errore SMTP in invio
@@ -140,11 +145,8 @@ public class EmailService {
         if (oggetto == null || oggetto.isBlank()) {
             throw new IllegalArgumentException("Oggetto obbligatorio");
         }
-        if (fatturaId == null) {
-            throw new IllegalArgumentException("Fattura non trovata");
-        }
-        if (ricevutaId == null) {
-            throw new IllegalArgumentException("Ricevuta non trovata");
+        if (fatturaId == null && ricevutaId == null) {
+            throw new IllegalArgumentException("Selezionare almeno un allegato");
         }
         for (String addr : indirizzi) {
             try {
@@ -154,14 +156,22 @@ public class EmailService {
             }
         }
 
-        FiscalDocument fattura = documentoDellaPrenotazione(tenantId, bookingId, fatturaId, CODICE_FATTURA, "Fattura");
-        FiscalDocument ricevuta = documentoDellaPrenotazione(tenantId, bookingId, ricevutaId, CODICE_RICEVUTA, "Ricevuta");
+        // Solo i documenti richiesti (id valorizzato): validati prima di generare qualsiasi PDF
+        FiscalDocument fattura = fatturaId != null
+                ? documentoDellaPrenotazione(tenantId, bookingId, fatturaId, CODICE_FATTURA, "Fattura") : null;
+        FiscalDocument ricevuta = ricevutaId != null
+                ? documentoDellaPrenotazione(tenantId, bookingId, ricevutaId, CODICE_RICEVUTA, "Ricevuta") : null;
 
-        // 1-2. PDF dei documenti (stessa generazione del download)
-        byte[] pdfFattura = documentPdfService.generaPdf(tenantId, fatturaId);
-        byte[] pdfRicevuta = documentPdfService.generaPdf(tenantId, ricevutaId);
+        // 1-2. PDF dei documenti (stessa generazione del download), nome file → contenuto
+        Map<String, byte[]> allegati = new LinkedHashMap<>();
+        if (fattura != null) {
+            allegati.put(nomeFile("Fattura", fattura), documentPdfService.generaPdf(tenantId, fatturaId));
+        }
+        if (ricevuta != null) {
+            allegati.put(nomeFile("Ricevuta", ricevuta), documentPdfService.generaPdf(tenantId, ricevutaId));
+        }
 
-        // 3. Messaggio multipart: testo semplice + 2 allegati
+        // 3. Messaggio multipart: testo semplice + 1 o 2 allegati
         MimeMessage message = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
         helper.setFrom(mailFrom);
@@ -170,15 +180,16 @@ public class EmailService {
         }
         helper.setSubject(oggetto.trim());
         helper.setText(testo != null ? testo : "", false);
-        helper.addAttachment(nomeFile("Fattura", fattura), new ByteArrayResource(pdfFattura));
-        helper.addAttachment(nomeFile("Ricevuta", ricevuta), new ByteArrayResource(pdfRicevuta));
+        for (Map.Entry<String, byte[]> a : allegati.entrySet()) {
+            helper.addAttachment(a.getKey(), new ByteArrayResource(a.getValue()));
+        }
 
         // 4. Invio
         mailSender.send(message);
 
         // 5. Log
-        log.info("EmailService.inviaDocumenti() - tenant={} booking={} destinatari={} oggetto={}",
-                tenantId, bookingId, String.join(";", indirizzi), oggetto);
+        log.info("EmailService.inviaDocumenti() - tenant={} booking={} destinatari={} oggetto={} allegati={}",
+                tenantId, bookingId, String.join(";", indirizzi), oggetto, allegati.keySet());
     }
 
     /**

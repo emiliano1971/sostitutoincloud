@@ -46,6 +46,8 @@ export interface TenantSettingsDTO {
   pageSize?: number;
   /** Testo predefinito dell'email di invio documenti (in scrittura "" = svuota). */
   emailTestoPredefinito?: string | null;
+  /** Oggetto predefinito dell'email di invio documenti, max 200 (in scrittura "" = svuota). */
+  emailOggettoPredefinito?: string | null;
 }
 
 export async function getSettings(): Promise<TenantSettingsDTO> {

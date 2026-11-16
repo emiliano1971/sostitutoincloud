@@ -1,5 +1,6 @@
 package it.gavia.sostitutoincloud.config;
 
+import it.gavia.sostitutoincloud.service.DataEmissioneNonValidaException;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
@@ -96,6 +97,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleBadRequest(IllegalArgumentException ex) {
         log.warn("IllegalArgumentException: {}", ex.getMessage());
         return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** Data di emissione fuori dall'intervallo ammesso (più specifica di IllegalStateException). */
+    @ExceptionHandler(DataEmissioneNonValidaException.class)
+    public ResponseEntity<Map<String, Object>> handleDataEmissione(DataEmissioneNonValidaException ex) {
+        log.warn("DataEmissioneNonValidaException: {}", ex.getMessage());
+        return errorResponse(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
     }
 
     @ExceptionHandler(IllegalStateException.class)

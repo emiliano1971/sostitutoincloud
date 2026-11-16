@@ -67,4 +67,7 @@ public class TenantSettingsDTO {
 
     // Testo predefinito dell'email di invio documenti (fattura PM + ricevuta)
     private String emailTestoPredefinito;
+
+    // Oggetto predefinito dell'email di invio documenti; null = "Documenti fiscali soggiorno"
+    private String emailOggettoPredefinito;
 }

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import ComuneAutocomplete from '../../components/ComuneAutocomplete';
 import { getSettings, updateSettings, type TenantSettingsDTO } from '@/api/settingsApi';
+import { EMAIL_OGGETTO_DEFAULT } from '@/lib/emailDocumenti';
 import { useLookup } from '@/contexts/LookupContext';
 
 type SaveStatus = { type: 'success' | 'error'; message: string } | null;
@@ -269,13 +270,8 @@ const TenantSettings = () => {
                     <Input type="number" step="0.01" defaultValue={settings.bolloSoglia} id="bolloSoglia" />
                   </div>
                 </div>
-                <div className="flex items-center justify-between py-2 mt-2">
-                  <div>
-                    <Label>Addebita bollo al cliente</Label>
-                    <p className="text-xs text-muted-foreground">Se disattivo il bollo è registrato ma non sommato al totale ricevuta</p>
-                  </div>
-                  <Switch id="bolloAddebitatoCliente" defaultChecked={settings.bolloAddebitatoCliente} />
-                </div>
+                {/* Flag non più usato nel calcolo, nascosto dall'interfaccia.
+                    Il bollo si gestisce nelle regole di contratto (addebitaBollo). */}
               </div>
 
               {/* Sezione Regime PM */}
@@ -355,7 +351,8 @@ const TenantSettings = () => {
                     cedolareSeccaEnabled: (document.getElementById('cedolareSeccaEnabled') as HTMLButtonElement).getAttribute('data-state') === 'checked',
                     bolloImporto: parseFloat((document.getElementById('bolloImporto') as HTMLInputElement).value),
                     bolloSoglia: parseFloat((document.getElementById('bolloSoglia') as HTMLInputElement).value),
-                    bolloAddebitatoCliente: (document.getElementById('bolloAddebitatoCliente') as HTMLButtonElement).getAttribute('data-state') === 'checked',
+                    // Flag nascosto dall'interfaccia: si rimanda invariato il valore caricato
+                    bolloAddebitatoCliente: settings.bolloAddebitatoCliente,
                     regimeFiscalePm: (document.getElementById('regimeFiscalePm') as HTMLSelectElement).value,
                     naturaIvaEsente: (document.getElementById('naturaIvaEsente') as HTMLSelectElement).value,
                     dataNascita: (document.getElementById('pmDataNascita') as HTMLInputElement).value || undefined,
@@ -482,6 +479,18 @@ const TenantSettings = () => {
                 </div>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="emailOggettoPredefinito">Oggetto email documenti</Label>
+                <p className="text-xs text-muted-foreground">
+                  Oggetto predefinito dell'email con fattura e ricevuta. Se vuoto: {EMAIL_OGGETTO_DEFAULT}. Modificabile prima di ogni invio.
+                </p>
+                <Input
+                  id="emailOggettoPredefinito"
+                  defaultValue={settings.emailOggettoPredefinito ?? ''}
+                  maxLength={200}
+                  placeholder={EMAIL_OGGETTO_DEFAULT}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="emailTestoPredefinito">Testo email documenti</Label>
                 <p className="text-xs text-muted-foreground">
                   Testo predefinito per l'invio della fattura PM e della ricevuta all'ospite. Editabile prima di ogni invio.
@@ -507,6 +516,8 @@ const TenantSettings = () => {
                     fkCanaleOtaDefaultId: parseInt((document.getElementById('fkCanaleOtaDefaultId') as HTMLSelectElement).value) || 0,
                     // Stringa vuota = rimuovi il testo (null nel DTO significherebbe "non modificare")
                     emailTestoPredefinito: (document.getElementById('emailTestoPredefinito') as HTMLTextAreaElement).value,
+                    // Come il testo: stringa vuota = rimuovi (si torna al default)
+                    emailOggettoPredefinito: (document.getElementById('emailOggettoPredefinito') as HTMLInputElement).value,
                   });
                 }}>
                   {saving ? 'Salvataggio...' : 'Salva Configurazione'}

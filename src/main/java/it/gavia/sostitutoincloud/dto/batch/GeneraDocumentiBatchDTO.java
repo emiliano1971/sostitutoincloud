@@ -13,5 +13,10 @@ import java.util.List;
 @AllArgsConstructor
 public class GeneraDocumentiBatchDTO {
     private List<Integer> bookingIds;
+    /** Data delle fatture PM; null = dataEmissione, poi oggi. */
+    private LocalDate dataFattura;
+    /** Data delle ricevute owner; null = dataEmissione, poi oggi. */
+    private LocalDate dataRicevuta;
+    /** Ripiego per compatibilità: data unica per fattura e ricevuta. */
     private LocalDate dataEmissione;
 }

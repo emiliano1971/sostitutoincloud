@@ -10,6 +10,7 @@ import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentPageDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
+import it.gavia.sostitutoincloud.dto.document.EmissioneControlloDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
 import it.gavia.sostitutoincloud.service.DocumentGenerationService;
 import it.gavia.sostitutoincloud.service.DocumentPdfService;
@@ -103,13 +104,15 @@ public class DocumentController {
 
     /**
      * Generazione massiva dei documenti mancanti (fattura PM + ricevuta owner).
-     * 200 sempre con il riepilogo, anche se tutte le prenotazioni sono scartate.
+     * 200 con il riepilogo, anche se tutte le prenotazioni sono scartate (data anteriore al
+     * minimo compresa). 422 solo per una data futura, che vale per l'intero lotto.
      */
     @PostMapping("/genera-batch")
     public ResponseEntity<BatchRisultatoDTO> generaBatch(@RequestBody GeneraDocumentiBatchDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        log.info("DocumentController.generaBatch() - tenantId={} bookings={} dataEmissione={}",
-                tenantId, dto.getBookingIds() != null ? dto.getBookingIds().size() : 0, dto.getDataEmissione());
+        log.info("DocumentController.generaBatch() - tenantId={} bookings={} dataFattura={} dataRicevuta={} dataEmissione={}",
+                tenantId, dto.getBookingIds() != null ? dto.getBookingIds().size() : 0,
+                dto.getDataFattura(), dto.getDataRicevuta(), dto.getDataEmissione());
         return ResponseEntity.ok(documentGenerationService.generaBatch(tenantId, dto));
     }
 
@@ -158,6 +161,20 @@ public class DocumentController {
         log.info("DocumentController.inviaSdiBatch() - tenantId={} documenti={}", tenantId,
                 dto.getDocumentIds() != null ? dto.getDocumentIds().size() : 0);
         return ResponseEntity.ok(sdiXmlService.inviaBatch(tenantId, dto.getDocumentIds()));
+    }
+
+    /**
+     * Controllo preventivo della data di emissione: intervallo ammesso (ultimo documento dello
+     * stesso tipo e anno → oggi), errore della data e avvisi non bloccanti (F24, CU, anno
+     * precedente, invio SDI tardivo). Non scrive nulla. data assente = oggi.
+     */
+    @GetMapping("/emissione-controllo")
+    public ResponseEntity<EmissioneControlloDTO> emissioneControllo(
+            @RequestParam Integer bookingId,
+            @RequestParam String tipoDocumento,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate data) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        return ResponseEntity.ok(documentGenerationService.controlloEmissione(tenantId, bookingId, tipoDocumento, data));
     }
 
     @PostMapping("/generate")

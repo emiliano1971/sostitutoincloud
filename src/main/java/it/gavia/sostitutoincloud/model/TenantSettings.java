@@ -62,6 +62,9 @@ public class TenantSettings {
     // Testo predefinito dell'email di invio documenti (migration 031)
     private String emailTestoPredefinito;
 
+    // Oggetto predefinito dell'email di invio documenti (migration 036); null = default frontend
+    private String emailOggettoPredefinito;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
