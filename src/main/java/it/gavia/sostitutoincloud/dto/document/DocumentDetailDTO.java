@@ -42,6 +42,9 @@ public class DocumentDetailDTO {
     private String sdiFilePath;
     private LocalDateTime sdiSentAt;
     private String sdiErrorMsg;
+    // Ultimo invio email (migration 037)
+    private LocalDateTime emailInviataAt;
+    private String emailInviataA;
     private String propertyName;
     private String channelName;
     private Integer fkBookingId;

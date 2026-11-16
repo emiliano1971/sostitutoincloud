@@ -39,6 +39,8 @@ public class FiscalDocumentRowMapper implements RowMapper<FiscalDocument> {
                 .sdiFilePath(rs.getString("sdi_file_path"))
                 .sdiSentAt(rs.getObject("sdi_sent_at", LocalDateTime.class))
                 .sdiErrorMsg(rs.getString("sdi_error_msg"))
+                .emailInviataAt(rs.getObject("email_inviata_at", LocalDateTime.class))
+                .emailInviataA(rs.getString("email_inviata_a"))
                 .createdAt(rs.getObject("created_at", LocalDateTime.class))
                 .updatedAt(rs.getObject("updated_at", LocalDateTime.class))
                 .build();

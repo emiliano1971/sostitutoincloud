@@ -423,6 +423,8 @@ public class FiscalDocumentService {
                             .sdiFilePath(d.getSdiFilePath())
                             .sdiSentAt(d.getSdiSentAt())
                             .sdiErrorMsg(d.getSdiErrorMsg())
+                            .emailInviataAt(d.getEmailInviataAt())
+                            .emailInviataA(d.getEmailInviataA())
                             .propertyName(property != null ? property.getDisplayName() : null)
                             .channelName(canale != null ? canale.getNome() : null)
                             .fkBookingId(d.getFkBookingId())
@@ -511,6 +513,8 @@ public class FiscalDocumentService {
                 .filter(d -> CODICE_RICEVUTA.equals(d.getDocumentType()))
                 .sorted(Comparator.comparing(DocumentListDTO::getIssueDate,
                         Comparator.nullsLast(Comparator.reverseOrder())))
+                // Portale proprietario: niente email dell'ospite né traccia dell'invio
+                .peek(d -> { d.setEmailInviataAt(null); d.setEmailInviataA(null); })
                 .toList();
         log.info("FiscalDocumentService.findRicevuteByOwner() - tenantId={} ownerId={} {} ricevute",
                 tenantId, ownerId, result.size());
@@ -690,6 +694,8 @@ public class FiscalDocumentService {
                 .sdiFilePath(doc.getSdiFilePath())
                 .sdiSentAt(doc.getSdiSentAt())
                 .sdiErrorMsg(doc.getSdiErrorMsg())
+                .emailInviataAt(doc.getEmailInviataAt())
+                .emailInviataA(doc.getEmailInviataA())
                 .propertyName(property != null ? property.getDisplayName() : null)
                 .channelName(canale != null ? canale.getNome() : null)
                 .fkBookingId(doc.getFkBookingId())
@@ -828,8 +834,14 @@ public class FiscalDocumentService {
      * Aggiorna lo stato di un documento fiscale verificando l'appartenenza al tenant
      * e risolvendo l'id dello stato dalla lookup per codice.
      * Restituisce il dettaglio aggiornato.
+     * 'annullata' non è ammesso (IllegalStateException → 422 nel controller): un cambio di stato
+     * senza effetti su ledger, F24 e liquidazione. Si usa l'eliminazione documento; NdcService
+     * annulla internamente tramite il DAO e non passa da qui.
      */
     public DocumentDetailDTO aggiornaStato(Integer tenantId, Integer documentId, String nuovoStato) {
+        if (STATO_ANNULLATA.equals(nuovoStato != null ? nuovoStato.trim() : null)) {
+            throw new IllegalStateException("Stato 'annullata' non ammesso: usare l'eliminazione documento");
+        }
         FiscalDocument doc = fiscalDocumentDAO.findById(documentId)
                 .filter(d -> tenantId.equals(d.getFkTenantId()))
                 .orElseThrow(() -> new IllegalArgumentException(

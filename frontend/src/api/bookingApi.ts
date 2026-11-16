@@ -63,6 +63,9 @@ export interface FiscalDocumentSummary {
   aliquotaIva?: number;
   canoneLocazione?: number;
   fkDocumentoCollegatoId?: number;
+  /** Ultimo invio email accettato dal server SMTP (non la consegna); assente se mai inviato. */
+  emailInviataAt?: string;
+  emailInviataA?: string;
 }
 
 export interface BookingListItem {

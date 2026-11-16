@@ -39,12 +39,16 @@ public class EmailService {
     private static final String STATO_ANNULLATA = "annullata";
     private static final String CODICE_NOTA_CREDITO = "nota_credito";
 
+    /** Lunghezza di fiscal_document.email_inviata_a (VARCHAR(500)). */
+    private static final int EMAIL_INVIATA_A_MAX = 500;
+
     private final JavaMailSender mailSender;
     private final DocumentPdfService documentPdfService;
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final StatoDocumentoDAO statoDocumentoDAO;
     private final BookingService bookingService;
+    private final AuditService auditService;
 
     @Value("${app.mail.from}")
     private String mailFrom;
@@ -54,13 +58,15 @@ public class EmailService {
                         FiscalDocumentDAO fiscalDocumentDAO,
                         TipoDocumentoDAO tipoDocumentoDAO,
                         StatoDocumentoDAO statoDocumentoDAO,
-                        BookingService bookingService) {
+                        BookingService bookingService,
+                        AuditService auditService) {
         this.mailSender = mailSender;
         this.documentPdfService = documentPdfService;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
         this.tipoDocumentoDAO = tipoDocumentoDAO;
         this.statoDocumentoDAO = statoDocumentoDAO;
         this.bookingService = bookingService;
+        this.auditService = auditService;
     }
 
     /**
@@ -188,8 +194,31 @@ public class EmailService {
         mailSender.send(message);
 
         // 5. Log
+        String elenco = String.join(";", indirizzi);
         log.info("EmailService.inviaDocumenti() - tenant={} booking={} destinatari={} oggetto={} allegati={}",
-                tenantId, bookingId, String.join(";", indirizzi), oggetto, allegati.keySet());
+                tenantId, bookingId, elenco, oggetto, allegati.keySet());
+
+        // 6. Traccia dell'invio, solo sui documenti allegati. L'email è già partita: un errore qui
+        // non deve diventare un fallimento per l'utente, si registra e si prosegue.
+        try {
+            String destinatariColonna = elenco.length() > EMAIL_INVIATA_A_MAX
+                    ? elenco.substring(0, EMAIL_INVIATA_A_MAX - 3) + "..." : elenco;
+            if (fattura != null) fiscalDocumentDAO.updateEmailInviata(fattura.getId(), destinatariColonna);
+            if (ricevuta != null) fiscalDocumentDAO.updateEmailInviata(ricevuta.getId(), destinatariColonna);
+        } catch (Exception e) {
+            log.error("EmailService.inviaDocumenti() - email inviata ma marcatura documenti fallita booking={}: {}",
+                    bookingId, e.getMessage(), e);
+        }
+        try {
+            List<String> numeri = new java.util.ArrayList<>();
+            if (fattura != null) numeri.add(fattura.getDocumentNumber());
+            if (ricevuta != null) numeri.add(ricevuta.getDocumentNumber());
+            auditService.log("email.documenti", "Booking", bookingId,
+                    "Email a " + elenco + " — oggetto \"" + oggetto.trim() + "\" — documenti: " + String.join(", ", numeri));
+        } catch (Exception e) {
+            log.error("EmailService.inviaDocumenti() - email inviata ma audit fallito booking={}: {}",
+                    bookingId, e.getMessage(), e);
+        }
     }
 
     /**

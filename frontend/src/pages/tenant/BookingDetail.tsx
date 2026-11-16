@@ -35,7 +35,7 @@ import InvoicePMDialog from '@/components/booking/InvoicePMDialog';
 import ReceiptOwnerDialog from '@/components/booking/ReceiptOwnerDialog';
 import { labelStatoPrenotazione } from '@/lib/statiLabels';
 import { getSettings, type TenantSettingsDTO } from '@/api/settingsApi';
-import { oggettoEmailIniziale } from '@/lib/emailDocumenti';
+import { dataInvioEmail, oggettoEmailIniziale, testoEmailInviata } from '@/lib/emailDocumenti';
 
 const paymentLabels: Record<string, string> = {
   pending: 'In attesa',
@@ -1417,6 +1417,11 @@ const BookingDetail = () => {
                       <FileDown className="h-4 w-4" />
                     </button>
                   </div>
+                  {doc.emailInviataAt && (
+                    <p className="text-xs text-muted-foreground" title={testoEmailInviata(doc.emailInviataAt, doc.emailInviataA)}>
+                      Email inviata il {dataInvioEmail(doc.emailInviataAt)}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>
@@ -1495,24 +1500,32 @@ const BookingDetail = () => {
               <div className="space-y-1">
                 <Label className="text-xs">Allegati</Label>
                 {[
-                  { key: 'fattura', icon: FileText, label: `Fattura ${existingInvoice.documentNumber}`,
-                    attivo: allegaFattura, set: setAllegaFattura },
-                  { key: 'ricevuta', icon: ReceiptText, label: `Ricevuta ${existingReceipt.documentNumber}`,
-                    attivo: allegaRicevuta, set: setAllegaRicevuta },
-                ].map(({ key, icon: Icon, label, attivo, set }) => (
-                  <div key={key} className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm">
-                    <Icon className={cn('h-4 w-4 shrink-0', !attivo && 'text-muted-foreground')} />
-                    <span className={cn('flex-1', !attivo && 'line-through text-muted-foreground')}>{label}</span>
-                    {attivo ? (
-                      <Button type="button" variant="ghost" size="icon" className="h-6 w-6"
-                        onClick={() => set(false)} title="Rimuovi allegato">
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    ) : (
-                      <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs gap-1"
-                        onClick={() => set(true)}>
-                        <RotateCcw className="h-3 w-3" /> Ripristina
-                      </Button>
+                  { key: 'fattura', icon: FileText, label: `Fattura ${existingInvoice.documentNumber}`, nome: 'Fattura',
+                    doc: existingInvoice, attivo: allegaFattura, set: setAllegaFattura },
+                  { key: 'ricevuta', icon: ReceiptText, label: `Ricevuta ${existingReceipt.documentNumber}`, nome: 'Ricevuta',
+                    doc: existingReceipt, attivo: allegaRicevuta, set: setAllegaRicevuta },
+                ].map(({ key, icon: Icon, label, nome, doc, attivo, set }) => (
+                  <div key={key} className="space-y-0.5">
+                    <div className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm">
+                      <Icon className={cn('h-4 w-4 shrink-0', !attivo && 'text-muted-foreground')} />
+                      <span className={cn('flex-1', !attivo && 'line-through text-muted-foreground')}>{label}</span>
+                      {attivo ? (
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6"
+                          onClick={() => set(false)} title="Rimuovi allegato">
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : (
+                        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs gap-1"
+                          onClick={() => set(true)}>
+                          <RotateCcw className="h-3 w-3" /> Ripristina
+                        </Button>
+                      )}
+                    </div>
+                    {/* Avviso non bloccante: l'allegato selezionato risulta già inviato */}
+                    {attivo && doc.emailInviataAt && (
+                      <p className="text-xs text-warning">
+                        {nome} già inviata il {dataInvioEmail(doc.emailInviataAt)} a {doc.emailInviataA ?? '—'}
+                      </p>
                     )}
                   </div>
                 ))}

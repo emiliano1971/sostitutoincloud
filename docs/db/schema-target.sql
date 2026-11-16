@@ -701,6 +701,9 @@ CREATE TABLE fiscal_document (
     sdi_file_path           VARCHAR(500),                       -- percorso del file XML generato in sdi/outgoing
     sdi_sent_at             TIMESTAMP,                          -- data/ora generazione-invio del file SDI
     sdi_error_msg           VARCHAR(500),                       -- messaggio d'errore in caso di stato 'error'
+    -- migration 037: ultimo invio email accettato dal server SMTP (non la consegna)
+    email_inviata_at        TIMESTAMP,
+    email_inviata_a         VARCHAR(500),                       -- destinatari separati da ;
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_document_number_per_tenant UNIQUE (fk_tenant_id, document_number)
@@ -710,6 +713,11 @@ COMMENT ON TABLE fiscal_document IS
     'Di norma ogni booking genera due documenti: fattura PM → ospite (con IVA) '
     'e ricevuta owner → ospite (fuori campo IVA, cedolare secca). '
     'fk_stato_documento_id referenzia la tabella lookup stato_documento.';
+COMMENT ON COLUMN fiscal_document.email_inviata_at IS
+    'Ultimo invio email del documento accettato dal server SMTP (non conferma la consegna). '
+    'NULL se mai inviato da questa funzione.';
+COMMENT ON COLUMN fiscal_document.email_inviata_a IS
+    'Destinatari dell ultimo invio email, separati da punto e virgola.';
 
 CREATE TRIGGER trg_fiscal_document_updated_at
     BEFORE UPDATE ON fiscal_document

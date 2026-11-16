@@ -4,7 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send, Mail } from 'lucide-react';
+import { testoEmailInviata } from '@/lib/emailDocumenti';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -788,7 +789,17 @@ const DocumentsList = () => {
                       {/* Numero documento + id prenotazione collegata, cliccabile.
                           stopPropagation: la riga potrebbe diventare cliccabile in futuro. */}
                       <div className="flex flex-col gap-0.5">
-                        <span className="font-mono text-sm">{d.documentNumber}</span>
+                        <span className="flex items-center gap-1">
+                          <span className="font-mono text-sm">{d.documentNumber}</span>
+                          {d.emailInviataAt && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Mail className="h-3.5 w-3.5 text-muted-foreground" aria-label="Email inviata" />
+                              </TooltipTrigger>
+                              <TooltipContent>{testoEmailInviata(d.emailInviataAt, d.emailInviataA)}</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </span>
                         {d.fkBookingId && d.externalBookingId && (
                           <button
                             type="button"

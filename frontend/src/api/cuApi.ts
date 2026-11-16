@@ -41,6 +41,8 @@ export async function getCuById(id: number): Promise<CuDetail> {
 export interface CuGeneraBatchResponse {
   generated: number;
   skipped: number;
+  /** CU draft/generated rimaste senza ritenute nell'anno, eliminate dalla generazione. */
+  eliminated?: number;
   records: CuListItem[];
 }
 

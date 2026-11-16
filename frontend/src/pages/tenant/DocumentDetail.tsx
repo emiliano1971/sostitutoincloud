@@ -6,13 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ArrowLeft, Building2, User, Home, Calendar, Receipt, Download, Loader2, AlertCircle, ExternalLink, Send, CheckCircle2, XCircle, AlertTriangle, Landmark, FileCheck, Ban, RotateCcw } from 'lucide-react';
-import { getDocumentById, downloadDocumentPdf, downloadNdcPdf, inviaSdi, downloadSdiXml, downloadXmlRuntime, segnaInviataManualmente, type DocumentDetail as DocumentDetailType } from '@/api/documentApi';
+import { dataInvioEmail } from '@/lib/emailDocumenti';
+import { getDocumentById, downloadDocumentPdf, downloadNdcPdf, inviaSdi, downloadSdiXml, downloadXmlRuntime, segnaInviataManualmente, type DocumentDetail as DocumentDetailType, type EliminazioneEsito } from '@/api/documentApi';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { annullaNdc, getBookingById, type BookingDetail, type FiscalDocumentSummary } from '@/api/bookingApi';
 import NdcDialog from '@/components/booking/NdcDialog';
+import EliminaDocumento from '@/components/document/EliminaDocumento';
+import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/hooks/use-toast';
 import { labelTipoDocumento } from '@/lib/statiLabels';
 
@@ -111,6 +114,29 @@ const DocumentDetail = () => {
       .catch(err => setError(err.message))
       .finally(() => setIsLoading(false));
   }, [id]);
+
+  // Eliminazione fisica riuscita: toast con gli avvisi da seguire, poi ritorno alla lista
+  // con i filtri (il documento non esiste più).
+  const handleEliminato = (esito: EliminazioneEsito) => {
+    const f24 = esito.avvisi.find(a => a.codice === 'F24_AGGIORNATO');
+    const daRicordare = esito.avvisi
+      .filter(a => a.codice === 'F24_AGGIORNATO' || a.codice === 'LIQUIDAZIONE_DA_RICALCOLARE' || a.codice === 'CU_DA_RIGENERARE' || a.codice === 'CU_VERRA_ELIMINATA')
+      .map(a => a.messaggio);
+    toast({
+      title: `Eliminat${esito.eliminati.length > 1 ? 'i' : 'o'} ${esito.eliminati.map(d => d.numero).join(' e ')}`,
+      description: daRicordare.length > 0 ? daRicordare.join(' ') : 'Il numero è di nuovo disponibile.',
+      action: f24?.f24Anno && f24?.f24Mese ? (
+        <ToastAction altText="Apri F24" onClick={() => navigate(`/f24?anno=${f24.f24Anno}&mese=${f24.f24Mese}`)}>
+          Apri F24
+        </ToastAction>
+      ) : undefined,
+    });
+    tornaAllaLista();
+  };
+
+  const handleErroreEliminazione = (messaggio: string) => {
+    toast({ title: 'Eliminazione non riuscita', description: messaggio, variant: 'destructive' });
+  };
 
   useEffect(() => {
     setStatoFatturaCollegata(null);
@@ -298,6 +324,9 @@ const DocumentDetail = () => {
   const ndcAnnullata = isNotaCredito && doc.statoDocumento === 'annullata';
   const puoAnnullareNdc = isNotaCredito && !['sent_sdi', 'accepted', 'annullata'].includes(doc.statoDocumento);
   const ndcAttive = (doc.noteCredito ?? []).filter(n => n.statoDocumento !== 'annullata');
+  // Eliminazione fisica (fattura PM con la sua ricevuta, o ricevuta senza fattura): solo
+  // documenti in bozza/pronti; gli altri vincoli li decide il controllo del backend.
+  const puoEliminare = (isFatturaPm || isRicevutaOwner) && ['draft', 'ready'].includes(doc.statoDocumento);
   const sdiRifiutato = doc.statoDocumento === 'rejected';
   const sdiErrore = doc.statoDocumento === 'error';
   // La card mostra i dati di trasmissione appena esiste un progressivo, qualunque
@@ -456,6 +485,11 @@ const DocumentDetail = () => {
           <CardContent className="space-y-1 text-sm">
             <p className="font-medium">{doc.recipientName ?? 'N/D'}</p>
             {doc.recipientTaxCode && <p className="text-xs text-muted-foreground">C.F.: {doc.recipientTaxCode}</p>}
+            {doc.emailInviataAt && (
+              <p className="text-xs text-muted-foreground">
+                Email inviata il {dataInvioEmail(doc.emailInviataAt)} a {doc.emailInviataA ?? '—'}
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -788,6 +822,9 @@ const DocumentDetail = () => {
             {isAnnullando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
             Annulla NDC
           </Button>
+        )}
+        {puoEliminare && (
+          <EliminaDocumento documentId={doc.id} onEliminato={handleEliminato} onErrore={handleErroreEliminazione} />
         )}
         {isFatturaPm && doc.fkBookingId && !doc.statoStorno && !['rejected', 'error', 'draft'].includes(doc.statoDocumento) && (
           <Button variant="outline" className="gap-2" onClick={handleApriNdc} disabled={isAprendoNdc}>

@@ -18,6 +18,9 @@ export interface DocumentListItem {
   sdiFilePath?: string;
   sdiSentAt?: string;
   sdiErrorMsg?: string;
+  /** Ultimo invio email accettato dal server SMTP (non la consegna); assente se mai inviato. */
+  emailInviataAt?: string;
+  emailInviataA?: string;
   // Versamento F24 della ritenuta e CU dell'anno (solo ricevuta owner)
   f24RecordId?: number;
   f24Periodo?: string;
@@ -250,6 +253,47 @@ export async function getEmissioneControllo(
   const q = new URLSearchParams({ bookingId: String(bookingId), tipoDocumento });
   if (data) q.set('data', data);
   return get<EmissioneControllo>(`/documents/emissione-controllo?${q}`);
+}
+
+/** Avviso non bloccante dell'eliminazione documento (richiede conferma). */
+export interface AvvisoEliminazione {
+  codice: 'F24_AGGIORNATO' | 'LIQUIDAZIONE_DA_RICALCOLARE' | 'CU_DA_RIGENERARE' | 'CU_VERRA_ELIMINATA' | 'EMAIL_GIA_INVIATA'
+    | 'BOLLO_ADDEBITATO';
+  messaggio: string;
+  /** Solo F24_AGGIORNATO: F24 e suo periodo, per il link alla lista F24. */
+  f24Id?: number;
+  f24Anno?: number;
+  f24Mese?: number;
+}
+
+export interface DocumentoEliminabile {
+  id: number;
+  numero: string;
+  tipo: 'fattura' | 'ricevuta';
+}
+
+/** Esito di GET /documents/{id}/eliminazione-controllo: non scrive nulla. */
+export interface EliminazioneControllo {
+  consentito: boolean;
+  blocchi: string[];
+  avvisi: AvvisoEliminazione[];
+  /** Documenti che verrebbero eliminati: la fattura con la sua ricevuta, oppure la sola ricevuta. */
+  documenti: DocumentoEliminabile[];
+}
+
+export interface EliminazioneEsito {
+  bookingId?: number;
+  eliminati: DocumentoEliminabile[];
+  avvisi: AvvisoEliminazione[];
+}
+
+export async function getEliminazioneControllo(id: number): Promise<EliminazioneControllo> {
+  return get<EliminazioneControllo>(`/documents/${id}/eliminazione-controllo`);
+}
+
+/** Eliminazione fisica: 400 motivo non valido, 422 non consentita (blocchi nel messaggio). */
+export async function eliminaDocumento(id: number, motivo: string): Promise<EliminazioneEsito> {
+  return post<EliminazioneEsito>(`/documents/${id}/elimina`, { motivo });
 }
 
 export async function aggiornaStatoDocumento(id: number, stato: string): Promise<void> {

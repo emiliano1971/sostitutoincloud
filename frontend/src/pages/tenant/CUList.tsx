@@ -45,7 +45,7 @@ const CUList = () => {
     setGenerating(true);
     try {
       const res = await generaCuBatch(taxYear);
-      toast({ title: 'Generazione CU completata', description: `Generate: ${res.generated} — Saltate: ${res.skipped}` });
+      toast({ title: 'Generazione CU completata', description: `Generate: ${res.generated} — Saltate: ${res.skipped} — Eliminate: ${res.eliminated ?? 0}` });
       reload();
     } catch (err) {
       toast({ title: 'Errore', description: (err as Error).message, variant: 'destructive' });

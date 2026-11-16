@@ -10,9 +10,12 @@ import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentPageDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
+import it.gavia.sostitutoincloud.dto.document.EliminaDocumentoRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.EmissioneControlloDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
+import it.gavia.sostitutoincloud.service.DocumentEliminazioneService;
 import it.gavia.sostitutoincloud.service.DocumentGenerationService;
+import it.gavia.sostitutoincloud.service.EliminazioneNonConsentitaException;
 import it.gavia.sostitutoincloud.service.DocumentPdfService;
 import it.gavia.sostitutoincloud.service.FiscalDocumentService;
 import it.gavia.sostitutoincloud.service.SdiXmlService;
@@ -38,11 +41,14 @@ public class DocumentController {
     private final DocumentGenerationService documentGenerationService;
     private final DocumentPdfService documentPdfService;
     private final SdiXmlService sdiXmlService;
+    private final DocumentEliminazioneService documentEliminazioneService;
 
     public DocumentController(FiscalDocumentService fiscalDocumentService,
                               DocumentGenerationService documentGenerationService,
                               DocumentPdfService documentPdfService,
-                              SdiXmlService sdiXmlService) {
+                              SdiXmlService sdiXmlService,
+                              DocumentEliminazioneService documentEliminazioneService) {
+        this.documentEliminazioneService = documentEliminazioneService;
         this.fiscalDocumentService = fiscalDocumentService;
         this.documentGenerationService = documentGenerationService;
         this.documentPdfService = documentPdfService;
@@ -300,12 +306,58 @@ public class DocumentController {
         }
     }
 
+    /**
+     * Controllo dell'eliminazione fisica (fattura PM con la sua ricevuta, oppure ricevuta senza
+     * fattura): consentito, blocchi, avvisi e documenti coinvolti. Non scrive nulla. 404 se il
+     * documento non esiste per il tenant.
+     */
+    @GetMapping("/{id}/eliminazione-controllo")
+    public ResponseEntity<?> eliminazioneControllo(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.debug("DocumentController.eliminazioneControllo() - tenantId={} documentId={}", tenantId, id);
+        try {
+            return ResponseEntity.ok(documentEliminazioneService.controllo(tenantId, id));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Eliminazione fisica. 400 motivo mancante o fuori misura (GlobalExceptionHandler),
+     * 404 documento non trovato, 422 con i blocchi se non consentita.
+     */
+    @PostMapping("/{id}/elimina")
+    public ResponseEntity<?> elimina(@PathVariable Integer id, @RequestBody(required = false) EliminaDocumentoRequestDTO request) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.elimina() - tenantId={} documentId={}", tenantId, id);
+        try {
+            return ResponseEntity.ok(documentEliminazioneService.elimina(
+                    tenantId, id, request != null ? request.getMotivo() : null));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (EliminazioneNonConsentitaException e) {
+            log.warn("DocumentController.elimina() - non consentita: {}", e.getBlocchi());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", "Eliminazione non consentita",
+                            "message", e.getMessage(), "blocchi", e.getBlocchi()));
+        }
+    }
+
     @PatchMapping("/{id}/stato")
-    public ResponseEntity<DocumentDetailDTO> aggiornaStato(@PathVariable Integer id,
-                                                           @RequestBody DocumentStatoUpdateDTO request) {
+    public ResponseEntity<?> aggiornaStato(@PathVariable Integer id,
+                                           @RequestBody DocumentStatoUpdateDTO request) {
         // IllegalArgumentException (documento/stato non validi) → 400 via GlobalExceptionHandler
         Integer tenantId = SecurityUtils.getCurrentTenantId();
-        DocumentDetailDTO result = fiscalDocumentService.aggiornaStato(tenantId, id, request.getStato());
-        return ResponseEntity.ok(result);
+        try {
+            DocumentDetailDTO result = fiscalDocumentService.aggiornaStato(tenantId, id, request.getStato());
+            return ResponseEntity.ok(result);
+        } catch (IllegalStateException e) {
+            // 422: 'annullata' non ammesso, si usa l'eliminazione documento
+            log.warn("DocumentController.aggiornaStato() - {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
     }
 }

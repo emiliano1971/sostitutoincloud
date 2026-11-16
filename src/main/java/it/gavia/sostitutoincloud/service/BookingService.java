@@ -1881,6 +1881,8 @@ public class BookingService {
                 .aliquotaIva(d.getAliquotaIva())
                 .canoneLocazione(d.getCanoneLocazione())
                 .fkDocumentoCollegatoId(d.getFkDocumentoCollegatoId())
+                .emailInviataAt(d.getEmailInviataAt())
+                .emailInviataA(d.getEmailInviataA())
                 .build();
     }
 

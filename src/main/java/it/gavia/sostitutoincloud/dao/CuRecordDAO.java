@@ -159,6 +159,27 @@ public class CuRecordDAO {
         return row;
     }
 
+    /**
+     * Ritenute valide del proprietario nell'anno (stesso filtro di aggregate_by_owner_year.sql):
+     * 0 = la CU non avrebbe nulla da aggregare.
+     */
+    public int countRitenuteValide(Integer tenantId, Integer ownerId, Integer taxYear) {
+        Integer n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM withholding_ledger WHERE fk_tenant_id = ? AND fk_owner_id = ? "
+                        + "AND periodo_anno = ? AND fk_ndc_id IS NULL",
+                Integer.class, tenantId, ownerId, taxYear);
+        log.debug("CuRecordDAO.countRitenuteValide() - tenantId={} ownerId={} year={} n={}", tenantId, ownerId, taxYear, n);
+        return n != null ? n : 0;
+    }
+
+    /** CU del tenant per l'anno senza ritenute valide nel registro, in qualsiasi stato. */
+    public List<CuRecord> findOrfane(Integer tenantId, Integer taxYear) {
+        List<CuRecord> result = jdbcTemplate.query(loadSql("sql/cu_record/orfane.sql"),
+                cuRecordRowMapper, tenantId, taxYear);
+        log.debug("CuRecordDAO.findOrfane() - tenantId={} year={} trovate={}", tenantId, taxYear, result.size());
+        return result;
+    }
+
     public List<Integer> findOwnerIdsWithWithholding(Integer tenantId, Integer taxYear) {
         String sql = loadSql("sql/cu_record/owners_with_withholding.sql");
         List<Integer> result = jdbcTemplate.queryForList(sql, Integer.class, tenantId, taxYear);

@@ -31,6 +31,9 @@ public class DocumentListDTO {
     private String sdiFilePath;
     private LocalDateTime sdiSentAt;
     private String sdiErrorMsg;
+    // Ultimo invio email (migration 037); null nel portale proprietario
+    private LocalDateTime emailInviataAt;
+    private String emailInviataA;
     private String propertyName;
     private String channelName;
     private Integer fkBookingId;

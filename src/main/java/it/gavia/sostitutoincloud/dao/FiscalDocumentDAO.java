@@ -24,6 +24,7 @@ public class FiscalDocumentDAO {
             "canone_locazione, fk_documento_collegato_id, " +
             "fk_stato_documento_id, sdi_identifier, " +
             "sdi_progressivo, sdi_file_path, sdi_sent_at, sdi_error_msg, " +
+            "email_inviata_at, email_inviata_a, " +
             "created_at, updated_at FROM fiscal_document";
 
     private final JdbcTemplate jdbcTemplate;
@@ -64,6 +65,16 @@ public class FiscalDocumentDAO {
     public void deleteByBookingId(Integer bookingId) {
         log.debug("FiscalDocumentDAO.deleteByBookingId() - bookingId={}", bookingId);
         jdbcTemplate.update("DELETE FROM fiscal_document WHERE fk_booking_id = ?", bookingId);
+    }
+
+    /**
+     * Eliminazione fisica di un documento (DocumentEliminazioneService). FK: righe NDC in
+     * CASCADE, fk_documento_collegato_id degli altri documenti a NULL, ledger in RESTRICT
+     * (la riga di ritenuta va cancellata prima).
+     */
+    public int deleteById(Integer id) {
+        log.info("FiscalDocumentDAO.deleteById() - id={}", id);
+        return jdbcTemplate.update("DELETE FROM fiscal_document WHERE id = ?", id);
     }
 
     public int countByBookingId(Integer bookingId) {
@@ -215,6 +226,16 @@ public class FiscalDocumentDAO {
      * NB: lo stato è la FK fk_stato_documento_id (lookup stato_documento), non una colonna
      * varchar: l'id viene risolto per codice nella stessa istruzione.
      */
+    /**
+     * Ultimo invio email del documento accettato dal server SMTP (migration 037): data/ora e
+     * destinatari. Sovrascrive l'invio precedente; lo storico resta in audit_log.
+     */
+    public void updateEmailInviata(Integer id, String destinatari) {
+        jdbcTemplate.update("UPDATE fiscal_document SET email_inviata_at = NOW(), email_inviata_a = ?, " +
+                "updated_at = NOW() WHERE id = ?", destinatari, id);
+        log.info("FiscalDocumentDAO.updateEmailInviata() - id={} destinatari={}", id, destinatari);
+    }
+
     public void updateSdiInfo(Integer id, String sdiProgressivo, String sdiFilePath) {
         String sql = "UPDATE fiscal_document SET sdi_progressivo = ?, sdi_file_path = ?, " +
                 "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'sent_sdi'), " +

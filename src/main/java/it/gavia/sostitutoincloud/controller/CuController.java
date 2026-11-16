@@ -83,6 +83,11 @@ public class CuController {
         log.info("CuController.genera() - ownerId={} year={}", req.getOwnerId(), req.getTaxYear());
         try {
             if (req.getOwnerId() != null) {
+                // CU draft/generated senza più ritenute: eliminata, 200 con messaggio
+                var eliminata = cuService.eliminaSeOrfana(tenantId, req.getOwnerId(), req.getTaxYear());
+                if (eliminata.isPresent()) {
+                    return ResponseEntity.ok(eliminata.get());
+                }
                 return ResponseEntity.ok(cuService.genera(tenantId, req));
             }
             return ResponseEntity.ok(cuService.generaBatch(tenantId, req.getTaxYear()));

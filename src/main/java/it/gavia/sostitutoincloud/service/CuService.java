@@ -3,6 +3,7 @@ package it.gavia.sostitutoincloud.service;
 import it.gavia.sostitutoincloud.dao.CuRecordDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dto.cu.CuDetailDTO;
+import it.gavia.sostitutoincloud.dto.cu.CuEliminataDTO;
 import it.gavia.sostitutoincloud.dto.cu.CuGeneraBatchResponseDTO;
 import it.gavia.sostitutoincloud.dto.cu.CuGeneraRequestDTO;
 import it.gavia.sostitutoincloud.dto.cu.CuListDTO;
@@ -26,13 +27,17 @@ import java.util.stream.Collectors;
 public class CuService {
 
     private static final Set<String> STATI_VALIDI = Set.of("draft", "generated", "sent", "delivered");
+    /** Stati in cui una CU orfana (senza ritenute nel registro) si può eliminare. */
+    private static final Set<String> STATI_ELIMINABILI = Set.of("draft", "generated");
 
     private final CuRecordDAO cuRecordDAO;
     private final OwnerProfileDAO ownerProfileDAO;
+    private final AuditService auditService;
 
-    public CuService(CuRecordDAO cuRecordDAO, OwnerProfileDAO ownerProfileDAO) {
+    public CuService(CuRecordDAO cuRecordDAO, OwnerProfileDAO ownerProfileDAO, AuditService auditService) {
         this.cuRecordDAO = cuRecordDAO;
         this.ownerProfileDAO = ownerProfileDAO;
+        this.auditService = auditService;
     }
 
     private String resolveOwnerName(OwnerProfile owner) {
@@ -161,6 +166,49 @@ public class CuService {
         return generaPerOwner(tenantId, req.getOwnerId(), req.getTaxYear());
     }
 
+    /**
+     * Generazione singola su una CU orfana: se per owner e anno non restano ritenute valide e la
+     * CU è draft/generated, la elimina (audit cu.delete) invece di fallire sull'aggregazione.
+     * Vuoto se ci sono ritenute, se la CU non esiste o se è sent/delivered: in quei casi si
+     * prosegue con {@link #genera}, che risponde come prima (rigenerazione o errore).
+     */
+    public Optional<CuEliminataDTO> eliminaSeOrfana(Integer tenantId, Integer ownerId, Integer taxYear) {
+        if (taxYear == null) {
+            throw new IllegalArgumentException("taxYear obbligatorio");
+        }
+        if (cuRecordDAO.countRitenuteValide(tenantId, ownerId, taxYear) > 0) {
+            return Optional.empty();
+        }
+        return cuRecordDAO.findByTenantOwnerYear(tenantId, ownerId, taxYear)
+                .filter(cu -> STATI_ELIMINABILI.contains(cu.getStato()))
+                .map(cu -> {
+                    String ownerName = eliminaOrfana(cu);
+                    return CuEliminataDTO.builder()
+                            .eliminata(true)
+                            .cuId(cu.getId())
+                            .ownerName(ownerName)
+                            .taxYear(taxYear)
+                            .message("CU " + taxYear + " di " + ownerName
+                                    + " eliminata: non restano ritenute nell'anno")
+                            .build();
+                });
+    }
+
+    /** Elimina una CU orfana draft/generated con audit cu.delete; restituisce il nome del proprietario. */
+    private String eliminaOrfana(CuRecord cu) {
+        OwnerProfile owner = ownerProfileDAO.findById(cu.getFkOwnerId()).orElse(null);
+        String ownerName = owner != null ? resolveOwnerName(owner) : "owner id=" + cu.getFkOwnerId();
+        cuRecordDAO.deleteById(cu.getId());
+        auditService.log("cu.delete", "CuRecord", cu.getId(),
+                "CU " + cu.getTaxYear() + " di " + ownerName + " (owner id=" + cu.getFkOwnerId()
+                        + ", stato " + cu.getStato() + ") eliminata: nessuna ritenuta rimasta nel registro. "
+                        + "Importi che aveva: compensi € " + cu.getTotalCompensi()
+                        + ", imponibile € " + cu.getTotalImponibile()
+                        + ", ritenute € " + cu.getTotalRitenute() + ".");
+        log.info("CuService - CU orfana eliminata id={} owner={} anno={}", cu.getId(), cu.getFkOwnerId(), cu.getTaxYear());
+        return ownerName;
+    }
+
     public CuGeneraBatchResponseDTO generaBatch(Integer tenantId, Integer taxYear) {
         if (taxYear == null) {
             throw new IllegalArgumentException("taxYear obbligatorio");
@@ -177,11 +225,25 @@ public class CuService {
                 log.warn("CuService.generaBatch() - owner {} saltato: {}", ownerId, e.getMessage());
             }
         }
-        log.info("CuService.generaBatch() - tenantId={} year={} generated={} skipped={}",
-                tenantId, taxYear, generated, skipped);
+        // CU orfane: proprietari senza più ritenute valide nell'anno (es. ricevuta eliminata).
+        // Non compaiono in findOwnerIdsWithWithholding, quindi il giro sopra non le tocca.
+        int eliminated = 0;
+        for (CuRecord orfana : cuRecordDAO.findOrfane(tenantId, taxYear)) {
+            if (STATI_ELIMINABILI.contains(orfana.getStato())) {
+                eliminaOrfana(orfana);
+                eliminated++;
+            } else {
+                skipped++;
+                log.warn("CuService.generaBatch() - CU {} (owner {}) senza ritenute ma già {}: non eliminata",
+                        orfana.getId(), orfana.getFkOwnerId(), orfana.getStato());
+            }
+        }
+        log.info("CuService.generaBatch() - tenantId={} year={} generated={} skipped={} eliminated={}",
+                tenantId, taxYear, generated, skipped, eliminated);
         return CuGeneraBatchResponseDTO.builder()
                 .generated(generated)
                 .skipped(skipped)
+                .eliminated(eliminated)
                 .records(records)
                 .build();
     }

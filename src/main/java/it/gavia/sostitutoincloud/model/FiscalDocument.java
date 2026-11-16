@@ -42,6 +42,9 @@ public class FiscalDocument {
     private String sdiFilePath;
     private LocalDateTime sdiSentAt;
     private String sdiErrorMsg;
+    // Ultimo invio email accettato dal server SMTP (migration 037), non la consegna
+    private LocalDateTime emailInviataAt;
+    private String emailInviataA;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
