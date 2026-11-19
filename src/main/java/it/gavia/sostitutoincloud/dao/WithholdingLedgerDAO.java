@@ -328,6 +328,29 @@ public class WithholdingLedgerDAO {
                 stato, id);
     }
 
+    /**
+     * Cambio data della ricevuta nello stesso mese (DocumentDataModificaService): solo data_evento,
+     * periodo invariato. Esclude le righe collegate a una NDC.
+     */
+    public int updateDataEvento(Integer id, java.time.LocalDate dataEvento) {
+        int righe = jdbcTemplate.update("UPDATE withholding_ledger SET data_evento = ?, updated_at = NOW() " +
+                "WHERE id = ? AND fk_ndc_id IS NULL", dataEvento, id);
+        log.info("WithholdingLedgerDAO.updateDataEvento() - id={} data={} righe={}", id, dataEvento, righe);
+        return righe;
+    }
+
+    /**
+     * Cambio data della ricevuta in un altro mese dello stesso anno: periodo_mese e data_evento.
+     * Condizionale: solo righe da_versare, fuori da qualsiasi F24 e non collegate a una NDC.
+     */
+    public int spostaPeriodo(Integer id, Integer periodoMese, java.time.LocalDate dataEvento) {
+        int righe = jdbcTemplate.update("UPDATE withholding_ledger SET periodo_mese = ?, data_evento = ?, updated_at = NOW() " +
+                "WHERE id = ? AND stato = 'da_versare' AND fk_f24_record_id IS NULL AND fk_ndc_id IS NULL",
+                periodoMese, dataEvento, id);
+        log.info("WithholdingLedgerDAO.spostaPeriodo() - id={} mese={} data={} righe={}", id, periodoMese, dataEvento, righe);
+        return righe;
+    }
+
     public int deleteById(Integer id) {
         log.info("WithholdingLedgerDAO.deleteById() - id={}", id);
         return jdbcTemplate.update("DELETE FROM withholding_ledger WHERE id = ?", id);
