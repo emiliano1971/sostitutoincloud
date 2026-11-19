@@ -16,4 +16,6 @@ public class EliminazioneEsitoDTO {
     private Integer bookingId;
     private List<EliminazioneControlloDTO.DocumentoCoinvolto> eliminati;
     private List<EliminazioneControlloDTO.Avviso> avvisi;
+    /** Solo fattura eliminata: numero della ricevuta rimasta sulla prenotazione. */
+    private String ricevutaLasciata;
 }

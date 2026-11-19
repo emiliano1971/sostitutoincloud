@@ -15,6 +15,8 @@ import {
 import { annullaNdc, getBookingById, type BookingDetail, type FiscalDocumentSummary } from '@/api/bookingApi';
 import NdcDialog from '@/components/booking/NdcDialog';
 import EliminaDocumento from '@/components/document/EliminaDocumento';
+import AnnullaInvioManuale from '@/components/document/AnnullaInvioManuale';
+import CambiaDataDocumento from '@/components/document/CambiaDataDocumento';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/hooks/use-toast';
 import { labelTipoDocumento } from '@/lib/statiLabels';
@@ -92,7 +94,7 @@ const DocumentDetail = () => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSendingSdi, setIsSendingSdi] = useState(false);
   const [isScaricandoXml, setIsScaricandoXml] = useState(false);
-  // Conferma "Inviata manualmente" (documento trasmesso fuori dall'applicazione)
+  // Conferma "Inviata manualmente" (documento marcato come inviato fuori dall'applicazione)
   const [confermaManuale, setConfermaManuale] = useState(false);
   const [isMarcandoManuale, setIsMarcandoManuale] = useState(false);
   const [isAnnullando, setIsAnnullando] = useState(false);
@@ -124,7 +126,10 @@ const DocumentDetail = () => {
       .map(a => a.messaggio);
     toast({
       title: `Eliminat${esito.eliminati.length > 1 ? 'i' : 'o'} ${esito.eliminati.map(d => d.numero).join(' e ')}`,
-      description: daRicordare.length > 0 ? daRicordare.join(' ') : 'Il numero è di nuovo disponibile.',
+      description: [
+        esito.ricevutaLasciata ? `La ricevuta ${esito.ricevutaLasciata} resta: ricorda di riemettere la fattura.` : null,
+        ...daRicordare,
+      ].filter(Boolean).join(' ') || 'Il numero è di nuovo disponibile.',
       action: f24?.f24Anno && f24?.f24Mese ? (
         <ToastAction altText="Apri F24" onClick={() => navigate(`/f24?anno=${f24.f24Anno}&mese=${f24.f24Mese}`)}>
           Apri F24
@@ -240,7 +245,7 @@ const DocumentDetail = () => {
     }
   };
 
-  // Trasmissione fatta fuori dall'applicazione: stato sent_sdi senza file né progressivo
+  // Invio fatto fuori dall'applicazione: stato sent_sdi senza file né progressivo
   const handleInviataManualmente = async () => {
     if (!doc) return;
     setIsMarcandoManuale(true);
@@ -354,6 +359,12 @@ const DocumentDetail = () => {
   const puoRiprovareSdi = isTrasmissibile && (sdiRifiutato || sdiErrore) && !(isFatturaPm && ndcAttive.length > 0);
   // "Inviata manualmente": da bozza o pronto, stesse regole dell'invio (fattura senza NDC
   // attiva, NDC con fattura già trasmessa). Il backend le ricontrolla (422).
+  // "Annulla invio manuale": sent_sdi senza progressivo né file; il resto lo decide il controllo
+  // del backend (il componente compare solo se l'annullo è consentito).
+  // "Cambia data": fattura PM / NDC mai inviata e ricevuta; intervallo e altri vincoli dal controllo del backend
+  const puoCambiareData = (isFatturaPm || isNotaCredito || isRicevutaOwner) && ['draft', 'ready'].includes(doc.statoDocumento);
+  const puoAnnullareInvioManuale = isTrasmissibile && doc.statoDocumento === 'sent_sdi'
+    && !doc.sdiProgressivo && !doc.sdiFilePath;
   const puoMarcareManuale = isTrasmissibile && ['ready', 'draft'].includes(doc.statoDocumento)
     && (isNotaCredito ? fatturaCollegataInviata : ndcAttive.length === 0);
   const ritenuta = doc.ritenutaAmount ?? 0;
@@ -736,7 +747,7 @@ const DocumentDetail = () => {
                         <CheckCircle2 className="h-3.5 w-3.5" /> {sdiInviatoManualmente ? 'Inviato manualmente' : 'Inviato SDI'}
                       </Badge>
                       <span className="text-xs text-muted-foreground">
-                        {sdiInviatoManualmente ? 'trasmesso fuori dall\'applicazione' : 'in attesa di risposta AdE'}
+                        {sdiInviatoManualmente ? 'marcato come inviato fuori dall\'applicazione' : 'in attesa di risposta AdE'}
                       </span>
                     </>
                   )}
@@ -793,7 +804,12 @@ const DocumentDetail = () => {
               </>
             ) : (
               <>
-                <p className="text-muted-foreground">{isNotaCredito ? 'Nota di credito' : 'Fattura'} non ancora trasmessa allo SDI.</p>
+                <p className="text-muted-foreground">{isNotaCredito ? 'Nota di credito' : 'Fattura'} non ancora inviata allo SDI.</p>
+                {doc.sdiManualeAnnullatoAt && ['ready', 'draft'].includes(doc.statoDocumento) && (
+                  <p className="text-xs text-muted-foreground">
+                    Invio manuale annullato il {new Date(doc.sdiManualeAnnullatoAt).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                )}
                 {sdiErrore && doc.sdiErrorMsg && (
                   <div className="rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
                     <span className="font-medium">Dettaglio:</span> {doc.sdiErrorMsg}
@@ -822,6 +838,21 @@ const DocumentDetail = () => {
             {isAnnullando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
             Annulla NDC
           </Button>
+        )}
+        {puoCambiareData && (
+          <CambiaDataDocumento
+            key={`${doc.id}-${doc.issueDate}`}
+            documentId={doc.id}
+            onCambiata={(aggiornato, precedente) => {
+              setDoc(aggiornato);
+              const fmt = (iso?: string) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('it-IT') : '—');
+              toast({
+                title: 'Data del documento cambiata',
+                description: `${aggiornato.documentNumber}: dal ${fmt(precedente)} al ${fmt(aggiornato.issueDate)}`,
+              });
+            }}
+            onErrore={messaggio => toast({ title: 'Cambio data non riuscito', description: messaggio, variant: 'destructive' })}
+          />
         )}
         {puoEliminare && (
           <EliminaDocumento documentId={doc.id} onEliminato={handleEliminato} onErrore={handleErroreEliminazione} />
@@ -860,6 +891,17 @@ const DocumentDetail = () => {
             {isMarcandoManuale ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             Inviata manualmente
           </Button>
+        )}
+        {puoAnnullareInvioManuale && (
+          <AnnullaInvioManuale
+            documentId={doc.id}
+            isNotaCredito={isNotaCredito}
+            onAnnullato={aggiornato => {
+              setDoc(aggiornato);
+              toast({ title: 'Invio manuale annullato', description: `${aggiornato.documentNumber} è di nuovo pronto.` });
+            }}
+            onErrore={messaggio => toast({ title: 'Annullo non riuscito', description: messaggio, variant: 'destructive' })}
+          />
         )}
         <AlertDialog open={confermaManuale} onOpenChange={open => { if (!open && !isMarcandoManuale) setConfermaManuale(false); }}>
           <AlertDialogContent>

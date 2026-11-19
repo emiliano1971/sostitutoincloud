@@ -45,6 +45,8 @@ public class FiscalDocument {
     // Ultimo invio email accettato dal server SMTP (migration 037), non la consegna
     private LocalDateTime emailInviataAt;
     private String emailInviataA;
+    /** Migration 038: ultimo annullo di un invio manuale allo SDI (resta dopo un nuovo invio). */
+    private LocalDateTime sdiManualeAnnullatoAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

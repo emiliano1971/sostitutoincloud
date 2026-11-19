@@ -21,13 +21,31 @@ public class EliminazioneControlloDTO {
     private List<String> blocchi;
     private List<Avviso> avvisi;
     private List<DocumentoCoinvolto> documenti;
+    /**
+     * Solo per la fattura: eliminazione della sola fattura (blocchi della sola fattura). I campi
+     * sopra coincidono con scenarioConRicevuta se presente, altrimenti con questo.
+     */
+    private Scenario scenarioSoloFattura;
+    /** Solo per la fattura con una ricevuta attiva sulla prenotazione: fattura + ricevuta, tutto o niente. */
+    private Scenario scenarioConRicevuta;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Scenario {
+        private boolean consentito;
+        private List<String> blocchi;
+        private List<Avviso> avvisi;
+        private List<DocumentoCoinvolto> documenti;
+    }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Avviso {
-        /** F24_AGGIORNATO, LIQUIDAZIONE_DA_RICALCOLARE, CU_DA_RIGENERARE, CU_VERRA_ELIMINATA, EMAIL_GIA_INVIATA, BOLLO_ADDEBITATO */
+        /** F24_AGGIORNATO, LIQUIDAZIONE_DA_RICALCOLARE, CU_DA_RIGENERARE, CU_VERRA_ELIMINATA, EMAIL_GIA_INVIATA, BOLLO_ADDEBITATO, SDI_MANUALE_ANNULLATO, RICEVUTA_RESTA, RICEVUTE_MULTIPLE */
         private String codice;
         private String messaggio;
         /** Solo F24_AGGIORNATO: F24 e suo periodo (link alla lista F24 filtrata). */

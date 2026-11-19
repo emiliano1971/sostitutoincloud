@@ -7,6 +7,7 @@ import it.gavia.sostitutoincloud.dao.FiscalDocumentRigaNdcDAO;
 import it.gavia.sostitutoincloud.dao.OwnerProfileDAO;
 import it.gavia.sostitutoincloud.dao.PropertyDAO;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
+import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.model.Booking;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
@@ -14,6 +15,7 @@ import it.gavia.sostitutoincloud.model.FiscalDocumentRigaNdc;
 import it.gavia.sostitutoincloud.model.OwnerProfile;
 import it.gavia.sostitutoincloud.model.Property;
 import it.gavia.sostitutoincloud.model.Tenant;
+import it.gavia.sostitutoincloud.model.StatoDocumento;
 import it.gavia.sostitutoincloud.model.TipoDocumento;
 import it.gavia.sostitutoincloud.util.TenantAddressUtils;
 import lombok.extern.log4j.Log4j2;
@@ -80,6 +82,8 @@ public class DocumentPdfService {
     private final TipoDocumentoDAO tipoDocumentoDAO;
     private final VociFatturaPmService vociFatturaPmService;
     private final FiscalDocumentRigaNdcDAO rigaNdcDAO;
+    // Nota bollo della ricevuta: serve sapere se la fattura della prenotazione è attiva (non annullata)
+    private final StatoDocumentoDAO statoDocumentoDAO;
 
     public DocumentPdfService(FiscalDocumentDAO fiscalDocumentDAO,
                               BookingDAO bookingDAO,
@@ -88,7 +92,9 @@ public class DocumentPdfService {
                               TenantDAO tenantDAO,
                               TipoDocumentoDAO tipoDocumentoDAO,
                               VociFatturaPmService vociFatturaPmService,
-                              FiscalDocumentRigaNdcDAO rigaNdcDAO) {
+                              FiscalDocumentRigaNdcDAO rigaNdcDAO,
+                              StatoDocumentoDAO statoDocumentoDAO) {
+        this.statoDocumentoDAO = statoDocumentoDAO;
         this.vociFatturaPmService = vociFatturaPmService;
         this.rigaNdcDAO = rigaNdcDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
@@ -303,7 +309,10 @@ public class DocumentPdfService {
         // fatturato dal PM; altrimenti, se c'è un bollo, assolto dal sostituto d'imposta.
         String notaBollo = "";
         if (bolloAddebitato) {
-            notaBollo = "<br/>Marca da bollo anticipata dal sostituto d'imposta e addebitata nella fattura di gestione.";
+            // Fattura di gestione eliminata (ricevuta lasciata): "da addebitare" finché non è riemessa
+            notaBollo = haFatturaAttiva(doc.getFkBookingId())
+                    ? "<br/>Marca da bollo anticipata dal sostituto d'imposta e addebitata nella fattura di gestione."
+                    : "<br/>Marca da bollo anticipata dal sostituto d'imposta, da addebitare nella fattura di gestione.";
         } else if (bollo.compareTo(BigDecimal.ZERO) > 0) {
             notaBollo = "<br/>Imposta di bollo di &#8364; " + importo(bollo) + " assolta dal sostituto d'imposta.";
         }
@@ -447,5 +456,15 @@ public class DocumentPdfService {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;");
+    }
+
+    /** Fattura PM non annullata presente sulla prenotazione. */
+    private boolean haFatturaAttiva(Integer bookingId) {
+        if (bookingId == null) return false;
+        Integer tipoFatturaId = tipoDocumentoDAO.findByCodice(CODICE_FATTURA).map(TipoDocumento::getId).orElse(null);
+        Integer annullataId = statoDocumentoDAO.findByCodice("annullata").map(StatoDocumento::getId).orElse(null);
+        return tipoFatturaId != null && fiscalDocumentDAO.findByBookingId(bookingId).stream()
+                .anyMatch(d -> tipoFatturaId.equals(d.getFkTipoDocumentoId())
+                        && !java.util.Objects.equals(annullataId, d.getFkStatoDocumentoId()));
     }
 }

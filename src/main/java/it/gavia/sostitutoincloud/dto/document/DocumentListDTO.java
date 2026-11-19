@@ -34,6 +34,8 @@ public class DocumentListDTO {
     // Ultimo invio email (migration 037); null nel portale proprietario
     private LocalDateTime emailInviataAt;
     private String emailInviataA;
+    /** Ultimo annullo di un invio manuale allo SDI (migration 038). */
+    private LocalDateTime sdiManualeAnnullatoAt;
     private String propertyName;
     private String channelName;
     private Integer fkBookingId;
@@ -53,4 +55,10 @@ public class DocumentListDTO {
     // NDC: fattura originale stornata
     private Integer fatturaCollegataId;
     private String fatturaCollegataNumber;
+    // Fattura PM attiva: ricevuta attiva della stessa prenotazione (null se assente)
+    private Integer ricevutaCollegataId;
+    private String ricevutaCollegataNumber;
+    // Ricevuta attiva: fattura PM attiva della stessa prenotazione (null se assente)
+    private Integer fatturaDellaPrenotazioneId;
+    private String fatturaDellaPrenotazioneNumber;
 }

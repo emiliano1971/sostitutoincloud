@@ -704,6 +704,8 @@ CREATE TABLE fiscal_document (
     -- migration 037: ultimo invio email accettato dal server SMTP (non la consegna)
     email_inviata_at        TIMESTAMP,
     email_inviata_a         VARCHAR(500),                       -- destinatari separati da ;
+    -- migration 038: ultimo annullo di un invio manuale allo SDI (resta dopo un nuovo invio)
+    sdi_manuale_annullato_at TIMESTAMP,
     created_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMP       NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_document_number_per_tenant UNIQUE (fk_tenant_id, document_number)
@@ -718,6 +720,9 @@ COMMENT ON COLUMN fiscal_document.email_inviata_at IS
     'NULL se mai inviato da questa funzione.';
 COMMENT ON COLUMN fiscal_document.email_inviata_a IS
     'Destinatari dell ultimo invio email, separati da punto e virgola.';
+COMMENT ON COLUMN fiscal_document.sdi_manuale_annullato_at IS
+    'Data dell ultimo annullo di un invio manuale allo SDI; resta anche dopo un nuovo invio. '
+    'NULL se mai annullato.';
 
 CREATE TRIGGER trg_fiscal_document_updated_at
     BEFORE UPDATE ON fiscal_document

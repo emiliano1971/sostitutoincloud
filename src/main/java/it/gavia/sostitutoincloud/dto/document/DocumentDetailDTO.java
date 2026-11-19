@@ -45,6 +45,8 @@ public class DocumentDetailDTO {
     // Ultimo invio email (migration 037)
     private LocalDateTime emailInviataAt;
     private String emailInviataA;
+    /** Ultimo annullo di un invio manuale allo SDI (migration 038). */
+    private LocalDateTime sdiManualeAnnullatoAt;
     private String propertyName;
     private String channelName;
     private Integer fkBookingId;

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send, Mail } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send, Mail, Link2 } from 'lucide-react';
 import { testoEmailInviata } from '@/lib/emailDocumenti';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -797,6 +797,41 @@ const DocumentsList = () => {
                                 <Mail className="h-3.5 w-3.5 text-muted-foreground" aria-label="Email inviata" />
                               </TooltipTrigger>
                               <TooltipContent>{testoEmailInviata(d.emailInviataAt, d.emailInviataA)}</TooltipContent>
+                            </Tooltip>
+                          )}
+                          {/* Legame fattura ↔ ricevuta della stessa prenotazione (documenti attivi) */}
+                          {(() => {
+                            const collegatoId = d.ricevutaCollegataId ?? d.fatturaDellaPrenotazioneId;
+                            const collegatoNumero = d.ricevutaCollegataNumber ?? d.fatturaDellaPrenotazioneNumber;
+                            if (!collegatoId || !collegatoNumero) return null;
+                            return (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    aria-label={`Apri ${collegatoNumero}`}
+                                    className="text-muted-foreground hover:text-primary"
+                                    onClick={e => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      navigate(`/documents/${collegatoId}`, { state: { listaQuery: location.search } });
+                                    }}
+                                  >
+                                    <Link2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent>Collegata a {collegatoNumero}</TooltipContent>
+                              </Tooltip>
+                            );
+                          })()}
+                          {d.documentType === 'ricevuta' && d.statoDocumento !== 'annullata' && !d.fatturaDellaPrenotazioneId && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className="h-4 px-1 text-[10px] font-normal text-muted-foreground">
+                                  Senza fattura
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>Fattura non presente: riemettila</TooltipContent>
                             </Tooltip>
                           )}
                         </span>

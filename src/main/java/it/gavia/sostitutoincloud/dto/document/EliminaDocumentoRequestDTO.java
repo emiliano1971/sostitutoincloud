@@ -12,4 +12,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class EliminaDocumentoRequestDTO {
     private String motivo;
+    /**
+     * Solo dalla fattura: true (default se assente) elimina anche la ricevuta della prenotazione,
+     * false solo la fattura. Ignorato per la ricevuta e se la prenotazione non ha ricevuta.
+     */
+    private Boolean eliminaRicevuta;
 }

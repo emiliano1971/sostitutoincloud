@@ -67,6 +67,7 @@ public class DocumentEliminazioneService {
     private static final int MOTIVO_MIN = 5;
     private static final int MOTIVO_MAX = 500;
     private static final DateTimeFormatter FMT_EMAIL = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+    private static final DateTimeFormatter FMT_DATA = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
@@ -126,6 +127,8 @@ public class DocumentEliminazioneService {
         WithholdingLedger riga;
         F24Record f24;
         Settlement settlement;
+        /** Solo fattura (eliminaRicevuta=false): ricevute attive che restano sulla prenotazione. */
+        List<FiscalDocument> ricevuteLasciate = List.of();
         final List<String> blocchi = new ArrayList<>();
         final List<Avviso> avvisi = new ArrayList<>();
 
@@ -145,8 +148,33 @@ public class DocumentEliminazioneService {
      * @throws NoSuchElementException documento inesistente o di altro tenant (404)
      */
     public EliminazioneControlloDTO controllo(Integer tenantId, Integer documentId) {
-        Piano piano = valuta(tenantId, carica(tenantId, documentId));
+        FiscalDocument doc = carica(tenantId, documentId);
+        if (!tipo(CODICE_FATTURA).getId().equals(doc.getFkTipoDocumentoId())) {
+            // Ricevuta (dal proprio dettaglio) o tipo non ammesso: nessuno scenario, il flag non si applica
+            Piano piano = valuta(tenantId, doc, true);
+            return EliminazioneControlloDTO.builder()
+                    .consentito(piano.blocchi.isEmpty())
+                    .blocchi(piano.blocchi)
+                    .avvisi(piano.avvisi)
+                    .documenti(coinvolti(piano))
+                    .build();
+        }
+        // Fattura: scenario "solo fattura" sempre, "con ricevuta" solo se la prenotazione ne ha una
+        Piano solo = valuta(tenantId, doc, false);
+        Piano con = solo.ricevuteLasciate.isEmpty() ? null : valuta(tenantId, doc, true);
+        Piano principale = con != null ? con : solo;
         return EliminazioneControlloDTO.builder()
+                .consentito(principale.blocchi.isEmpty())
+                .blocchi(principale.blocchi)
+                .avvisi(principale.avvisi)
+                .documenti(coinvolti(principale))
+                .scenarioSoloFattura(scenario(solo))
+                .scenarioConRicevuta(con != null ? scenario(con) : null)
+                .build();
+    }
+
+    private EliminazioneControlloDTO.Scenario scenario(Piano piano) {
+        return EliminazioneControlloDTO.Scenario.builder()
                 .consentito(piano.blocchi.isEmpty())
                 .blocchi(piano.blocchi)
                 .avvisi(piano.avvisi)
@@ -155,16 +183,19 @@ public class DocumentEliminazioneService {
     }
 
     /**
-     * Elimina fisicamente il documento (e la ricevuta collegata, se si parte dalla fattura).
+     * Elimina fisicamente il documento. Dalla fattura: con eliminaRicevuta (default true) anche
+     * la ricevuta della prenotazione, tutto o niente; con false solo la fattura, con i soli
+     * blocchi della fattura. Dalla ricevuta il flag non si applica.
      *
      * @throws IllegalArgumentException          motivo mancante o fuori misura (400)
      * @throws NoSuchElementException            documento inesistente o di altro tenant (404)
      * @throws EliminazioneNonConsentitaException blocchi ricalcolati dentro il lock (422)
      */
-    public EliminazioneEsitoDTO elimina(Integer tenantId, Integer documentId, String motivo) {
+    public EliminazioneEsitoDTO elimina(Integer tenantId, Integer documentId, String motivo, Boolean eliminaRicevuta) {
         String motivoValido = validaMotivo(motivo);
+        boolean conRicevuta = eliminaRicevuta == null || eliminaRicevuta;
         // Prima valutazione fuori dal lock: serve solo a sapere quali serie bloccare
-        Piano preliminare = valuta(tenantId, carica(tenantId, documentId));
+        Piano preliminare = valuta(tenantId, carica(tenantId, documentId), conRicevuta);
         List<Serie> serieDaBloccare = serie(preliminare);
 
         return transactionTemplate.execute(status -> {
@@ -172,7 +203,7 @@ public class DocumentEliminazioneService {
             serieDaBloccare.forEach(s -> fiscalDocumentDAO.lockNumerazione(tenantId, s.tipoId(), s.anno()));
 
             // Dentro il lock: si ricalcola tutto, il controllo fatto prima non vale
-            Piano piano = valuta(tenantId, carica(tenantId, documentId));
+            Piano piano = valuta(tenantId, carica(tenantId, documentId), conRicevuta);
             if (!piano.blocchi.isEmpty()) {
                 throw new EliminazioneNonConsentitaException(piano.blocchi);
             }
@@ -186,7 +217,11 @@ public class DocumentEliminazioneService {
 
     // ── valutazione ──────────────────────────────────────────────────────────
 
-    private Piano valuta(Integer tenantId, FiscalDocument doc) {
+    /**
+     * @param conRicevuta solo per la fattura: true = anche la ricevuta della prenotazione (tutti i
+     *                    blocchi, tutto o niente); false = solo la fattura, blocchi della sola fattura
+     */
+    private Piano valuta(Integer tenantId, FiscalDocument doc, boolean conRicevuta) {
         Piano piano = new Piano();
         Integer tipoFatturaId = tipo(CODICE_FATTURA).getId();
         Integer tipoRicevutaId = tipo(CODICE_RICEVUTA).getId();
@@ -208,7 +243,23 @@ public class DocumentEliminazioneService {
                 .toList();
         boolean ricevuteMultiple = false;
 
-        if (isFattura) {
+        if (isFattura && !conRicevuta) {
+            // Solo fattura: le ricevute restano, nessun controllo su ricevuta, ledger, F24, rendiconto, CU
+            piano.fattura = doc;
+            piano.ricevuteLasciate = ricevuteAttive;
+            if (ricevuteAttive.size() > 1) {
+                piano.avvisi.add(Avviso.builder().codice("RICEVUTE_MULTIPLE")
+                        .messaggio("La prenotazione ha più ricevute attive (" + numeri(ricevuteAttive)
+                                + "): situazione anomala da verificare; nessuna viene toccata")
+                        .build());
+            }
+            if (!ricevuteAttive.isEmpty()) {
+                piano.avvisi.add(Avviso.builder().codice("RICEVUTA_RESTA")
+                        .messaggio("La ricevuta " + numeri(ricevuteAttive) + " resta senza fattura collegata: "
+                                + "riemetti la fattura prima di modificare lo split")
+                        .build());
+            }
+        } else if (isFattura) {
             piano.fattura = doc;
             // La ricevuta si cerca dalla prenotazione (non solo da fk_documento_collegato_id)
             if (ricevuteAttive.size() > 1) {
@@ -225,7 +276,7 @@ public class DocumentEliminazioneService {
                     .toList();
             if (!fattureAttive.isEmpty()) {
                 piano.blocchi.add("La prenotazione ha la fattura " + numeri(fattureAttive)
-                        + ": eliminare dal dettaglio della fattura, che elimina anche la ricevuta");
+                        + ": eliminare dal dettaglio della fattura, dove si sceglie se eliminare anche la ricevuta");
             }
             piano.ricevuta = doc;
         }
@@ -254,6 +305,8 @@ public class DocumentEliminazioneService {
         Set<Integer> giaSegnalati = ndcAttive.stream().map(FiscalDocument::getId)
                 .collect(Collectors.toCollection(HashSet::new));
         if (ricevuteMultiple) ricevuteAttive.forEach(r -> giaSegnalati.add(r.getId()));
+        // Solo fattura: le ricevute che restano non sono "altri documenti"
+        piano.ricevuteLasciate.forEach(r -> giaSegnalati.add(r.getId()));
         if (piano.ricevuta != null && piano.fattura == null) {
             // Dal dettaglio ricevuta la fattura attiva è già segnalata sopra
             docsBooking.stream()
@@ -290,6 +343,11 @@ public class DocumentEliminazioneService {
                             + (d.getEmailInviataA() != null ? d.getEmailInviataA() : "—")
                             + " il " + d.getEmailInviataAt().format(FMT_EMAIL)
                             + ": l'eliminazione non lo ritira dal destinatario")
+                    .build());
+        }
+        if (d.getSdiManualeAnnullatoAt() != null) {
+            piano.avvisi.add(Avviso.builder().codice("SDI_MANUALE_ANNULLATO")
+                    .messaggio(d.getDocumentNumber() + ": " + testoSdiManualeAnnullato(d))
                     .build());
         }
         String stato = codiceStato(d.getFkStatoDocumentoId());
@@ -475,7 +533,9 @@ public class DocumentEliminazioneService {
         // Fattura
         if (piano.fattura != null) {
             fiscalDocumentDAO.deleteById(piano.fattura.getId());
-            auditService.log("document.delete", "FiscalDocument", null, testoAudit(piano.fattura, motivo));
+            auditService.log("document.delete", "FiscalDocument", null, testoAudit(piano.fattura, motivo)
+                    + (piano.ricevuteLasciate.isEmpty() ? ""
+                        : " Ricevuta " + numeri(piano.ricevuteLasciate) + " lasciata (eliminaRicevuta=false)."));
         }
 
         if (bookingId != null) {
@@ -486,6 +546,7 @@ public class DocumentEliminazioneService {
         return EliminazioneEsitoDTO.builder()
                 .bookingId(bookingId)
                 .eliminati(eliminati)
+                .ricevutaLasciata(piano.ricevuteLasciate.isEmpty() ? null : numeri(piano.ricevuteLasciate))
                 .avvisi(piano.avvisi)
                 .build();
     }
@@ -496,7 +557,15 @@ public class DocumentEliminazioneService {
                 + (d.getEmailInviataAt() != null
                     ? " Email già inviata a " + (d.getEmailInviataA() != null ? d.getEmailInviataA() : "—")
                         + " il " + d.getEmailInviataAt().format(FMT_EMAIL) + "."
-                    : "");
+                    : "")
+                + (d.getSdiManualeAnnullatoAt() != null ? " Avviso confermato: " + testoSdiManualeAnnullato(d) : "");
+    }
+
+    /** Avviso SDI_MANUALE_ANNULLATO (migration 038): la data è quella dell'annullo. */
+    private String testoSdiManualeAnnullato(FiscalDocument d) {
+        return "Questo documento era stato marcato come inviato manualmente e poi annullato il "
+                + d.getSdiManualeAnnullatoAt().format(FMT_DATA) + ". Se la fattura era stata trasmessa davvero, "
+                + "eliminarla e riemettere con lo stesso numero crea un duplicato: in quel caso emetti una nota di credito.";
     }
 
     // ── helper ───────────────────────────────────────────────────────────────

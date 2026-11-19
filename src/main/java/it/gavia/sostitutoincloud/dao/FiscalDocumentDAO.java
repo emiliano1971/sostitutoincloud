@@ -24,7 +24,7 @@ public class FiscalDocumentDAO {
             "canone_locazione, fk_documento_collegato_id, " +
             "fk_stato_documento_id, sdi_identifier, " +
             "sdi_progressivo, sdi_file_path, sdi_sent_at, sdi_error_msg, " +
-            "email_inviata_at, email_inviata_a, " +
+            "email_inviata_at, email_inviata_a, sdi_manuale_annullato_at, " +
             "created_at, updated_at FROM fiscal_document";
 
     private final JdbcTemplate jdbcTemplate;
@@ -254,6 +254,63 @@ public class FiscalDocumentDAO {
                 "sdi_sent_at = NOW(), sdi_file_path = NULL, sdi_error_msg = NULL, updated_at = NOW() WHERE id = ?";
         jdbcTemplate.update(sql, id);
         log.info("FiscalDocumentDAO.updateSdiManuale() - id={}", id);
+    }
+
+    /**
+     * Annullo di un invio manuale (migration 038): da sent_sdi a ready, sdi_sent_at azzerata,
+     * sdi_manuale_annullato_at = NOW(). UPDATE condizionale: tocca la riga solo se è ancora un
+     * invio manuale (sent_sdi senza progressivo né file), così non annulla un documento inviato
+     * davvero nel frattempo.
+     *
+     * @return righe aggiornate (0 = documento cambiato, annullo non eseguito)
+     */
+    public int annullaSdiManuale(Integer id) {
+        int righe = jdbcTemplate.update(
+                "UPDATE fiscal_document SET " +
+                "fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'ready'), " +
+                "sdi_sent_at = NULL, sdi_manuale_annullato_at = NOW(), updated_at = NOW() " +
+                "WHERE id = ? " +
+                "AND fk_stato_documento_id = (SELECT id FROM stato_documento WHERE codice = 'sent_sdi') " +
+                "AND sdi_progressivo IS NULL AND sdi_file_path IS NULL", id);
+        log.info("FiscalDocumentDAO.annullaSdiManuale() - id={} righe={}", id, righe);
+        return righe;
+    }
+
+    /**
+     * Documento immediatamente precedente (prima) o successivo (dopo) nella serie di numerazione:
+     * stesso tenant, tipo e anno di issue_date (annullati compresi, come getNextProgressiveNumber),
+     * progressivo dal terzo segmento del numero. Usato dal cambio data (DocumentDataModificaService).
+     *
+     * @param successivo false = progressivo più alto minore di quello dato; true = più basso maggiore
+     */
+    public Optional<FiscalDocument> findAdiacenteInSerie(Integer tenantId, Integer tipoDocumentoId, Integer anno,
+                                                         Integer progressivo, boolean successivo) {
+        String sql = SELECT_ALL + " WHERE fk_tenant_id = ? AND fk_tipo_documento_id = ? " +
+                "AND EXTRACT(YEAR FROM issue_date) = ? " +
+                "AND CAST(SPLIT_PART(document_number, '-', 3) AS INTEGER) " + (successivo ? ">" : "<") + " ? " +
+                "ORDER BY CAST(SPLIT_PART(document_number, '-', 3) AS INTEGER) " + (successivo ? "ASC" : "DESC") +
+                " LIMIT 1";
+        List<FiscalDocument> result = jdbcTemplate.query(sql, fiscalDocumentRowMapper,
+                tenantId, tipoDocumentoId, anno, progressivo);
+        log.debug("FiscalDocumentDAO.findAdiacenteInSerie() - tenant={} tipo={} anno={} prog={} successivo={} trovato={}",
+                tenantId, tipoDocumentoId, anno, progressivo, successivo, !result.isEmpty());
+        return result.isEmpty() ? Optional.empty() : Optional.of(result.get(0));
+    }
+
+    /**
+     * Cambio della data di un documento mai inviato (DocumentDataModificaService). UPDATE
+     * condizionale: solo in draft/ready e senza progressivo né file SDI.
+     *
+     * @return righe aggiornate (0 = documento cambiato nel frattempo)
+     */
+    public int updateIssueDate(Integer id, LocalDate nuovaData) {
+        int righe = jdbcTemplate.update(
+                "UPDATE fiscal_document SET issue_date = ?, updated_at = NOW() " +
+                "WHERE id = ? " +
+                "AND fk_stato_documento_id IN (SELECT id FROM stato_documento WHERE codice IN ('draft', 'ready')) " +
+                "AND sdi_progressivo IS NULL AND sdi_file_path IS NULL", nuovaData, id);
+        log.info("FiscalDocumentDAO.updateIssueDate() - id={} data={} righe={}", id, nuovaData, righe);
+        return righe;
     }
 
     public Optional<FiscalDocument> findBySdiProgressivo(String progressivo) {

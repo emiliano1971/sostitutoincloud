@@ -28,6 +28,13 @@ import { oggettoEmailIniziale } from '@/lib/emailDocumenti';
 // DocumentGenerationService.generaBatch() (STATO_STORNATA, STATO_CANCELLED)
 const STATI_NON_ELABORABILI = ['stornata', 'cancelled'];
 
+// Filtri speciali del menu stati (valori di "stati" gestiti dal backend, esclusivi). "da_fatturare"
+// usa la stessa regola del conteggio "Prenotazioni da fatturare" della dashboard.
+const FILTRI_SPECIALI: Record<string, string> = {
+  da_completare: 'Da completare',
+  da_fatturare: 'Da fatturare',
+};
+
 // Data locale in formato yyyy-MM-dd. NON usare .toISOString(): converte in UTC e
 // nelle ore notturne (Europe/Rome = UTC+1/+2) restituirebbe il giorno precedente.
 const toLocalISO = (d: Date): string => {
@@ -239,14 +246,15 @@ const BookingsList = () => {
     }, { replace: true });
   };
 
-  // Toggle stato nel multi-check. "da_completare" è esclusivo con gli stati singoli.
+  // Toggle stato nel multi-check. I filtri speciali ("da completare", "da fatturare") sono
+  // esclusivi tra loro e con gli stati singoli.
   const toggleStato = (codice: string) => {
     let arr: string[];
-    if (codice === 'da_completare') {
-      arr = statiSelezionati.has('da_completare') ? [] : ['da_completare']; // esclusivo
+    if (codice in FILTRI_SPECIALI) {
+      arr = statiSelezionati.has(codice) ? [] : [codice]; // esclusivo
     } else {
       const next = new Set(statiSelezionati);
-      next.delete('da_completare'); // stati singoli non si combinano con "da completare"
+      Object.keys(FILTRI_SPECIALI).forEach(k => next.delete(k)); // non si combinano con gli stati singoli
       if (next.has(codice)) next.delete(codice); else next.add(codice);
       arr = [...next];
     }
@@ -256,7 +264,7 @@ const BookingsList = () => {
   const statoTriggerLabel = statiSelezionati.size === 0
     ? 'Tutti gli stati'
     : statiSelezionati.size === 1
-      ? (statiSelezionati.has('da_completare') ? 'Da completare' : getStatusLabel([...statiSelezionati][0]))
+      ? (FILTRI_SPECIALI[[...statiSelezionati][0]] ?? getStatusLabel([...statiSelezionati][0]))
       : `${statiSelezionati.size} stati`;
 
   // Riepilogo di un'azione massiva: conteggi nel titolo, primi 5 scarti nel testo
@@ -383,6 +391,18 @@ const BookingsList = () => {
                   <span className="flex-1 text-left">Da completare</span>
                   <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" />
                 </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent cursor-pointer"
+                  title="Check-out passato, senza fattura PM (anche con ricevuta già emessa)"
+                  onClick={() => toggleStato('da_fatturare')}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleStato('da_fatturare'); } }}
+                >
+                  <Checkbox checked={statiSelezionati.has('da_fatturare')} className="pointer-events-none" />
+                  <span className="flex-1 text-left">Da fatturare</span>
+                  <span className="h-2.5 w-2.5 rounded-full bg-warning" />
+                </div>
                 <div className="my-1 h-px bg-border" />
                 {STATO_OPTIONS.map(opt => (
                   <div
@@ -496,8 +516,9 @@ const BookingsList = () => {
           {statiSelezionati.size > 0 && (
             <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t">
               {[...statiSelezionati].map(codice => {
-                const label = codice === 'da_completare' ? 'Da completare' : getStatusLabel(codice);
-                const cls = codice === 'da_completare' ? 'bg-muted text-muted-foreground' : statusColors[codice];
+                const label = FILTRI_SPECIALI[codice] ?? getStatusLabel(codice);
+                const cls = codice === 'da_completare' ? 'bg-muted text-muted-foreground'
+                  : codice === 'da_fatturare' ? 'bg-warning/10 text-warning' : statusColors[codice];
                 return (
                   <Badge key={codice} variant="outline" className={`${cls} gap-1`}>
                     {label}

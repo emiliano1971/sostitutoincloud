@@ -21,6 +21,8 @@ export interface DocumentListItem {
   /** Ultimo invio email accettato dal server SMTP (non la consegna); assente se mai inviato. */
   emailInviataAt?: string;
   emailInviataA?: string;
+  /** Ultimo annullo di un invio manuale allo SDI (resta anche dopo un nuovo invio). */
+  sdiManualeAnnullatoAt?: string;
   // Versamento F24 della ritenuta e CU dell'anno (solo ricevuta owner)
   f24RecordId?: number;
   f24Periodo?: string;
@@ -49,6 +51,12 @@ export interface DocumentListItem {
   /** NDC: fattura originale stornata. */
   fatturaCollegataId?: number;
   fatturaCollegataNumber?: string;
+  /** Fattura PM attiva: ricevuta attiva della stessa prenotazione. */
+  ricevutaCollegataId?: number;
+  ricevutaCollegataNumber?: string;
+  /** Ricevuta attiva: fattura PM attiva della stessa prenotazione (assente = ricevuta senza fattura). */
+  fatturaDellaPrenotazioneId?: number;
+  fatturaDellaPrenotazioneNumber?: string;
 }
 
 export interface DocumentRow {
@@ -258,7 +266,7 @@ export async function getEmissioneControllo(
 /** Avviso non bloccante dell'eliminazione documento (richiede conferma). */
 export interface AvvisoEliminazione {
   codice: 'F24_AGGIORNATO' | 'LIQUIDAZIONE_DA_RICALCOLARE' | 'CU_DA_RIGENERARE' | 'CU_VERRA_ELIMINATA' | 'EMAIL_GIA_INVIATA'
-    | 'BOLLO_ADDEBITATO';
+    | 'BOLLO_ADDEBITATO' | 'SDI_MANUALE_ANNULLATO' | 'RICEVUTA_RESTA' | 'RICEVUTE_MULTIPLE';
   messaggio: string;
   /** Solo F24_AGGIORNATO: F24 e suo periodo, per il link alla lista F24. */
   f24Id?: number;
@@ -272,6 +280,14 @@ export interface DocumentoEliminabile {
   tipo: 'fattura' | 'ricevuta';
 }
 
+/** Uno scenario di eliminazione della fattura: solo fattura, oppure fattura + ricevuta. */
+export interface ScenarioEliminazione {
+  consentito: boolean;
+  blocchi: string[];
+  avvisi: AvvisoEliminazione[];
+  documenti: DocumentoEliminabile[];
+}
+
 /** Esito di GET /documents/{id}/eliminazione-controllo: non scrive nulla. */
 export interface EliminazioneControllo {
   consentito: boolean;
@@ -279,21 +295,87 @@ export interface EliminazioneControllo {
   avvisi: AvvisoEliminazione[];
   /** Documenti che verrebbero eliminati: la fattura con la sua ricevuta, oppure la sola ricevuta. */
   documenti: DocumentoEliminabile[];
+  /** Solo per la fattura: eliminazione della sola fattura (blocchi della sola fattura). */
+  scenarioSoloFattura?: ScenarioEliminazione;
+  /** Solo per la fattura con una ricevuta sulla prenotazione: fattura + ricevuta, tutto o niente. */
+  scenarioConRicevuta?: ScenarioEliminazione;
 }
 
 export interface EliminazioneEsito {
   bookingId?: number;
   eliminati: DocumentoEliminabile[];
   avvisi: AvvisoEliminazione[];
+  /** Solo fattura eliminata: numero della ricevuta rimasta sulla prenotazione. */
+  ricevutaLasciata?: string;
 }
 
 export async function getEliminazioneControllo(id: number): Promise<EliminazioneControllo> {
   return get<EliminazioneControllo>(`/documents/${id}/eliminazione-controllo`);
 }
 
-/** Eliminazione fisica: 400 motivo non valido, 422 non consentita (blocchi nel messaggio). */
-export async function eliminaDocumento(id: number, motivo: string): Promise<EliminazioneEsito> {
-  return post<EliminazioneEsito>(`/documents/${id}/elimina`, { motivo });
+/**
+ * Eliminazione fisica: 400 motivo non valido, 422 non consentita (blocchi nel messaggio).
+ * eliminaRicevuta sempre esplicito: dalla fattura true = anche la ricevuta, false = solo la
+ * fattura; per la ricevuta il backend lo ignora.
+ */
+export async function eliminaDocumento(id: number, motivo: string, eliminaRicevuta: boolean): Promise<EliminazioneEsito> {
+  return post<EliminazioneEsito>(`/documents/${id}/elimina`, { motivo, eliminaRicevuta });
+}
+
+/** Avviso dell'annullo invio manuale: RIAPERTURA sempre, NDC_RIAPERTA per la nota di credito. */
+export interface AvvisoAnnulloInvioManuale {
+  codice: 'RIAPERTURA' | 'NDC_RIAPERTA';
+  messaggio: string;
+}
+
+/** Esito di GET /documents/{id}/annulla-invio-manuale-controllo: non scrive nulla. */
+export interface AnnulloInvioManualeControllo {
+  consentito: boolean;
+  blocchi: string[];
+  avvisi: AvvisoAnnulloInvioManuale[];
+  /** Data dell'invio manuale che verrebbe annullato. */
+  inviatoManualmenteAt?: string;
+}
+
+export async function getAnnulloInvioManualeControllo(id: number): Promise<AnnulloInvioManualeControllo> {
+  return get<AnnulloInvioManualeControllo>(`/documents/${id}/annulla-invio-manuale-controllo`);
+}
+
+/** Riporta a "pronto" un documento marcato come inviato manualmente: 400 motivo, 422 non consentito. */
+export async function annullaInvioManuale(id: number, motivo: string): Promise<DocumentDetail> {
+  return post<DocumentDetail>(`/documents/${id}/annulla-invio-manuale`, { motivo });
+}
+
+/** Avviso del cambio data: richiede conferma, non blocca. */
+export interface AvvisoCambioData {
+  codice: 'DATA_PRECEDE_CHECKOUT' | 'INVIO_SDI_TARDIVO' | 'EMAIL_GIA_INVIATA' | 'NDC_CREDITO_PERIODO'
+    | 'RICEVUTA_PERIODO_SPOSTATO';
+  messaggio: string;
+}
+
+/** Esito di GET /documents/{id}/cambio-data-controllo: non scrive nulla. */
+export interface CambioDataControllo {
+  consentito: boolean;
+  blocchi: string[];
+  avvisi: AvvisoCambioData[];
+  dataMinima?: string;
+  dataMassima?: string;
+  dataAttuale: string;
+  /** Solo ricevuta: cambio di mese non consentito, dataMinima/dataMassima già ristrette al mese. */
+  limitatoAlMese?: boolean;
+  /** Motivo concreto del limite al mese (F24, rendiconto, stato della ritenuta). */
+  motivoLimiteMese?: string;
+}
+
+/** Controllo del cambio data; senza data valuta solo il documento e l'intervallo. */
+export async function getCambioDataControllo(id: number, data?: string): Promise<CambioDataControllo> {
+  const q = data ? `?data=${encodeURIComponent(data)}` : '';
+  return get<CambioDataControllo>(`/documents/${id}/cambio-data-controllo${q}`);
+}
+
+/** Cambio data di fattura PM / NDC mai inviata o di ricevuta: 400 data o motivo, 422 non consentito. */
+export async function cambiaDataDocumento(id: number, data: string, motivo: string): Promise<DocumentDetail> {
+  return post<DocumentDetail>(`/documents/${id}/cambio-data`, { data, motivo });
 }
 
 export async function aggiornaStatoDocumento(id: number, stato: string): Promise<void> {

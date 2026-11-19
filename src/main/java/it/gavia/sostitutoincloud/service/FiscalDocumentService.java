@@ -344,6 +344,12 @@ public class FiscalDocumentService {
                 .collect(Collectors.toMap(FiscalDocument::getFkDocumentoCollegatoId, d -> d, (a, b) -> a));
         Map<Integer, FiscalDocument> docsById = docs.stream()
                 .collect(Collectors.toMap(FiscalDocument::getId, d -> d));
+        // Legame fattura ↔ ricevuta per PRENOTAZIONE (non da fk_documento_collegato_id, che manca
+        // dopo l'eliminazione della sola fattura): documenti non annullati, sempre dalla lista già
+        // in memoria (nessuna query in più). Più documenti attivi dello stesso tipo (anomalia):
+        // vince il più recente.
+        Map<Integer, FiscalDocument> fatturaAttivaPerBooking = attivoPiuRecentePerBooking(docs, CODICE_FATTURA, lookup);
+        Map<Integer, FiscalDocument> ricevutaAttivaPerBooking = attivoPiuRecentePerBooking(docs, CODICE_RICEVUTA, lookup);
         List<Booking> bookings = bookingDAO.findByTenantId(tenantId);
         List<Property> properties = propertyDAO.findByTenantId(tenantId);
         List<CanaleOta> canali = canaleOtaDAO.findAll();
@@ -406,6 +412,13 @@ public class FiscalDocumentService {
                     boolean isNdc = tipo != null && CODICE_NOTA_CREDITO.equals(tipo.getCodice());
                     FiscalDocument fatturaCollegata = isNdc && d.getFkDocumentoCollegatoId() != null
                             ? docsById.get(d.getFkDocumentoCollegatoId()) : null;
+                    // Solo per documenti attivi: fattura → ricevuta della prenotazione e viceversa
+                    boolean attivo = stato == null || !STATO_ANNULLATA.equals(stato.getCodice());
+                    String codiceTipo = tipo != null ? tipo.getCodice() : null;
+                    FiscalDocument ricevutaPrenotazione = attivo && CODICE_FATTURA.equals(codiceTipo) && d.getFkBookingId() != null
+                            ? ricevutaAttivaPerBooking.get(d.getFkBookingId()) : null;
+                    FiscalDocument fatturaPrenotazione = attivo && CODICE_RICEVUTA.equals(codiceTipo) && d.getFkBookingId() != null
+                            ? fatturaAttivaPerBooking.get(d.getFkBookingId()) : null;
 
                     return DocumentListDTO.builder()
                             .id(d.getId())
@@ -425,6 +438,7 @@ public class FiscalDocumentService {
                             .sdiErrorMsg(d.getSdiErrorMsg())
                             .emailInviataAt(d.getEmailInviataAt())
                             .emailInviataA(d.getEmailInviataA())
+                            .sdiManualeAnnullatoAt(d.getSdiManualeAnnullatoAt())
                             .propertyName(property != null ? property.getDisplayName() : null)
                             .channelName(canale != null ? canale.getNome() : null)
                             .fkBookingId(d.getFkBookingId())
@@ -439,6 +453,10 @@ public class FiscalDocumentService {
                             .ndcNumber(ndcAttiva != null ? ndcAttiva.getDocumentNumber() : null)
                             .fatturaCollegataId(isNdc ? d.getFkDocumentoCollegatoId() : null)
                             .fatturaCollegataNumber(fatturaCollegata != null ? fatturaCollegata.getDocumentNumber() : null)
+                            .ricevutaCollegataId(ricevutaPrenotazione != null ? ricevutaPrenotazione.getId() : null)
+                            .ricevutaCollegataNumber(ricevutaPrenotazione != null ? ricevutaPrenotazione.getDocumentNumber() : null)
+                            .fatturaDellaPrenotazioneId(fatturaPrenotazione != null ? fatturaPrenotazione.getId() : null)
+                            .fatturaDellaPrenotazioneNumber(fatturaPrenotazione != null ? fatturaPrenotazione.getDocumentNumber() : null)
                             .build();
                 })
                 // Ricerca anche sui riferimenti mostrati in lista (prenotazione, NDC ↔ fattura):
@@ -451,6 +469,27 @@ public class FiscalDocumentService {
         log.debug("FiscalDocumentService.elenco() - tenantId={}, ownerId={}, risultati={}",
                 tenantId, ownerId, result.size());
         return result;
+    }
+
+    /**
+     * Prenotazione → documento non annullato del tipo indicato; se più d'uno (anomalia) il più
+     * recente per created_at, poi id.
+     */
+    private Map<Integer, FiscalDocument> attivoPiuRecentePerBooking(List<FiscalDocument> docs, String codiceTipo,
+                                                                     LookupMaps lookup) {
+        Comparator<FiscalDocument> recente = Comparator
+                .comparing(FiscalDocument::getCreatedAt, Comparator.nullsFirst(Comparator.<java.time.LocalDateTime>naturalOrder()))
+                .thenComparing(FiscalDocument::getId);
+        return docs.stream()
+                .filter(d -> d.getFkBookingId() != null)
+                .filter(d -> {
+                    TipoDocumento t = lookup.tipiById().get(d.getFkTipoDocumentoId());
+                    StatoDocumento st = lookup.statiById().get(d.getFkStatoDocumentoId());
+                    return t != null && codiceTipo.equals(t.getCodice())
+                            && (st == null || !STATO_ANNULLATA.equals(st.getCodice()));
+                })
+                .collect(Collectors.toMap(FiscalDocument::getFkBookingId, d -> d,
+                        (a, b) -> recente.compare(a, b) >= 0 ? a : b));
     }
 
     private boolean corrispondeRicerca(DocumentListDTO d, String search) {
@@ -513,8 +552,16 @@ public class FiscalDocumentService {
                 .filter(d -> CODICE_RICEVUTA.equals(d.getDocumentType()))
                 .sorted(Comparator.comparing(DocumentListDTO::getIssueDate,
                         Comparator.nullsLast(Comparator.reverseOrder())))
-                // Portale proprietario: niente email dell'ospite né traccia dell'invio
-                .peek(d -> { d.setEmailInviataAt(null); d.setEmailInviataA(null); })
+                // Portale proprietario: niente email dell'ospite né traccia dell'invio, né il
+                // legame con la fattura PM (documento del property manager)
+                .peek(d -> {
+                    d.setEmailInviataAt(null);
+                    d.setEmailInviataA(null);
+                    d.setRicevutaCollegataId(null);
+                    d.setRicevutaCollegataNumber(null);
+                    d.setFatturaDellaPrenotazioneId(null);
+                    d.setFatturaDellaPrenotazioneNumber(null);
+                })
                 .toList();
         log.info("FiscalDocumentService.findRicevuteByOwner() - tenantId={} ownerId={} {} ricevute",
                 tenantId, ownerId, result.size());
@@ -696,6 +743,7 @@ public class FiscalDocumentService {
                 .sdiErrorMsg(doc.getSdiErrorMsg())
                 .emailInviataAt(doc.getEmailInviataAt())
                 .emailInviataA(doc.getEmailInviataA())
+                .sdiManualeAnnullatoAt(doc.getSdiManualeAnnullatoAt())
                 .propertyName(property != null ? property.getDisplayName() : null)
                 .channelName(canale != null ? canale.getNome() : null)
                 .fkBookingId(doc.getFkBookingId())

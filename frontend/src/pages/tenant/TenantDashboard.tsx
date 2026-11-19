@@ -28,7 +28,7 @@ const TenantDashboard = () => {
     { label: 'Prenotazioni da Completare', value: dashboard.bookingsDaCompletare, icon: CalendarDays, color: 'text-primary' },
     { label: 'Ricavi Mese Corrente', value: fmt(dashboard.ricaviMeseCorrente), icon: TrendingUp, color: 'text-success' },
     { label: 'Prenotazioni da fatturare', value: dashboard.prenotazioniDaFatturare, icon: FileText, color: 'text-warning',
-      hint: 'Check-out passato, senza fattura PM', href: '/bookings?stati=ready' },
+      hint: 'Check-out passato, senza fattura PM (anche con ricevuta già emessa)', href: '/bookings?stati=da_fatturare' },
     { label: 'Fatture da inviare SDI', value: dashboard.fattureDaInviareSDI, icon: Send, color: 'text-amber-500',
       valueColor: 'text-amber-600', hint: 'Fatture PM e NDC pronte per la trasmissione',
       href: '/documents?stato=ready&tipo=fattura' },

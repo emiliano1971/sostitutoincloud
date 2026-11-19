@@ -101,8 +101,11 @@ public class DashboardService {
         Set<Integer> statiDocPendingIds = Stream.of("draft", "ready")
                 .map(statoDocumentoMap::get).filter(Objects::nonNull).collect(Collectors.toSet());
 
-        // A) Prenotazioni da fatturare: 'ready', check-out passato, nessuna fattura PM non annullata
-        Integer statoReadyId = statoPrenotazioneMap.get("ready");
+        // A) Prenotazioni da fatturare: regola unica RegolaDaFatturare (stessa del filtro
+        //    stati=da_fatturare della lista prenotazioni): ready/doc_issued/settled, check-out
+        //    passato, nessuna fattura PM non annullata
+        Map<Integer, String> codiceStatoPrenotazione = statoPrenotazioneMap.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey, (x, y) -> x));
         Set<Integer> bookingConFattura = allDocs.stream()
                 .filter(d -> Objects.equals(tipoFatturaId, d.getFkTipoDocumentoId())
                         && !Objects.equals(statoAnnullataId, d.getFkStatoDocumentoId()))
@@ -110,10 +113,9 @@ public class DashboardService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         int prenotazioniDaFatturare = (int) allBookings.stream()
-                .filter(b -> Objects.equals(statoReadyId, b.getFkStatoPrenotazioneId())
-                        && b.getCheckoutDate() != null
-                        && b.getCheckoutDate().isBefore(oggi)
-                        && !bookingConFattura.contains(b.getId()))
+                .filter(b -> RegolaDaFatturare.daFatturare(
+                        codiceStatoPrenotazione.get(b.getFkStatoPrenotazioneId()),
+                        b.getCheckoutDate(), bookingConFattura.contains(b.getId()), oggi))
                 .count();
 
         // B) Fatture da inviare SDI: fatture PM e NDC in draft/ready, escluse le fatture stornate

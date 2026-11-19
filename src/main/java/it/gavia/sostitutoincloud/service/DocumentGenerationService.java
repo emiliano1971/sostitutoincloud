@@ -64,7 +64,8 @@ public class DocumentGenerationService {
     private static final String STATO_F24_PAID = "paid";
     private static final List<String> STATI_CU_EMESSA = List.of("sent", "delivered");
     // Fattura immediata: trasmissione allo SDI entro 12 giorni dalla data del documento
-    private static final int GIORNI_INVIO_SDI = 12;
+    // Package-private: riusata da DocumentDataModificaService (cambio data), stessa regola.
+    static final int GIORNI_INVIO_SDI = 12;
     private static final DateTimeFormatter DATA_IT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final FiscalDocumentDAO fiscalDocumentDAO;
@@ -318,7 +319,7 @@ public class DocumentGenerationService {
     }
 
     /** Data del documento strettamente anteriore al check-out; false se il check-out manca. */
-    private static boolean precedeCheckout(LocalDate data, LocalDate checkout) {
+    static boolean precedeCheckout(LocalDate data, LocalDate checkout) {
         return checkout != null && data.isBefore(checkout);
     }
 

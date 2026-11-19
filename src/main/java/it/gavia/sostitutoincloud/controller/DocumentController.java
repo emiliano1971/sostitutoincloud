@@ -10,14 +10,20 @@ import it.gavia.sostitutoincloud.dto.document.DocumentGenerateRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentGenerateResponseDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentPageDTO;
 import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
+import it.gavia.sostitutoincloud.dto.document.AnnullaInvioManualeRequestDTO;
+import it.gavia.sostitutoincloud.dto.document.CambioDataRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.EliminaDocumentoRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.EmissioneControlloDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
+import it.gavia.sostitutoincloud.service.AnnulloNonConsentitoException;
+import it.gavia.sostitutoincloud.service.CambioDataNonConsentitoException;
+import it.gavia.sostitutoincloud.service.DocumentDataModificaService;
 import it.gavia.sostitutoincloud.service.DocumentEliminazioneService;
 import it.gavia.sostitutoincloud.service.DocumentGenerationService;
 import it.gavia.sostitutoincloud.service.EliminazioneNonConsentitaException;
 import it.gavia.sostitutoincloud.service.DocumentPdfService;
 import it.gavia.sostitutoincloud.service.FiscalDocumentService;
+import it.gavia.sostitutoincloud.service.SdiManualeAnnulloService;
 import it.gavia.sostitutoincloud.service.SdiXmlService;
 import it.gavia.sostitutoincloud.util.SecurityUtils;
 import lombok.extern.log4j.Log4j2;
@@ -42,13 +48,19 @@ public class DocumentController {
     private final DocumentPdfService documentPdfService;
     private final SdiXmlService sdiXmlService;
     private final DocumentEliminazioneService documentEliminazioneService;
+    private final SdiManualeAnnulloService sdiManualeAnnulloService;
+    private final DocumentDataModificaService documentDataModificaService;
 
     public DocumentController(FiscalDocumentService fiscalDocumentService,
                               DocumentGenerationService documentGenerationService,
                               DocumentPdfService documentPdfService,
                               SdiXmlService sdiXmlService,
-                              DocumentEliminazioneService documentEliminazioneService) {
+                              DocumentEliminazioneService documentEliminazioneService,
+                              SdiManualeAnnulloService sdiManualeAnnulloService,
+                              DocumentDataModificaService documentDataModificaService) {
+        this.documentDataModificaService = documentDataModificaService;
         this.documentEliminazioneService = documentEliminazioneService;
+        this.sdiManualeAnnulloService = sdiManualeAnnulloService;
         this.fiscalDocumentService = fiscalDocumentService;
         this.documentGenerationService = documentGenerationService;
         this.documentPdfService = documentPdfService;
@@ -333,7 +345,8 @@ public class DocumentController {
         log.info("DocumentController.elimina() - tenantId={} documentId={}", tenantId, id);
         try {
             return ResponseEntity.ok(documentEliminazioneService.elimina(
-                    tenantId, id, request != null ? request.getMotivo() : null));
+                    tenantId, id, request != null ? request.getMotivo() : null,
+                    request != null ? request.getEliminaRicevuta() : null));
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
@@ -341,6 +354,88 @@ public class DocumentController {
             log.warn("DocumentController.elimina() - non consentita: {}", e.getBlocchi());
             return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
                     .body(java.util.Map.of("error", "Eliminazione non consentita",
+                            "message", e.getMessage(), "blocchi", e.getBlocchi()));
+        }
+    }
+
+    /**
+     * Controllo dell'annullo di un invio manuale allo SDI (fattura PM / NDC in sent_sdi senza
+     * progressivo né file): consentito, blocchi, avvisi. Non scrive nulla. 404 se non trovato.
+     */
+    @GetMapping("/{id}/annulla-invio-manuale-controllo")
+    public ResponseEntity<?> annullaInvioManualeControllo(@PathVariable Integer id) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.debug("DocumentController.annullaInvioManualeControllo() - tenantId={} documentId={}", tenantId, id);
+        try {
+            return ResponseEntity.ok(sdiManualeAnnulloService.controllo(tenantId, id));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Annullo dell'invio manuale: documento di nuovo 'ready'. 200 con il dettaglio aggiornato,
+     * 400 motivo non valido (GlobalExceptionHandler), 404 non trovato, 422 con i blocchi.
+     */
+    @PostMapping("/{id}/annulla-invio-manuale")
+    public ResponseEntity<?> annullaInvioManuale(@PathVariable Integer id,
+                                                 @RequestBody(required = false) AnnullaInvioManualeRequestDTO request) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.annullaInvioManuale() - tenantId={} documentId={}", tenantId, id);
+        try {
+            sdiManualeAnnulloService.annulla(tenantId, id, request != null ? request.getMotivo() : null);
+            return ResponseEntity.ok(fiscalDocumentService.findById(tenantId, id).orElseThrow());
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (AnnulloNonConsentitoException e) {
+            log.warn("DocumentController.annullaInvioManuale() - non consentito: {}", e.getBlocchi());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", "Annullo invio manuale non consentito",
+                            "message", e.getMessage(), "blocchi", e.getBlocchi()));
+        }
+    }
+
+    /**
+     * Controllo del cambio data (fattura PM / NDC in draft/ready, mai inviata): intervallo
+     * ammesso, blocchi, avvisi; con data anche la valutazione di quella data. Non scrive nulla.
+     */
+    @GetMapping("/{id}/cambio-data-controllo")
+    public ResponseEntity<?> cambioDataControllo(
+            @PathVariable Integer id,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate data) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.debug("DocumentController.cambioDataControllo() - tenantId={} documentId={} data={}", tenantId, id, data);
+        try {
+            return ResponseEntity.ok(documentDataModificaService.controllo(tenantId, id, data));
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
+    }
+
+    /**
+     * Cambio data: 200 con il dettaglio riletto, 400 data mancante/invariata o motivo non valido
+     * (GlobalExceptionHandler), 404 non trovato, 422 con i blocchi.
+     */
+    @PostMapping("/{id}/cambio-data")
+    public ResponseEntity<?> cambioData(@PathVariable Integer id,
+                                        @RequestBody(required = false) CambioDataRequestDTO request) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.cambioData() - tenantId={} documentId={} data={}", tenantId, id,
+                request != null ? request.getData() : null);
+        try {
+            documentDataModificaService.modifica(tenantId, id,
+                    request != null ? request.getData() : null, request != null ? request.getMotivo() : null);
+            return ResponseEntity.ok(fiscalDocumentService.findById(tenantId, id).orElseThrow());
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        } catch (CambioDataNonConsentitoException e) {
+            log.warn("DocumentController.cambioData() - non consentito: {}", e.getBlocchi());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", "Cambio data non consentito",
                             "message", e.getMessage(), "blocchi", e.getBlocchi()));
         }
     }

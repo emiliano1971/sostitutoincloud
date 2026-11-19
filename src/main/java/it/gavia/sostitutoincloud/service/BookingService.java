@@ -160,8 +160,10 @@ public class BookingService {
         int pageNum = Math.max(page, 0);
         LookupMaps maps = buildLookupMaps(tenantId);
 
+        // Documenti letti prima dei filtri: servono anche al filtro stati=da_fatturare
+        Map<Integer, List<FiscalDocument>> docsByBooking = documentiPerBooking(tenantId);
         Stream<Booking> stream = bookingDAO.findByTenantId(tenantId).stream();
-        stream = applyStatusFilter(stream, filter.getStatus(), maps);
+        stream = applyStatusFilter(stream, filter.getStatus(), maps, docsByBooking);
         stream = applyChannelFilter(stream, filter.getChannel(), maps);
         if (filter.getPropertyId() != null) {
             stream = stream.filter(b -> filter.getPropertyId().equals(b.getFkPropertyId()));
@@ -177,7 +179,6 @@ public class BookingService {
             stream = stream.filter(b -> b.getCheckinDate() != null && !b.getCheckinDate().isAfter(filter.getDataTo()));
         }
 
-        Map<Integer, List<FiscalDocument>> docsByBooking = documentiPerBooking(tenantId);
         // Ricerca sui campi mostrati in lista (nomi risolti): dopo il mapping in DTO
         List<BookingListDTO> tutti = stream
                 .map(b -> toListDTO(b, maps, docsByBooking))
@@ -1267,10 +1268,20 @@ public class BookingService {
     // ── filtri ──────────────────────────────────────────────────────────────
 
     /** status: uno o più codici separati da virgola; 'da_completare' vince sugli altri. */
-    private Stream<Booking> applyStatusFilter(Stream<Booking> stream, String status, LookupMaps maps) {
+    private Stream<Booking> applyStatusFilter(Stream<Booking> stream, String status, LookupMaps maps,
+                                              Map<Integer, List<FiscalDocument>> docsByBooking) {
         if (status == null || status.isBlank()) return stream;
         Set<String> stati = Arrays.stream(status.split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
+        if (stati.contains(RegolaDaFatturare.FILTRO)) {
+            // Stessa regola del conteggio "Prenotazioni da fatturare" della dashboard
+            LocalDate oggi = LocalDate.now();
+            return stream.filter(b -> RegolaDaFatturare.daFatturare(
+                    statoCodiceDa(b.getFkStatoPrenotazioneId(), maps.statiPrenotazioneById),
+                    b.getCheckoutDate(),
+                    documentoAttivo(docsByBooking.getOrDefault(b.getId(), List.of()), "fattura", maps).isPresent(),
+                    oggi));
+        }
         if (stati.contains("da_completare")) {
             LocalDate oggi = LocalDate.now();
             return stream.filter(b -> {
