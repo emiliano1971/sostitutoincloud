@@ -8,6 +8,8 @@ import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, C
 import { testoEmailInviata } from '@/lib/emailDocumenti';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import SdiDisabilitatoTooltip from '@/components/document/SdiDisabilitatoTooltip';
+import { useSdiAbilitato } from '@/hooks/useSdiAbilitato';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -127,6 +129,9 @@ const DocumentsList = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isProcessingSdi, setIsProcessingSdi] = useState(false);
+  // Trasmissione SDI del tenant: se false "Invia a SDI" e "Verifica risposte SDI" disabilitati
+  const sdiAbilitato = useSdiAbilitato();
+  const sdiDisabilitato = sdiAbilitato === false;
   const [sdiDettagli, setSdiDettagli] = useState<string[] | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   // Selezione multipla per le azioni massive (ZIP XML, invio SDI): solo pagina corrente
@@ -511,18 +516,20 @@ const DocumentsList = () => {
                 <SelectItem value="rejected">Rifiutato</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={handleElaboraRisposte}
-              disabled={isProcessingSdi}
-              title="Legge le ricevute SDI ricevute e aggiorna lo stato dei documenti"
-            >
-              {isProcessingSdi
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <RefreshCw className="h-4 w-4" />}
-              {isProcessingSdi ? 'Elaborazione…' : 'Verifica risposte SDI'}
-            </Button>
+            <SdiDisabilitatoTooltip disabilitato={sdiDisabilitato}>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={handleElaboraRisposte}
+                disabled={isProcessingSdi || sdiDisabilitato}
+                title={sdiDisabilitato ? undefined : 'Legge le ricevute SDI ricevute e aggiorna lo stato dei documenti'}
+              >
+                {isProcessingSdi
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <RefreshCw className="h-4 w-4" />}
+                {isProcessingSdi ? 'Elaborazione…' : 'Verifica risposte SDI'}
+              </Button>
+            </SdiDisabilitatoTooltip>
           </div>
 
           {/* Seconda riga: periodo (mese/anno) e intervallo di date di emissione.
@@ -666,9 +673,11 @@ const DocumentsList = () => {
           <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowZipDialog(true)}>
             <Download className="h-4 w-4" /> Scarica ZIP XML
           </Button>
-          <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowSdiDialog(true)}>
-            <Send className="h-4 w-4" /> Invia a SDI
-          </Button>
+          <SdiDisabilitatoTooltip disabilitato={sdiDisabilitato}>
+            <Button variant="outline" size="sm" className="gap-1" onClick={() => setShowSdiDialog(true)} disabled={sdiDisabilitato}>
+              <Send className="h-4 w-4" /> Invia a SDI
+            </Button>
+          </SdiDisabilitatoTooltip>
           <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
             Annulla selezione
           </Button>
@@ -727,8 +736,9 @@ const DocumentsList = () => {
           <DialogHeader>
             <DialogTitle>Invia a SDI</DialogTitle>
             <DialogDescription>
-              Verranno inviati al Sistema di Interscambio i {selectedIds.size} documenti selezionati idonei.
-              L'operazione è irreversibile. Documenti non idonei verranno scartati.
+              Ai documenti idonei tra i {selectedIds.size} selezionati verrà assegnato un progressivo SDI e il file XML
+              sarà copiato nella cartella di uscita, da cui lo prende il tunnel SDI. L'operazione non si può annullare:
+              per correggere un documento inviato servirà una nota di credito. I documenti non idonei verranno scartati.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

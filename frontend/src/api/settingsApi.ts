@@ -32,6 +32,8 @@ export interface TenantSettingsDTO {
   provinciaNascita?: string;
   // policy documentali
   sdiAutoSend: boolean;
+  /** false = trasmissione SDI disabilitata (sdiAutoSend ignorato). Default false. */
+  sdiAbilitato: boolean;
   derogaRicevutaEnabled: boolean;
   numerazioneAutomatica: boolean;
   // notifiche

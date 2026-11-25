@@ -46,6 +46,8 @@ public class TenantSettingsUpdateDTO {
 
     // Policy documentali
     private Boolean sdiAutoSend;
+    /** null = invariato. */
+    private Boolean sdiAbilitato;
     private Boolean derogaRicevutaEnabled;
     private Boolean numerazioneAutomatica;
 

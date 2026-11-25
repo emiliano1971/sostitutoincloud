@@ -172,13 +172,23 @@ public class DocumentController {
         }
     }
 
-    /** Invio massivo allo SDI (tunnel). 200 sempre con il riepilogo. */
+    /**
+     * Invio massivo allo SDI (tunnel). 200 con il riepilogo; 422 su tutto il lotto se l'invio
+     * SDI è disabilitato per il tenant (nessun documento elaborato).
+     */
     @PostMapping("/invia-sdi-batch")
-    public ResponseEntity<BatchRisultatoDTO> inviaSdiBatch(@RequestBody InviaSdiBatchDTO dto) {
+    public ResponseEntity<?> inviaSdiBatch(@RequestBody InviaSdiBatchDTO dto) {
         Integer tenantId = SecurityUtils.getCurrentTenantId();
         log.info("DocumentController.inviaSdiBatch() - tenantId={} documenti={}", tenantId,
                 dto.getDocumentIds() != null ? dto.getDocumentIds().size() : 0);
-        return ResponseEntity.ok(sdiXmlService.inviaBatch(tenantId, dto.getDocumentIds()));
+        try {
+            BatchRisultatoDTO risultato = sdiXmlService.inviaBatch(tenantId, dto.getDocumentIds());
+            return ResponseEntity.ok(risultato);
+        } catch (IllegalStateException e) {
+            log.warn("DocumentController.inviaSdiBatch() - lotto rifiutato: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("error", e.getMessage(), "message", e.getMessage()));
+        }
     }
 
     /**

@@ -257,9 +257,8 @@ public class NdcService {
             log.info("NdcService - NDC {} senza invio SDI: fattura {} non inviata",
                     documentNumber, fattura.getDocumentNumber());
         } else {
-            boolean autoSend = tenantSettingsDAO.findByTenantId(tenantId)
-                    .map(TenantSettings::getSdiAutoSend)
-                    .orElse(false);   // senza impostazioni: invio manuale, come il default del tenant
+            // sdi_abilitato e sdi_auto_send entrambi true; senza impostazioni: nessun auto-invio
+            boolean autoSend = sdiXmlService.isAutoInvioAttivo(tenantId);
             if (autoSend) {
                 try {
                     sdiXmlService.generaEInvia(tenantId, ndc.getId());

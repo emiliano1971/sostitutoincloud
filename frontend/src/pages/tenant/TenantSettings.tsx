@@ -21,6 +21,11 @@ const TenantSettings = () => {
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
   const [saving, setSaving] = useState(false);
+  // Interruttore controllato: da spento disabilita il selettore dell'invio automatico
+  const [sdiAbilitato, setSdiAbilitato] = useState(false);
+  useEffect(() => {
+    if (settings) setSdiAbilitato(settings.sdiAbilitato === true);
+  }, [settings]);
   const [companyForm, setCompanyForm] = useState({
     legalName: '', displayName: '', taxCode: '', vatNumber: '',
     administrativeEmail: '', pec: '', phone: '', legalAddress: '',
@@ -374,10 +379,24 @@ const TenantSettings = () => {
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between py-2">
                 <div>
-                  <Label>Invio Automatico SDI</Label>
-                  <p className="text-xs text-muted-foreground">Invia automaticamente i documenti al Sistema di Interscambio</p>
+                  <Label htmlFor="sdiAbilitato">Invio SDI abilitato</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Se spento l'applicazione non trasmette allo SDI (invio singolo, massivo, automatico e verifica risposte).
+                    Restano disponibili download XML/ZIP e "Inviata manualmente".
+                  </p>
                 </div>
-                <Switch id="sdiAutoSend" defaultChecked={settings.sdiAutoSend} />
+                <Switch id="sdiAbilitato" checked={sdiAbilitato} onCheckedChange={setSdiAbilitato} />
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <Label className={sdiAbilitato ? undefined : 'text-muted-foreground'}>Invio Automatico SDI</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {sdiAbilitato
+                      ? 'Invia automaticamente i documenti al Sistema di Interscambio'
+                      : "L'invio allo SDI è disabilitato: l'invio automatico viene ignorato"}
+                  </p>
+                </div>
+                <Switch id="sdiAutoSend" defaultChecked={settings.sdiAutoSend} disabled={!sdiAbilitato} />
               </div>
               <div className="flex items-center justify-between py-2">
                 <div>
@@ -396,6 +415,7 @@ const TenantSettings = () => {
               <div className="flex justify-end">
                 <Button disabled={saving} onClick={() => {
                   handleSave({
+                    sdiAbilitato,
                     sdiAutoSend: (document.getElementById('sdiAutoSend') as HTMLButtonElement).getAttribute('data-state') === 'checked',
                     derogaRicevutaEnabled: (document.getElementById('derogaRicevutaEnabled') as HTMLButtonElement).getAttribute('data-state') === 'checked',
                     numerazioneAutomatica: (document.getElementById('numerazioneAutomatica') as HTMLButtonElement).getAttribute('data-state') === 'checked',

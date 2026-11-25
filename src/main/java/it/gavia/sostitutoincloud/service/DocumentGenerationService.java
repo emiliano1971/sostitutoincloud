@@ -639,12 +639,12 @@ public class DocumentGenerationService {
                 .avviso(TIPO_RICEVUTA_OWNER.equals(tipo) ? avvisoF24Pagato(tenantId, dataEmissione) : null)
                 .build();
 
-        // 8. Auto-invio SDI se configurato (tenant_settings.sdi_auto_send).
+        // 8. Auto-invio SDI se configurato: tenant_settings.sdi_abilitato e sdi_auto_send
+        // entrambi true (regola unica in SdiXmlService.isAutoInvioAttivo). Con SDI disabilitato
+        // non parte: il documento resta 'ready' e nessun esito SDI viene segnalato all'utente.
         // Solo per la fattura PM: la ricevuta owner è un documento interno e
         // SdiXmlService.generaEInvia() la rifiuta.
-        // sdi_auto_send arriva dagli stessi settings già usati per bollo e ritenute:
-        // per un tenant senza riga in tenant_settings valgono i default, dove è true.
-        if (TIPO_FATTURA_PM.equals(tipo) && Boolean.TRUE.equals(settings.getSdiAutoSend())) {
+        if (TIPO_FATTURA_PM.equals(tipo) && sdiXmlService.isAutoInvioAttivo(tenantId)) {
             // Dati obbligatori ospite. Il CF è già garantito dal controllo in testa al metodo
             // (fattura PM senza CF non arriva qui): in pratica solo il nome può mancare.
             boolean datiCompleti = booking.getGuestTaxCode() != null

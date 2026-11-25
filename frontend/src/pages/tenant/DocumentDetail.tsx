@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,8 @@ import NdcDialog from '@/components/booking/NdcDialog';
 import EliminaDocumento from '@/components/document/EliminaDocumento';
 import AnnullaInvioManuale from '@/components/document/AnnullaInvioManuale';
 import CambiaDataDocumento from '@/components/document/CambiaDataDocumento';
+import SdiDisabilitatoTooltip from '@/components/document/SdiDisabilitatoTooltip';
+import { useSdiAbilitato } from '@/hooks/useSdiAbilitato';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/hooks/use-toast';
 import { labelTipoDocumento } from '@/lib/statiLabels';
@@ -93,6 +95,16 @@ const DocumentDetail = () => {
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSendingSdi, setIsSendingSdi] = useState(false);
+  // Blocca un secondo POST partito prima che il pulsante risulti disabilitato a schermo
+  const invioSdiInCorso = useRef(false);
+  // Dialog di conferma dell'invio SDI: aperto da "Invia SDI" o da "Riprova"
+  const [confermaSdi, setConfermaSdi] = useState<null | 'invia' | 'riprova'>(null);
+  // Trasmissione SDI del tenant: se false "Invia SDI" e "Riprova" restano disabilitati con il
+  // tooltip; finché il flag non è noto (null) sono disabilitati senza tooltip. Se la lettura
+  // fallisce il hook restituisce true e decide il backend.
+  const sdiAbilitato = useSdiAbilitato();
+  const sdiDisabilitato = sdiAbilitato === false;
+  const sdiNonPronto = sdiAbilitato !== true;
   const [isScaricandoXml, setIsScaricandoXml] = useState(false);
   // Conferma "Inviata manualmente" (documento marcato come inviato fuori dall'applicazione)
   const [confermaManuale, setConfermaManuale] = useState(false);
@@ -208,15 +220,21 @@ const DocumentDetail = () => {
 
   const chiudiNdc = () => { setNdcBooking(null); setNdcFattura(null); };
 
-  // Invio SDI: solo fatture PM. Il backend rifiuta con 422 se già inviata.
+  // "Invia SDI" / "Riprova": apre solo la conferma, l'invio parte da "Invia" nel dialog
+  const apriConfermaSdi = (modo: 'invia' | 'riprova') => {
+    if (sdiNonPronto || isSendingSdi) return;
+    setConfermaSdi(modo);
+  };
+
+  // Invio SDI (fattura PM / NDC): assegna un nuovo progressivo e copia l'XML in outgoing/.
+  // Il backend rifiuta con 422 (già inviata, SDI disabilitato, dati mancanti).
   const handleInviaSdi = async () => {
-    if (!doc) return;
+    if (!doc || invioSdiInCorso.current) return;
+    invioSdiInCorso.current = true;
     setIsSendingSdi(true);
     try {
       const res = await inviaSdi(doc.id);
       toast({ title: 'File SDI generato con progressivo:', description: res.progressivo });
-      const aggiornato = await getDocumentById(doc.id);
-      setDoc(aggiornato);
     } catch (err) {
       toast({
         title: 'Errore invio SDI',
@@ -224,7 +242,16 @@ const DocumentDetail = () => {
         variant: 'destructive',
       });
     } finally {
+      // Ricarica sempre, anche dopo un errore (422 o di rete): il backend può aver portato il
+      // documento in 'error' o averlo inviato prima che la risposta andasse persa
+      try {
+        setDoc(await getDocumentById(doc.id));
+      } catch {
+        // dettaglio non ricaricabile: resta quello mostrato
+      }
+      invioSdiInCorso.current = false;
       setIsSendingSdi(false);
+      setConfermaSdi(null);
     }
   };
 
@@ -796,10 +823,12 @@ const DocumentDetail = () => {
                 </div>
 
                 {puoRiprovareSdi && (
-                  <Button variant="outline" size="sm" className="gap-2" onClick={handleInviaSdi} disabled={isSendingSdi}>
-                    {isSendingSdi ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                    Riprova
-                  </Button>
+                  <SdiDisabilitatoTooltip disabilitato={sdiDisabilitato}>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={() => apriConfermaSdi('riprova')} disabled={isSendingSdi || sdiNonPronto}>
+                      {isSendingSdi ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                      Riprova
+                    </Button>
+                  </SdiDisabilitatoTooltip>
                 )}
               </>
             ) : (
@@ -922,13 +951,51 @@ const DocumentDetail = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        <AlertDialog open={confermaSdi !== null} onOpenChange={open => { if (!open && !isSendingSdi) setConfermaSdi(null); }}>
+          <AlertDialogContent className="max-w-lg">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Invia allo SDI</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <p>
+                    <span className="font-mono font-medium text-foreground">{doc.documentNumber}</span>
+                    {' — '}{isNotaCredito ? 'Nota di credito' : 'Fattura'}
+                  </p>
+                  <p>
+                    Verrà assegnato un progressivo SDI e il file XML sarà copiato nella cartella di uscita,
+                    da cui lo prende il tunnel SDI.
+                  </p>
+                  <p>
+                    L'operazione non si può annullare. Per correggere un documento inviato servirà una nota di credito.
+                  </p>
+                  {confermaSdi === 'riprova' && (sdiRifiutato || sdiErrore) && (
+                    <p className="text-warning">
+                      Il documento era in stato {sdiRifiutato ? 'rifiutato' : 'errore'}: verrà assegnato un nuovo progressivo.
+                    </p>
+                  )}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isSendingSdi}>Annulla</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={e => { e.preventDefault(); void handleInviaSdi(); }}
+                disabled={isSendingSdi}
+              >
+                {isSendingSdi ? 'Invio…' : 'Invia'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {puoInviareSdi && (
-          <Button variant="outline" className="gap-2" onClick={handleInviaSdi} disabled={isSendingSdi}>
-            {isSendingSdi
-              ? <Loader2 className="h-4 w-4 animate-spin" />
-              : <Send className="h-4 w-4" />}
-            {isSendingSdi ? 'Invio…' : 'Invia SDI'}
-          </Button>
+          <SdiDisabilitatoTooltip disabilitato={sdiDisabilitato}>
+            <Button variant="outline" className="gap-2" onClick={() => apriConfermaSdi('invia')} disabled={isSendingSdi || sdiNonPronto}>
+              {isSendingSdi
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Send className="h-4 w-4" />}
+              {isSendingSdi ? 'Invio…' : 'Invia SDI'}
+            </Button>
+          </SdiDisabilitatoTooltip>
         )}
       </div>
     </div>

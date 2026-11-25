@@ -264,6 +264,8 @@ public class TenantService {
                 .naturaIvaEsente("N2.1")
                 // Default invio SDI manuale: l'auto-invio si attiva dalle impostazioni del tenant
                 .sdiAutoSend(false)
+                // Trasmissione SDI disabilitata finché il tenant non la abilita (migration 039)
+                .sdiAbilitato(false)
                 .derogaRicevutaEnabled(false)
                 .numerazioneAutomatica(true)
                 .alertScadenzeDocumenti(true)

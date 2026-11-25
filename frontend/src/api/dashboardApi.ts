@@ -16,6 +16,8 @@ export interface DashboardDTO {
   prenotazioniDaFatturare: number;
   /** Fatture PM e NDC pronte per la trasmissione SDI. */
   fattureDaInviareSDI: number;
+  /** false = invio SDI disabilitato: fattureDaInviareSDI vale 0. */
+  sdiAbilitato?: boolean;
   f24DaGenerare: number;
   liquidazioniPending: number;
   ricaviMeseCorrente: number;

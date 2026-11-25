@@ -28,6 +28,7 @@ public class TenantSettingsRowMapper implements RowMapper<TenantSettings> {
                 .comuneNascita(rs.getString("comune_nascita"))
                 .provinciaNascita(rs.getString("provincia_nascita"))
                 .sdiAutoSend(rs.getBoolean("sdi_auto_send"))
+                .sdiAbilitato(rs.getBoolean("sdi_abilitato"))
                 .derogaRicevutaEnabled(rs.getBoolean("deroga_ricevuta_enabled"))
                 .numerazioneAutomatica(rs.getBoolean("numerazione_automatica"))
                 .alertScadenzeDocumenti(rs.getBoolean("alert_scadenze_documenti"))

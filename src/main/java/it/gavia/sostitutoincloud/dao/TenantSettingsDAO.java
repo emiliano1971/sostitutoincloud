@@ -19,7 +19,7 @@ public class TenantSettingsDAO {
             "bollo_importo, bollo_soglia, bollo_addebitato_cliente, " +
             "regime_fiscale_pm, natura_iva_esente, " +
             "data_nascita, sesso, comune_nascita, provincia_nascita, " +
-            "sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
+            "sdi_auto_send, sdi_abilitato, deroga_ricevuta_enabled, numerazione_automatica, " +
             "alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
             "fk_canale_ota_default_id, codice_tributo_credito, page_size, email_testo_predefinito, email_oggetto_predefinito, " +
             "created_at, updated_at FROM tenant_settings";
@@ -50,10 +50,10 @@ public class TenantSettingsDAO {
             "  bollo_importo, bollo_soglia, bollo_addebitato_cliente, " +
             "  regime_fiscale_pm, natura_iva_esente, " +
             "  data_nascita, sesso, comune_nascita, provincia_nascita, " +
-            "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
+            "  sdi_auto_send, sdi_abilitato, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
             "  fk_canale_ota_default_id, codice_tributo_credito, page_size, email_testo_predefinito, email_oggetto_predefinito" +
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" +
             " ON CONFLICT (fk_tenant_id) DO UPDATE SET" +
             "  withholding_rate_primary    = EXCLUDED.withholding_rate_primary," +
             "  withholding_rate_secondary  = EXCLUDED.withholding_rate_secondary," +
@@ -70,6 +70,7 @@ public class TenantSettingsDAO {
             "  comune_nascita              = EXCLUDED.comune_nascita," +
             "  provincia_nascita           = EXCLUDED.provincia_nascita," +
             "  sdi_auto_send               = EXCLUDED.sdi_auto_send," +
+            "  sdi_abilitato               = EXCLUDED.sdi_abilitato," +
             "  deroga_ricevuta_enabled     = EXCLUDED.deroga_ricevuta_enabled," +
             "  numerazione_automatica      = EXCLUDED.numerazione_automatica," +
             "  alert_scadenze_documenti    = EXCLUDED.alert_scadenze_documenti," +
@@ -87,7 +88,7 @@ public class TenantSettingsDAO {
             "  bollo_importo, bollo_soglia, bollo_addebitato_cliente, " +
             "  regime_fiscale_pm, natura_iva_esente, " +
             "  data_nascita, sesso, comune_nascita, provincia_nascita, " +
-            "  sdi_auto_send, deroga_ricevuta_enabled, numerazione_automatica, " +
+            "  sdi_auto_send, sdi_abilitato, deroga_ricevuta_enabled, numerazione_automatica, " +
             "  alert_scadenze_documenti, alert_scadenze_f24, notifiche_email, " +
             "  fk_canale_ota_default_id, codice_tributo_credito, page_size, email_testo_predefinito, email_oggetto_predefinito, " +
             "  created_at, updated_at";
@@ -101,6 +102,8 @@ public class TenantSettingsDAO {
                 s.getRegimeFiscalePm(), s.getNaturaIvaEsente(),
                 s.getDataNascita(), s.getSesso(), s.getComuneNascita(), s.getProvinciaNascita(),
                 s.getSdiAutoSend(),
+                // NOT NULL con default a DB: un null esplicito non attiverebbe il DEFAULT (false)
+                Boolean.TRUE.equals(s.getSdiAbilitato()),
                 s.getDerogaRicevutaEnabled(), s.getNumerazioneAutomatica(),
                 s.getAlertScadenzeDocumenti(), s.getAlertScadenzeF24(),
                 s.getNotificheEmail(),

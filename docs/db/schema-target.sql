@@ -1270,7 +1270,8 @@ CREATE TABLE tenant_settings (
     natura_iva_esente           VARCHAR(10)     NOT NULL DEFAULT 'N2.1',   -- natura IVA per operazioni esenti/fuori campo
     -- Policy documentali
     sdi_auto_send               BOOLEAN         NOT NULL DEFAULT FALSE,  -- migration 033: invio SDI manuale di default
-    deroga_ricevuta_enabled     BOOLEAN         NOT NULL DEFAULT FALSE,
+    sdi_abilitato               BOOLEAN         NOT NULL DEFAULT FALSE,  -- migration 039: false = trasmissione SDI disabilitata
+    deroga_ricevuta_enabled    BOOLEAN         NOT NULL DEFAULT FALSE,
     numerazione_automatica      BOOLEAN         NOT NULL DEFAULT TRUE,
     -- Notifiche
     alert_scadenze_documenti    BOOLEAN         NOT NULL DEFAULT TRUE,
@@ -1305,6 +1306,9 @@ COMMENT ON COLUMN tenant_settings.email_oggetto_predefinito IS
     'Oggetto predefinito per l invio email dei documenti fiscali. '
     'Se NULL o vuoto il frontend usa "Documenti fiscali soggiorno". '
     'Editabile prima di ogni invio.';
+COMMENT ON COLUMN tenant_settings.sdi_abilitato IS
+    'Se false la trasmissione allo SDI dall applicazione e disabilitata '
+    '(invio singolo, riprova, massivo, auto-invio, elabora risposte); sdi_auto_send viene ignorato.';
 
 CREATE TRIGGER trg_tenant_settings_updated_at
     BEFORE UPDATE ON tenant_settings

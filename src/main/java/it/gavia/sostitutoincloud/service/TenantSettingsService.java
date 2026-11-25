@@ -1,6 +1,7 @@
 package it.gavia.sostitutoincloud.service;
 
 import it.gavia.sostitutoincloud.util.CodiceFiscalePivaValidator;
+import it.gavia.sostitutoincloud.util.SecurityUtils;
 import it.gavia.sostitutoincloud.dao.TenantDAO;
 import it.gavia.sostitutoincloud.dao.TenantSettingsDAO;
 import it.gavia.sostitutoincloud.dto.settings.TenantSettingsDTO;
@@ -24,10 +25,13 @@ public class TenantSettingsService {
 
     private final TenantSettingsDAO tenantSettingsDAO;
     private final TenantDAO tenantDAO;
+    private final AuditService auditService;
 
-    public TenantSettingsService(TenantSettingsDAO tenantSettingsDAO, TenantDAO tenantDAO) {
+    public TenantSettingsService(TenantSettingsDAO tenantSettingsDAO, TenantDAO tenantDAO,
+                                 AuditService auditService) {
         this.tenantSettingsDAO = tenantSettingsDAO;
         this.tenantDAO = tenantDAO;
+        this.auditService = auditService;
     }
 
     public TenantSettingsDTO getSettings(Integer tenantId) {
@@ -151,6 +155,10 @@ public class TenantSettingsService {
                         dto.getSdiAutoSend() != null
                                 ? dto.getSdiAutoSend()
                                 : existing.getSdiAutoSend())
+                .sdiAbilitato(
+                        dto.getSdiAbilitato() != null
+                                ? dto.getSdiAbilitato()
+                                : existing.getSdiAbilitato())
                 .derogaRicevutaEnabled(
                         dto.getDerogaRicevutaEnabled() != null
                                 ? dto.getDerogaRicevutaEnabled()
@@ -190,7 +198,35 @@ public class TenantSettingsService {
                 .build();
 
         TenantSettings saved = tenantSettingsDAO.save(updated);
+        registraCambioSdiAbilitato(tenantId, saved, existing.getSdiAbilitato());
         return toDTO(tenant, saved);
+    }
+
+    /**
+     * Audit del cambio di sdi_abilitato, solo se il valore cambia davvero. Dopo il salvataggio e
+     * protetto: un errore dell'audit non deve far fallire il salvataggio delle impostazioni.
+     */
+    private void registraCambioSdiAbilitato(Integer tenantId, TenantSettings saved, Boolean prima) {
+        boolean precedente = Boolean.TRUE.equals(prima);
+        boolean attuale = Boolean.TRUE.equals(saved.getSdiAbilitato());
+        if (precedente == attuale) {
+            return;
+        }
+        try {
+            Integer utenteId = null;
+            try {
+                utenteId = SecurityUtils.getCurrentUtenteId();
+            } catch (RuntimeException e) {
+                // contesto di sicurezza assente: audit senza utente
+            }
+            auditService.log("settings.sdi_abilitato", "TenantSettings", saved.getId(),
+                    attuale ? "Invio SDI abilitato (prima: disabilitato)"
+                            : "Invio SDI disabilitato (prima: abilitato)",
+                    tenantId, utenteId, null);
+        } catch (RuntimeException e) {
+            log.warn("TenantSettingsService - audit sdi_abilitato non registrato per tenantId={}: {}",
+                    tenantId, e.getMessage());
+        }
     }
 
     /** Canale OTA di default per l'import massivo proprietari; null se non configurato. */
@@ -229,6 +265,8 @@ public class TenantSettingsService {
                 .naturaIvaEsente("N2.1")
                 // Default invio SDI manuale: l'auto-invio si attiva dalle impostazioni del tenant
                 .sdiAutoSend(false)
+                // Trasmissione SDI disabilitata finché il tenant non la abilita (migration 039)
+                .sdiAbilitato(false)
                 .derogaRicevutaEnabled(false)
                 .numerazioneAutomatica(true)
                 .alertScadenzeDocumenti(true)
@@ -267,6 +305,7 @@ public class TenantSettingsService {
                 .comuneNascita(s.getComuneNascita())
                 .provinciaNascita(s.getProvinciaNascita())
                 .sdiAutoSend(s.getSdiAutoSend())
+                .sdiAbilitato(s.getSdiAbilitato())
                 .derogaRicevutaEnabled(s.getDerogaRicevutaEnabled())
                 .numerazioneAutomatica(s.getNumerazioneAutomatica())
                 .alertScadenzeDocumenti(s.getAlertScadenzeDocumenti())

@@ -42,6 +42,7 @@ public class DashboardService {
     private final StatoDocumentoDAO statoDocumentoDAO;
     private final BookingSplitEconomicoDAO splitEconomicoDAO;
     private final TipoDocumentoDAO tipoDocumentoDAO;
+    private final SdiXmlService sdiXmlService;
 
     public DashboardService(BookingDAO bookingDAO,
                             FiscalDocumentDAO fiscalDocumentDAO,
@@ -50,8 +51,10 @@ public class DashboardService {
                             StatoPrenotazioneDAO statoPrenotazioneDAO,
                             StatoDocumentoDAO statoDocumentoDAO,
                             BookingSplitEconomicoDAO splitEconomicoDAO,
-                            TipoDocumentoDAO tipoDocumentoDAO) {
+                            TipoDocumentoDAO tipoDocumentoDAO,
+                            SdiXmlService sdiXmlService) {
         this.tipoDocumentoDAO = tipoDocumentoDAO;
+        this.sdiXmlService = sdiXmlService;
         this.splitEconomicoDAO = splitEconomicoDAO;
         this.bookingDAO = bookingDAO;
         this.fiscalDocumentDAO = fiscalDocumentDAO;
@@ -131,7 +134,9 @@ public class DashboardService {
                         && statiInviatiIds.contains(d.getFkStatoDocumentoId()))
                 .map(FiscalDocument::getId)
                 .collect(Collectors.toSet());
-        int fattureDaInviareSDI = (int) allDocs.stream()
+        // Con invio SDI disabilitato per il tenant la card mostra 0 e "SDI disabilitato"
+        boolean sdiAbilitato = sdiXmlService.isSdiAbilitato(tenantId);
+        int fattureDaInviareSDI = !sdiAbilitato ? 0 : (int) allDocs.stream()
                 .filter(d -> Objects.equals(tipoFatturaId, d.getFkTipoDocumentoId())
                         || Objects.equals(tipoNdcId, d.getFkTipoDocumentoId()))
                 .filter(d -> statiDocPendingIds.contains(d.getFkStatoDocumentoId()))
@@ -217,6 +222,7 @@ public class DashboardService {
                 .bookingsInPenale(inPenale)
                 .prenotazioniDaFatturare(prenotazioniDaFatturare)
                 .fattureDaInviareSDI(fattureDaInviareSDI)
+                .sdiAbilitato(sdiAbilitato)
                 .f24DaGenerare(f24DaGenerare)
                 .liquidazioniPending(liquidazioniPending)
                 .ricaviMeseCorrente(ricaviMeseCorrente)

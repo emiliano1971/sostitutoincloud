@@ -29,9 +29,13 @@ const TenantDashboard = () => {
     { label: 'Ricavi Mese Corrente', value: fmt(dashboard.ricaviMeseCorrente), icon: TrendingUp, color: 'text-success' },
     { label: 'Prenotazioni da fatturare', value: dashboard.prenotazioniDaFatturare, icon: FileText, color: 'text-warning',
       hint: 'Check-out passato, senza fattura PM (anche con ricevuta già emessa)', href: '/bookings?stati=da_fatturare' },
-    { label: 'Fatture da inviare SDI', value: dashboard.fattureDaInviareSDI, icon: Send, color: 'text-amber-500',
-      valueColor: 'text-amber-600', hint: 'Fatture PM e NDC pronte per la trasmissione',
-      href: '/documents?stato=ready&tipo=fattura' },
+    // SDI disabilitato per il tenant: card a 0, senza link, con il motivo al posto del suggerimento
+    dashboard.sdiAbilitato === false
+      ? { label: 'Fatture da inviare SDI', value: 0, icon: Send, color: 'text-muted-foreground',
+          valueColor: 'text-muted-foreground', hint: 'SDI disabilitato' }
+      : { label: 'Fatture da inviare SDI', value: dashboard.fattureDaInviareSDI, icon: Send, color: 'text-amber-500',
+          valueColor: 'text-amber-600', hint: 'Fatture PM e NDC pronte per la trasmissione',
+          href: '/documents?stato=ready&tipo=fattura' },
     { label: 'F24 da Generare', value: dashboard.f24DaGenerare, icon: CreditCard, color: 'text-destructive', href: '/f24' },
   ] : [];
 

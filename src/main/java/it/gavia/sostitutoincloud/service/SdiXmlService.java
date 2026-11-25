@@ -70,6 +70,8 @@ public class SdiXmlService {
 
     /** ProgressivoInvio / nome file dell'XML scaricato prima di qualsiasi invio. */
     private static final String PROGRESSIVO_ANTEPRIMA = "ANTEPRIMA";
+    /** Messaggio del 422 con tenant_settings.sdi_abilitato = false (migration 039). */
+    public static final String MSG_SDI_DISABILITATO = "Invio SDI disabilitato per questo tenant";
 
     private static final String VERSIONE = "FPR12";
     private static final String NAMESPACE = "http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2";
@@ -146,6 +148,8 @@ public class SdiXmlService {
      * @return percorso assoluto del file XML generato
      */
     public String generaEInvia(Integer tenantId, Integer fiscalDocumentId) {
+        // 0. Trasmissione abilitata per il tenant (invio singolo, riprova, massivo, auto-invio)
+        verificaSdiAbilitato(tenantId);
         // 1. Documento + verifica tenant, tipo e stato
         FiscalDocument doc = caricaTrasmissibile(tenantId, fiscalDocumentId);
         // TD04: la fattura stornata va citata in DatiFattureCollegate (null per la fattura)
@@ -245,6 +249,41 @@ public class SdiXmlService {
                 .map(TipoDocumento::getCodice)
                 .orElseThrow(() -> new IllegalStateException(
                         "Tipo documento non risolvibile per il documento id=" + doc.getId()));
+    }
+
+    // ──────────────────────── abilitazione SDI del tenant ────────────────────────
+
+    /**
+     * true se il tenant ha la trasmissione SDI abilitata (tenant_settings.sdi_abilitato).
+     * Senza riga di impostazioni vale il default della colonna: disabilitata.
+     */
+    public boolean isSdiAbilitato(Integer tenantId) {
+        return tenantSettingsDAO.findByTenantId(tenantId)
+                .map(TenantSettings::getSdiAbilitato)
+                .map(Boolean.TRUE::equals)
+                .orElse(false);
+    }
+
+    /**
+     * Unico punto della regola per le trasmissioni avviate dall'utente: con sdi_abilitato = false
+     * lancia IllegalStateException (422 nei controller). Non sta in verificaInviabile perché
+     * quella vale anche per "Inviata manualmente", che resta disponibile.
+     */
+    public void verificaSdiAbilitato(Integer tenantId) {
+        if (!isSdiAbilitato(tenantId)) {
+            log.info("SdiXmlService - trasmissione rifiutata: SDI disabilitato per tenantId={}", tenantId);
+            throw new IllegalStateException(MSG_SDI_DISABILITATO);
+        }
+    }
+
+    /**
+     * Auto-invio dopo l'emissione (fattura PM e NDC): sdi_abilitato e sdi_auto_send entrambi
+     * true. Se false l'auto-invio semplicemente non parte, senza errori per l'utente.
+     */
+    public boolean isAutoInvioAttivo(Integer tenantId) {
+        return tenantSettingsDAO.findByTenantId(tenantId)
+                .map(s -> Boolean.TRUE.equals(s.getSdiAbilitato()) && Boolean.TRUE.equals(s.getSdiAutoSend()))
+                .orElse(false);
     }
 
     /**
@@ -454,6 +493,8 @@ public class SdiXmlService {
         if (documentIds == null || documentIds.isEmpty()) {
             throw new IllegalArgumentException("Nessun documento selezionato");
         }
+        // Tutto il lotto rifiutato prima del ciclo: nessun documento elaborato
+        verificaSdiAbilitato(tenantId);
         BatchRisultatoDTO risultato = new BatchRisultatoDTO();
         for (Integer docId : documentIds) {
             String numero = fiscalDocumentDAO.findById(docId)

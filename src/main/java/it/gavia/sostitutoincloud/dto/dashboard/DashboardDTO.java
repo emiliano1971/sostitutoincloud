@@ -20,6 +20,8 @@ public class DashboardDTO {
     private Integer prenotazioniDaFatturare;
     /** Fatture PM e NDC in draft/ready trasmissibili allo SDI (escluse stornate e NDC su fatture non inviate). */
     private Integer fattureDaInviareSDI;
+    /** tenant_settings.sdi_abilitato: false = fattureDaInviareSDI a 0 e card "SDI disabilitato". */
+    private Boolean sdiAbilitato;
     private Integer f24DaGenerare;
     private Integer liquidazioniPending;
     private BigDecimal ricaviMeseCorrente;

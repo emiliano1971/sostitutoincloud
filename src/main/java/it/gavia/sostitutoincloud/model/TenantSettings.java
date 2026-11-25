@@ -42,6 +42,8 @@ public class TenantSettings {
 
     // Policy documentali
     private Boolean sdiAutoSend;
+    // false = trasmissione SDI disabilitata, sdiAutoSend ignorato (migration 039, default false)
+    private Boolean sdiAbilitato;
     private Boolean derogaRicevutaEnabled;
     private Boolean numerazioneAutomatica;
 

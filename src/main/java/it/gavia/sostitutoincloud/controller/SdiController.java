@@ -85,6 +85,14 @@ public class SdiController {
         String tenantPiva = null;
         if (!superAdmin) {
             Integer tenantId = SecurityUtils.getCurrentTenantId();
+            // Invio SDI disabilitato per il tenant: niente elaborazione delle risposte.
+            // Il super_admin, senza tenant, elabora quelle di tutti e non è vincolato.
+            if (!sdiXmlService.isSdiAbilitato(tenantId)) {
+                log.info("SdiController.elaboraRisposte() - SDI disabilitato per tenantId={}", tenantId);
+                return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(java.util.Map.of(
+                        "error", SdiXmlService.MSG_SDI_DISABILITATO,
+                        "message", SdiXmlService.MSG_SDI_DISABILITATO));
+            }
             tenantPiva = tenantService.findById(tenantId)
                     .map(this::identificativoFiscale)
                     .orElse(null);
