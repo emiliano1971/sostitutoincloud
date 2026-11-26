@@ -298,7 +298,7 @@ interface RigaSplitView {
    * della riga, non dal flag attuale del canale) e % sul lordo ospite. 'non_registrato' se il
    * valore grezzo non è stato salvato (import precedenti alla migration 021).
    */
-  valoreFile?: { valore: number; natura?: string; pctLordo: string } | 'non_registrato';
+  valoreFile?: { valore: number; natura?: string; pctLordo: string; pctImponibile: string } | 'non_registrato';
   /** Riepilogo "Totale servizi PM" (imponibile / IVA / totale) al posto dell'importo. */
   riepilogoIva?: { imponibile: number; iva: number; lordo: number };
   /** Ultima voce di costo: dopo di lei si mostrano "Aggiungi voce" e il form. */
@@ -711,8 +711,14 @@ const BookingDetail = () => {
     const natura = comeNetto && !comeLordo ? `netto (+IVA ${r.aliquotaIva}%)`
       : comeLordo && !comeNetto ? 'lordo (IVA inclusa)'
       : undefined;
-    return { valore, natura, pctLordo: pctLordoOspite(valore) };
+    // pctImponibile = la "(xx%)" delle altre righe: imponibile sulla base di calcolo
+    return { valore, natura, pctLordo: pctLordoOspite(valore), pctImponibile: pctOf(nettoRiga(r)) };
   };
+  // Senza regola OTA il backend scrive "Commissione OTA (importo impostato)": a video non si
+  // mostra (la riga "Dal file" o "importo modificato" dicono già da dove viene l'importo).
+  // "importo forzato" (regola presente, valore divergente) e la regola applicata restano.
+  // haOverride.ota continua a leggere split.otaDescrizione: il ripristino non cambia.
+  const descrizioneOta = /importo impostato/.test(split.otaDescrizione ?? '') ? undefined : split.otaDescrizione;
 
   const vistaCalcolata = (r: BookingSplitRiga): RigaSplitView => ({
     key: r.id,
@@ -726,7 +732,7 @@ const BookingDetail = () => {
     // Riga da file: sempre il valore letto, con natura e % sul lordo ospite
     ...(r.source === 'import' ? { valoreFile: infoFile(r) } : {}),
     ...(r.tipoVoce === 'commissione_ota'
-      ? { editable: 'ota' as const, descrizione: split.otaDescrizione }
+      ? { editable: 'ota' as const, descrizione: descrizioneOta }
       : r.tipoVoce === 'pulizie'
         ? { editable: 'pulizie' as const }
         : r.tipoVoce === 'cambio_biancheria'
@@ -839,29 +845,52 @@ const BookingDetail = () => {
    * Colonna 1 di una riga: etichetta, regola applicata, % sulla base di calcolo (sotto la
    * label, così non occupa le colonne degli importi) e origine dell'importo.
    */
-  const etichettaVoce = (row: RigaSplitView) => (
+  const etichettaVoce = (row: RigaSplitView) => {
+    const fileInfo = row.valoreFile != null && row.valoreFile !== 'non_registrato' ? row.valoreFile : null;
+    return (
     // ETICHETTA_IVA conta solo nelle righe a griglia; nelle righe flex col-span non ha effetto
     <div className={`flex flex-col min-w-0 ${ETICHETTA_IVA}`}>
       <span className={`text-sm ${row.bold ? '' : 'text-muted-foreground'} ${'note' in row && row.note ? 'italic pl-3' : ''}`}>{row.label}</span>
       {row.descrizione && (
         <span className="text-xs text-muted-foreground/70">{row.descrizione}</span>
       )}
-      {row.valoreFile != null && row.valoreFile !== 'non_registrato' && (
+      {fileInfo ? (
+        // Riga da file: una sola riga di origine. La % dell'imponibile (quella della regola)
+        // si aggiunge solo se diversa da quella del file sul lordo ospite.
         <span className="text-xs text-muted-foreground/60">
-          file: {fmt(row.valoreFile.valore)}
-          {row.valoreFile.natura && <> · {row.valoreFile.natura}</>}
-          {' · '}{row.valoreFile.pctLordo.replace('.', ',')}% del lordo ospite
+          Dal file: {fmt(fileInfo.valore)}
+          {fileInfo.natura && <> {fileInfo.natura}</>}
+          {' · '}{fileInfo.pctLordo.replace('.', ',')}% del lordo ospite
+          {fileInfo.pctImponibile !== fileInfo.pctLordo && (
+            <>
+              {' · '}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="underline decoration-dotted cursor-help">
+                    imponibile {fileInfo.pctImponibile.replace('.', ',')}%
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  Imponibile della voce (senza IVA) in percentuale della base di calcolo: il lordo
+                  ospite, meno la tassa di soggiorno se inclusa. È la percentuale confrontabile con
+                  la regola di contratto.
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </span>
-      )}
-      {/* % solo per le voci di costo e la tassa (row.pct), o per le voci modificabili */}
-      {(row.pct || row.editable) && (
-        <span className="text-xs text-muted-foreground/60">({row.pct ?? pctOf(Math.abs(row.value))}%)</span>
+      ) : (
+        /* % solo per le voci di costo e la tassa (row.pct), o per le voci modificabili */
+        (row.pct || row.editable) && (
+          <span className="text-xs text-muted-foreground/60">({row.pct ?? pctOf(Math.abs(row.value))}%)</span>
+        )
       )}
       {/* Origine dell'importo (source della riga split); 'calcolato' = nessuna indicazione */}
       {row.source === 'manuale' && (
         <span className="text-xs text-amber-600">importo modificato</span>
       )}
-      {row.source === 'import' && (row.valoreFile === 'non_registrato' ? (
+      {/* "da file" solo dove manca la riga "Dal file" (valore originale non registrato) */}
+      {row.source === 'import' && row.valoreFile === 'non_registrato' && (
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={0} className="text-xs text-muted-foreground w-fit underline decoration-dotted cursor-help">
@@ -870,11 +899,10 @@ const BookingDetail = () => {
           </TooltipTrigger>
           <TooltipContent>valore originale non registrato</TooltipContent>
         </Tooltip>
-      ) : (
-        <span className="text-xs text-muted-foreground">da file</span>
-      ))}
+      )}
     </div>
-  );
+    );
+  };
 
   /**
    * Icone di una voce, fuori dal flusso (nel pr-6 del contenitore) così non spostano
