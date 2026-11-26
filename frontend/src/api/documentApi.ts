@@ -322,6 +322,43 @@ export async function eliminaDocumento(id: number, motivo: string, eliminaRicevu
   return post<EliminazioneEsito>(`/documents/${id}/elimina`, { motivo, eliminaRicevuta });
 }
 
+/** Limite di sicurezza dell'eliminazione in blocco: documenti selezionati per richiesta. */
+export const ELIMINAZIONE_BATCH_MAX = 50;
+
+/** Unità dell'eliminazione in blocco: fattura con la ricevuta della prenotazione, oppure ricevuta. */
+export interface UnitaEliminazione {
+  /** Per un documento non trovato numero e tipo sono assenti; per una NDC tipo = 'nota_credito'. */
+  documenti: { id: number; numero?: string; tipo?: string }[];
+  blocchi: string[];
+  avvisi: AvvisoEliminazione[];
+  /** Solo non tentati: es. "serie interrotta da FT-2026-0012". */
+  motivo?: string;
+  /** Ricevuta della prenotazione eliminata con la fattura senza essere selezionata. */
+  ricevutaInclusa: boolean;
+}
+
+/** Controllo (simulazione=true, non scrive) o esito (simulazione=false, con lotto) dell'eliminazione in blocco. */
+export interface EliminazioneBatch {
+  simulazione: boolean;
+  lotto?: string;
+  /** Almeno un'unità eliminabile. */
+  consentito: boolean;
+  /** Nel controllo: quelli che verrebbero eliminati. */
+  eliminati: UnitaEliminazione[];
+  bloccati: UnitaEliminazione[];
+  nonTentati: UnitaEliminazione[];
+}
+
+/** Simula l'eliminazione in blocco, a ritroso per serie. 400 se selezione vuota o oltre il limite. */
+export async function getEliminazioneBatchControllo(documentIds: number[]): Promise<EliminazioneBatch> {
+  return post<EliminazioneBatch>('/documents/elimina-batch-controllo', { documentIds });
+}
+
+/** Eliminazione in blocco: 200 sempre con il riepilogo; 400 motivo, selezione vuota o oltre il limite. */
+export async function eliminaDocumentiBatch(documentIds: number[], motivo: string): Promise<EliminazioneBatch> {
+  return post<EliminazioneBatch>('/documents/elimina-batch', { documentIds, motivo });
+}
+
 /** Avviso dell'annullo invio manuale: RIAPERTURA sempre, NDC_RIAPERTA per la nota di credito. */
 export interface AvvisoAnnulloInvioManuale {
   codice: 'RIAPERTURA' | 'NDC_RIAPERTA';

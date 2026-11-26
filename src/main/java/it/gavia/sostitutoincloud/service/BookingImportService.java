@@ -1,6 +1,8 @@
 package it.gavia.sostitutoincloud.service;
 
+import com.opencsv.CSVParserBuilder;
 import com.opencsv.CSVReader;
+import com.opencsv.CSVReaderBuilder;
 import com.opencsv.exceptions.CsvException;
 import it.gavia.sostitutoincloud.config.ImportSessionCache;
 import it.gavia.sostitutoincloud.dto.booking.ContrattoCalcoloResult;
@@ -42,6 +44,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -245,8 +248,8 @@ public class BookingImportService {
 
     public BookingImportPreviewDTO preview(Integer tenantId, MultipartFile file) throws IOException, CsvException {
         List<String[]> rawRows;
-        try (CSVReader reader = new CSVReader(
-                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+        // Header sulla prima riga: il separatore si rileva lì
+        try (CSVReader reader = apriCsv(file.getBytes(), 0)) {
             rawRows = reader.readAll();
         }
         if (rawRows.isEmpty()) throw new IllegalArgumentException("File CSV vuoto");
@@ -1044,9 +1047,9 @@ public class BookingImportService {
      * @param headerRow numero di righe da saltare prima dell'header (0 = l'header è la prima riga).
      */
     private ParsedTable readCsv(byte[] content, int headerRow) throws IOException, CsvException {
-        try (CSVReader reader = new CSVReader(new InputStreamReader(new ByteArrayInputStream(content), StandardCharsets.UTF_8))) {
+        int headerIdx = Math.max(0, headerRow);
+        try (CSVReader reader = apriCsv(content, headerIdx)) {
             List<String[]> raw = reader.readAll();
-            int headerIdx = Math.max(0, headerRow);
             if (raw.size() <= headerIdx) return new ParsedTable(List.of(), List.of());
             List<String> headers = new ArrayList<>();
             for (String h : raw.get(headerIdx)) headers.add(h != null ? h.trim() : "");
@@ -1061,6 +1064,85 @@ public class BookingImportService {
             }
             return new ParsedTable(headers, rows);
         }
+    }
+
+    /**
+     * Apre un CSV UTF-8: toglie il BOM (EF BB BF) e usa il separatore rilevato sulla riga
+     * dell'header (',' o ';'). Unico punto di apertura dei CSV: readCsv (prenotazioni e
+     * ospiti) e preview(). Il BOM va tolto dai byte, prima del parser: né InputStreamReader
+     * né trim() lo rimuovono, e davanti a una prima intestazione tra virgolette opencsv non
+     * riconoscerebbe più le virgolette.
+     *
+     * @param headerRow indice (0-based) della riga di intestazione, come in readCsv
+     */
+    private CSVReader apriCsv(byte[] content, int headerRow) throws IOException {
+        int bom = lunghezzaBom(content);
+        char sep = rilevaSeparatore(content, bom, headerRow);
+        return new CSVReaderBuilder(new InputStreamReader(
+                        new ByteArrayInputStream(content, bom, content.length - bom), StandardCharsets.UTF_8))
+                .withCSVParser(new CSVParserBuilder().withSeparator(sep).build())
+                .build();
+    }
+
+    /** 3 se il contenuto inizia con il BOM UTF-8 (EF BB BF), altrimenti 0. */
+    private static int lunghezzaBom(byte[] content) {
+        return content.length >= 3
+                && content[0] == (byte) 0xEF && content[1] == (byte) 0xBB && content[2] == (byte) 0xBF
+                ? 3 : 0;
+    }
+
+    /**
+     * Separatore della riga di intestazione: conta ',' e ';' fuori dalle virgolette (un a-capo
+     * dentro le virgolette non chiude la riga). Se il file ha meno righe di headerRow si usa la
+     * prima riga. A parità (anche 0 a 0) vince la virgola, il comportamento di prima.
+     *
+     * @param offset    byte da saltare in testa (BOM)
+     * @param headerRow indice (0-based) della riga di intestazione
+     */
+    private char rilevaSeparatore(byte[] content, int offset, int headerRow) throws IOException {
+        int riga = 0;
+        int virgole = 0;
+        int puntiEVirgola = 0;
+        int[] primaRiga = null;          // conteggi della riga 0, per il fallback
+        boolean inVirgolette = false;
+        boolean precedenteCR = false;    // \r\n conta come un solo a-capo
+        try (Reader r = new InputStreamReader(
+                new ByteArrayInputStream(content, offset, content.length - offset), StandardCharsets.UTF_8)) {
+            int ch;
+            while ((ch = r.read()) != -1) {
+                if (precedenteCR && ch == '\n') {
+                    precedenteCR = false;
+                    continue;
+                }
+                precedenteCR = false;
+                if (ch == '"') {
+                    inVirgolette = !inVirgolette;   // "" (virgolette raddoppiate) si annulla da solo
+                } else if (!inVirgolette) {
+                    if (ch == '\n' || ch == '\r') {
+                        precedenteCR = ch == '\r';
+                        if (riga == 0) primaRiga = new int[]{virgole, puntiEVirgola};
+                        if (riga == headerRow) break;
+                        riga++;
+                        virgole = 0;
+                        puntiEVirgola = 0;
+                    } else if (ch == ',') {
+                        virgole++;
+                    } else if (ch == ';') {
+                        puntiEVirgola++;
+                    }
+                }
+            }
+        }
+        // Riga dell'header non raggiunta (file più corto): conteggi della prima riga
+        boolean rigaHeaderTrovata = riga == headerRow;
+        if (!rigaHeaderTrovata && primaRiga != null) {
+            virgole = primaRiga[0];
+            puntiEVirgola = primaRiga[1];
+        }
+        char sep = puntiEVirgola > virgole ? ';' : ',';
+        log.debug("BookingImportService.rilevaSeparatore() - headerRow={} rigaHeaderTrovata={} bom={} virgole={} puntiEVirgola={} sep='{}'",
+                headerRow, rigaHeaderTrovata, offset > 0, virgole, puntiEVirgola, sep);
+        return sep;
     }
 
     /**

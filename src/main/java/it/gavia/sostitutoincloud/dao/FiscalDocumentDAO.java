@@ -3,14 +3,21 @@ package it.gavia.sostitutoincloud.dao;
 import it.gavia.sostitutoincloud.dao.mapper.FiscalDocumentRowMapper;
 import it.gavia.sostitutoincloud.model.FiscalDocument;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.util.StreamUtils;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Log4j2
@@ -60,6 +67,34 @@ public class FiscalDocumentDAO {
     public List<FiscalDocument> findByBookingId(Integer bookingId) {
         log.debug("FiscalDocumentDAO.findByBookingId() - bookingId={}", bookingId);
         return jdbcTemplate.query(SELECT_ALL + " WHERE fk_booking_id = ? ORDER BY created_at DESC", fiscalDocumentRowMapper, bookingId);
+    }
+
+    /** Ricevuta di riferimento di una prenotazione: id e numero documento. */
+    public record RicevutaRef(Integer id, String numero) { }
+
+    /**
+     * Ricevuta attiva più recente (annullate escluse) di ogni prenotazione del settlement, in una
+     * sola query. Chiave: booking id. Mappa vuota se nessuna prenotazione ha una ricevuta attiva.
+     */
+    public Map<Integer, RicevutaRef> findRicevuteAttiveBySettlement(Integer tenantId, Integer settlementId) {
+        Map<Integer, RicevutaRef> result = new HashMap<>();
+        jdbcTemplate.query(loadSql("sql/fiscal_document/ricevute_attive_per_settlement.sql"),
+                rs -> {
+                    result.put(rs.getInt("booking_id"),
+                            new RicevutaRef(rs.getInt("ricevuta_id"), rs.getString("ricevuta_number")));
+                },
+                settlementId, tenantId);
+        log.debug("FiscalDocumentDAO.findRicevuteAttiveBySettlement() - tenantId={} settlementId={} trovate={}",
+                tenantId, settlementId, result.size());
+        return result;
+    }
+
+    private String loadSql(String classpath) {
+        try (InputStream is = new ClassPathResource(classpath).getInputStream()) {
+            return StreamUtils.copyToString(is, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("Impossibile caricare SQL: " + classpath, e);
+        }
     }
 
     public void deleteByBookingId(Integer bookingId) {

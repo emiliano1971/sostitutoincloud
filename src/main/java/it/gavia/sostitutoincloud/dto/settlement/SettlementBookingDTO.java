@@ -16,6 +16,14 @@ public class SettlementBookingDTO {
 
     private Integer bookingId;
     private String externalBookingId;
+
+    /**
+     * Ricevuta attiva più recente della prenotazione (annullate escluse); null se non ce n'è.
+     * DTO del solo back-office (/api/settlements, link al dettaglio documento): il portale
+     * proprietario non lo usa e, se mostrerà il dettaglio, dovrà avere un DTO suo.
+     */
+    private Integer ricevutaId;
+    private String ricevutaNumber;
     private String propertyName;
     private LocalDate checkinDate;
     private LocalDate checkoutDate;

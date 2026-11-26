@@ -203,15 +203,22 @@ public class SettlementService {
         Map<Integer, TipoDocumento> tipiDocumentoById = tipoDocumentoDAO.findAll().stream()
                 .collect(Collectors.toMap(TipoDocumento::getId, t -> t));
 
+        // Ricevuta attiva più recente di ogni prenotazione: una sola query per tutto il settlement
+        Map<Integer, FiscalDocumentDAO.RicevutaRef> ricevuteByBooking =
+                fiscalDocumentDAO.findRicevuteAttiveBySettlement(tenantId, s.getId());
+
         List<SettlementBookingDTO> bookingDTOs = settlementBookings.stream()
                 .map(sb -> {
                     Booking booking = bookingDAO.findById(sb.getFkBookingId()).orElse(null);
                     if (booking == null) return null;
                     Property property = propertiesById.get(booking.getFkPropertyId());
+                    FiscalDocumentDAO.RicevutaRef ricevuta = ricevuteByBooking.get(booking.getId());
                     return SettlementBookingDTO.builder()
                             .periodoLedger(periodoArretrato(booking.getId(), s.getPeriod()))
                             .bookingId(booking.getId())
                             .externalBookingId(booking.getExternalBookingId())
+                            .ricevutaId(ricevuta != null ? ricevuta.id() : null)
+                            .ricevutaNumber(ricevuta != null ? ricevuta.numero() : null)
                             .propertyName(property != null ? property.getDisplayName() : null)
                             .checkinDate(booking.getCheckinDate())
                             .checkoutDate(booking.getCheckoutDate())

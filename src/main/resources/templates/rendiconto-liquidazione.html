@@ -105,6 +105,10 @@
   /* Colonne data: senza nowrap le 13 colonne su A4 verticale sono abbastanza
      strette da spezzare "08/09/2026" su due righe. */
   th.nowrap, td.nowrap { white-space: nowrap; }
+  /* Codice prenotazione sotto il numero ricevuta */
+  .sub { display:block; font-family:monospace; font-size:7px; color:#666; }
+  /* Numero ricevuta su una riga: senza, "RIC-2026-0005" va a capo sul trattino */
+  .ric { white-space: nowrap; }
   td.empty {
     text-align: center;
     padding: 12px;
@@ -248,7 +252,7 @@
     <thead>
       <tr>
         <th>#</th>
-        <th>ID Prenotazione</th>
+        <th>Ricevuta</th>
         <th>Immobile</th>
         <th class="nowrap">Check-in</th>
         <th class="nowrap">Check-out</th>

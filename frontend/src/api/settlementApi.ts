@@ -17,6 +17,9 @@ export interface SettlementListItem {
 export interface SettlementBookingItem {
   bookingId: number;
   externalBookingId: string;
+  /** Ricevuta attiva più recente della prenotazione (annullate escluse); assente se non c'è. */
+  ricevutaId?: number | null;
+  ricevutaNumber?: string | null;
   propertyName: string;
   checkinDate: string;
   checkoutDate: string;

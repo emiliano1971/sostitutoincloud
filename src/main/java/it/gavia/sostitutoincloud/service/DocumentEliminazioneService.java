@@ -8,6 +8,7 @@ import it.gavia.sostitutoincloud.dao.SettlementDAO;
 import it.gavia.sostitutoincloud.dao.StatoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.TipoDocumentoDAO;
 import it.gavia.sostitutoincloud.dao.WithholdingLedgerDAO;
+import it.gavia.sostitutoincloud.dto.document.EliminazioneBatchDTO;
 import it.gavia.sostitutoincloud.dto.document.EliminazioneControlloDTO;
 import it.gavia.sostitutoincloud.dto.document.EliminazioneControlloDTO.Avviso;
 import it.gavia.sostitutoincloud.dto.document.EliminazioneControlloDTO.DocumentoCoinvolto;
@@ -28,11 +29,17 @@ import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -63,6 +70,9 @@ public class DocumentEliminazioneService {
     private static final Set<String> STATI_F24_VERSATO = Set.of("sent", "paid");
     private static final Set<String> STATI_SETTLEMENT_BLOCCATI = Set.of("approved", "paid");
     private static final Set<String> STATI_CU_CONSEGNATA = Set.of("sent", "delivered");
+
+    /** Limite di sicurezza dell'eliminazione in blocco: documenti selezionati per richiesta. */
+    public static final int BATCH_MAX = 50;
 
     private static final int MOTIVO_MIN = 5;
     private static final int MOTIVO_MAX = 500;
@@ -140,6 +150,58 @@ public class DocumentEliminazioneService {
         }
     }
 
+    /** Controllo in blocco: eliminazioni già simulate, nessuna scrittura. */
+    private static final class Simulazione {
+        /** Progressivi eliminati per serie: "ultimo della serie" li scavalca. */
+        final Map<Serie, Set<Integer>> progressivi = new HashMap<>();
+        /** Documenti eliminati: spariscono dai documenti della prenotazione. */
+        final Set<Integer> documenti = new HashSet<>();
+        /** Righe di ritenuta eliminate: non contano più per la CU. */
+        final List<WithholdingLedger> righe = new ArrayList<>();
+
+        void registra(Piano piano) {
+            for (FiscalDocument d : piano.documenti()) {
+                documenti.add(d.getId());
+                Integer p = progressivo(d);
+                if (p != null) {
+                    progressivi.computeIfAbsent(new Serie(d.getFkTipoDocumentoId(), d.getIssueDate().getYear()),
+                            k -> new HashSet<>()).add(p);
+                }
+            }
+            if (piano.riga != null) righe.add(piano.riga);
+        }
+    }
+
+    /**
+     * Unità dell'eliminazione in blocco: una fattura (con la ricevuta della prenotazione, selezionata
+     * o no) oppure una ricevuta senza la sua fattura tra i selezionati.
+     */
+    private static final class UnitaBatch {
+        final FiscalDocument principale;
+        final Set<Integer> selezionati = new LinkedHashSet<>();
+        /** Documenti coinvolti secondo la valutazione preliminare (fuori dal lock). */
+        final List<FiscalDocument> documenti = new ArrayList<>();
+        /** Per serie, il progressivo più alto dell'unità: la sua posizione nell'ordine a ritroso. */
+        final Map<Serie, Integer> posizioni = new HashMap<>();
+        boolean ricevutaInclusa;
+
+        UnitaBatch(FiscalDocument principale) {
+            this.principale = principale;
+        }
+
+        void aggiungi(FiscalDocument d) {
+            if (documenti.stream().anyMatch(x -> x.getId().equals(d.getId()))) return;
+            documenti.add(d);
+            Integer p = progressivo(d);
+            posizioni.merge(new Serie(d.getFkTipoDocumentoId(), d.getIssueDate().getYear()),
+                    p != null ? p : 0, Math::max);
+        }
+    }
+
+    /** Esito del tentativo su un'unità: simulato (controllo) o reale (esecuzione). */
+    private record Tentativo(boolean ok, List<String> blocchi, List<Avviso> avvisi,
+                             List<DocumentoCoinvolto> documenti) { }
+
     // ── API ──────────────────────────────────────────────────────────────────
 
     /**
@@ -151,7 +213,7 @@ public class DocumentEliminazioneService {
         FiscalDocument doc = carica(tenantId, documentId);
         if (!tipo(CODICE_FATTURA).getId().equals(doc.getFkTipoDocumentoId())) {
             // Ricevuta (dal proprio dettaglio) o tipo non ammesso: nessuno scenario, il flag non si applica
-            Piano piano = valuta(tenantId, doc, true);
+            Piano piano = valuta(tenantId, doc, true, null);
             return EliminazioneControlloDTO.builder()
                     .consentito(piano.blocchi.isEmpty())
                     .blocchi(piano.blocchi)
@@ -160,8 +222,8 @@ public class DocumentEliminazioneService {
                     .build();
         }
         // Fattura: scenario "solo fattura" sempre, "con ricevuta" solo se la prenotazione ne ha una
-        Piano solo = valuta(tenantId, doc, false);
-        Piano con = solo.ricevuteLasciate.isEmpty() ? null : valuta(tenantId, doc, true);
+        Piano solo = valuta(tenantId, doc, false, null);
+        Piano con = solo.ricevuteLasciate.isEmpty() ? null : valuta(tenantId, doc, true, null);
         Piano principale = con != null ? con : solo;
         return EliminazioneControlloDTO.builder()
                 .consentito(principale.blocchi.isEmpty())
@@ -194,8 +256,18 @@ public class DocumentEliminazioneService {
     public EliminazioneEsitoDTO elimina(Integer tenantId, Integer documentId, String motivo, Boolean eliminaRicevuta) {
         String motivoValido = validaMotivo(motivo);
         boolean conRicevuta = eliminaRicevuta == null || eliminaRicevuta;
+        return eliminaInterno(tenantId, documentId, motivoValido, conRicevuta);
+    }
+
+    /**
+     * Corpo dell'eliminazione singola, usato anche da quella in blocco (una transazione per
+     * documento). Il motivo è già validato: in blocco porta anche il riferimento al lotto, che
+     * non deve contare nel limite dei 500 caratteri.
+     */
+    private EliminazioneEsitoDTO eliminaInterno(Integer tenantId, Integer documentId, String motivoValido,
+                                                boolean conRicevuta) {
         // Prima valutazione fuori dal lock: serve solo a sapere quali serie bloccare
-        Piano preliminare = valuta(tenantId, carica(tenantId, documentId), conRicevuta);
+        Piano preliminare = valuta(tenantId, carica(tenantId, documentId), conRicevuta, null);
         List<Serie> serieDaBloccare = serie(preliminare);
 
         return transactionTemplate.execute(status -> {
@@ -203,7 +275,7 @@ public class DocumentEliminazioneService {
             serieDaBloccare.forEach(s -> fiscalDocumentDAO.lockNumerazione(tenantId, s.tipoId(), s.anno()));
 
             // Dentro il lock: si ricalcola tutto, il controllo fatto prima non vale
-            Piano piano = valuta(tenantId, carica(tenantId, documentId), conRicevuta);
+            Piano piano = valuta(tenantId, carica(tenantId, documentId), conRicevuta, null);
             if (!piano.blocchi.isEmpty()) {
                 throw new EliminazioneNonConsentitaException(piano.blocchi);
             }
@@ -215,13 +287,255 @@ public class DocumentEliminazioneService {
         });
     }
 
+    // ── eliminazione in blocco ───────────────────────────────────────────────
+
+    /**
+     * Controllo dell'eliminazione in blocco: non scrive nulla. Simula l'ordine (serie per serie,
+     * progressivo decrescente) tenendo conto delle eliminazioni precedenti: dopo ognuna il
+     * documento successivo diventa l'ultimo della serie.
+     *
+     * @throws IllegalArgumentException selezione vuota o oltre {@link #BATCH_MAX} documenti (400)
+     */
+    public EliminazioneBatchDTO controlloBatch(Integer tenantId, List<Integer> documentIds) {
+        Simulazione sim = new Simulazione();
+        EliminazioneBatchDTO esito = eseguiBatch(tenantId, documentIds, u -> {
+            Piano piano = valuta(tenantId, carica(tenantId, u.principale.getId()), true, sim);
+            if (!piano.blocchi.isEmpty()) {
+                return new Tentativo(false, piano.blocchi, List.of(), coinvolti(piano));
+            }
+            sim.registra(piano);
+            return new Tentativo(true, List.of(), piano.avvisi, coinvolti(piano));
+        });
+        esito.setSimulazione(true);
+        return esito;
+    }
+
+    /**
+     * Eliminazione in blocco, nello stesso ordine del controllo. Ogni unità passa dall'eliminazione
+     * singola (transazione propria, lock delle serie, ricalcolo dentro il lock, audit
+     * document.delete): l'anteprima non conta. Al primo blocco la serie si ferma.
+     *
+     * @throws IllegalArgumentException motivo non valido, selezione vuota o oltre il limite (400)
+     */
+    public EliminazioneBatchDTO eliminaBatch(Integer tenantId, List<Integer> documentIds, String motivo) {
+        String motivoValido = validaMotivo(motivo);
+        List<Integer> ids = validaSelezione(documentIds);
+        String lotto = "ELB-" + UUID.randomUUID().toString().substring(0, 8);
+        String motivoAudit = motivoValido + " [eliminazione in blocco, lotto " + lotto + "]";
+
+        EliminazioneBatchDTO esito = eseguiBatch(tenantId, ids, u -> {
+            try {
+                EliminazioneEsitoDTO e = eliminaInterno(tenantId, u.principale.getId(), motivoAudit, true);
+                return new Tentativo(true, List.of(), e.getAvvisi(), e.getEliminati());
+            } catch (EliminazioneNonConsentitaException e) {
+                return new Tentativo(false, e.getBlocchi(), List.of(), null);
+            } catch (NoSuchElementException e) {
+                return new Tentativo(false, List.of(e.getMessage()), List.of(), null);
+            } catch (RuntimeException e) {
+                // La transazione dell'unità è già annullata: la serie si ferma come per un blocco
+                log.error("DocumentEliminazioneService.eliminaBatch() - lotto={} documento={}: {}",
+                        lotto, u.principale.getDocumentNumber(), e.getMessage(), e);
+                return new Tentativo(false, List.of("Errore durante l'eliminazione: " + e.getMessage()), List.of(), null);
+            }
+        });
+        esito.setLotto(lotto);
+
+        List<String> numeriEliminati = esito.getEliminati().stream()
+                .flatMap(u -> u.getDocumenti().stream()).map(DocumentoCoinvolto::getNumero).toList();
+        try {
+            // Le eliminazioni sono già confermate: un errore dell'audit di riepilogo non le annulla
+            auditService.log("document.delete.batch", "FiscalDocument", null,
+                    "Eliminazione in blocco lotto " + lotto + ": selezionati " + ids.size()
+                            + ", eliminati " + numeriEliminati.size() + " documenti"
+                            + (numeriEliminati.isEmpty() ? "" : " (" + String.join(", ", numeriEliminati) + ")")
+                            + ", bloccati " + esito.getBloccati().size()
+                            + ", non tentati " + esito.getNonTentati().size()
+                            + ". Motivo: " + motivoValido + ".");
+        } catch (RuntimeException e) {
+            log.error("DocumentEliminazioneService.eliminaBatch() - audit di riepilogo non scritto, lotto={}: {}",
+                    lotto, e.getMessage(), e);
+        }
+        return esito;
+    }
+
+    /**
+     * Motore comune a controllo ed esecuzione. Ordine: serie (tipo, anno) del documento principale,
+     * progressivo decrescente. Un'unità fattura tocca anche la serie delle ricevute, quindi si
+     * procede a giri: si tenta un'unità solo quando è in testa a tutte le sue serie. Al primo blocco
+     * le sue serie si fermano: le unità rimaste su quelle serie non vengono tentate e, a loro volta,
+     * fermano le proprie (un documento che resta in alto rende impossibili quelli sotto).
+     */
+    private EliminazioneBatchDTO eseguiBatch(Integer tenantId, List<Integer> documentIds,
+                                             Function<UnitaBatch, Tentativo> tentativo) {
+        List<Integer> ids = validaSelezione(documentIds);
+        List<EliminazioneBatchDTO.Unita> eliminati = new ArrayList<>();
+        List<EliminazioneBatchDTO.Unita> bloccati = new ArrayList<>();
+        List<EliminazioneBatchDTO.Unita> nonTentati = new ArrayList<>();
+
+        List<UnitaBatch> pendenti = new ArrayList<>(costruisciUnita(tenantId, ids, bloccati));
+        pendenti.sort(Comparator.comparing((UnitaBatch u) -> u.principale.getFkTipoDocumentoId())
+                .thenComparing(u -> u.principale.getIssueDate().getYear())
+                .thenComparing(u -> Optional.ofNullable(progressivo(u.principale)).orElse(0), Comparator.reverseOrder()));
+
+        Map<Serie, String> interrotte = new HashMap<>();   // serie → numero che l'ha fermata
+        while (!pendenti.isEmpty()) {
+            boolean progresso = false;
+            for (UnitaBatch u : new ArrayList<>(pendenti)) {
+                String causa = u.posizioni.keySet().stream().map(interrotte::get)
+                        .filter(Objects::nonNull).findFirst().orElse(null);
+                if (causa != null) {
+                    nonTentati.add(voce(u, null, List.of(), List.of(), "serie interrotta da " + causa));
+                    u.posizioni.keySet().forEach(s -> interrotte.putIfAbsent(s, causa));
+                    pendenti.remove(u);
+                    progresso = true;
+                } else if (inTesta(u, pendenti)) {
+                    pendenti.remove(u);
+                    tenta(u, tentativo, eliminati, bloccati, interrotte);
+                    progresso = true;
+                }
+            }
+            if (!progresso) {
+                // Ciclo tra serie (es. fattura 10 con ricevuta 9 e fattura 9 con ricevuta 10): nessuna
+                // unità è in testa a tutte le sue serie. Si tenta la prima: "non è l'ultima" la blocca.
+                UnitaBatch u = pendenti.remove(0);
+                log.info("DocumentEliminazioneService.eseguiBatch() - ciclo tra serie: tentativo forzato di {}",
+                        u.principale.getDocumentNumber());
+                tenta(u, tentativo, eliminati, bloccati, interrotte);
+            }
+        }
+
+        log.info("DocumentEliminazioneService.eseguiBatch() - tenant={} selezionati={} eliminati={} bloccati={} nonTentati={}",
+                tenantId, ids.size(), eliminati.size(), bloccati.size(), nonTentati.size());
+        return EliminazioneBatchDTO.builder()
+                .consentito(!eliminati.isEmpty())
+                .eliminati(eliminati)
+                .bloccati(bloccati)
+                .nonTentati(nonTentati)
+                .build();
+    }
+
+    private void tenta(UnitaBatch u, Function<UnitaBatch, Tentativo> tentativo,
+                       List<EliminazioneBatchDTO.Unita> eliminati, List<EliminazioneBatchDTO.Unita> bloccati,
+                       Map<Serie, String> interrotte) {
+        Tentativo t = tentativo.apply(u);
+        if (t.ok()) {
+            eliminati.add(voce(u, t.documenti(), List.of(), t.avvisi(), null));
+        } else {
+            bloccati.add(voce(u, t.documenti(), t.blocchi(), List.of(), null));
+            String causa = u.principale.getDocumentNumber();
+            u.posizioni.keySet().forEach(s -> interrotte.putIfAbsent(s, causa));
+        }
+    }
+
+    /** In testa a tutte le sue serie: nessun'altra unità pendente ha lì un progressivo più alto. */
+    private static boolean inTesta(UnitaBatch u, List<UnitaBatch> pendenti) {
+        return u.posizioni.entrySet().stream().allMatch(e -> pendenti.stream()
+                .filter(v -> v != u)
+                .noneMatch(v -> v.posizioni.getOrDefault(e.getKey(), Integer.MIN_VALUE) > e.getValue()));
+    }
+
+    /**
+     * Unità dai documenti selezionati. Fattura: con la ricevuta della prenotazione (eliminaRicevuta =
+     * true), che se selezionata viene assorbita. Ricevuta senza la sua fattura tra i selezionati: unità
+     * a sé (se la fattura è attiva, valuta la blocca). Note di credito e documenti non trovati vanno
+     * subito tra i bloccati, senza fermare nessuna serie.
+     */
+    private List<UnitaBatch> costruisciUnita(Integer tenantId, List<Integer> ids,
+                                             List<EliminazioneBatchDTO.Unita> bloccati) {
+        Integer tipoFatturaId = tipo(CODICE_FATTURA).getId();
+        Integer tipoRicevutaId = tipo(CODICE_RICEVUTA).getId();
+        Integer annullataId = stato(STATO_ANNULLATA).getId();
+
+        List<FiscalDocument> fatture = new ArrayList<>();
+        List<FiscalDocument> ricevute = new ArrayList<>();
+        for (Integer id : ids) {
+            FiscalDocument d;
+            try {
+                d = carica(tenantId, id);
+            } catch (NoSuchElementException e) {
+                bloccati.add(EliminazioneBatchDTO.Unita.builder()
+                        .documenti(List.of(DocumentoCoinvolto.builder().id(id).build()))
+                        .blocchi(List.of("Documento non trovato (id=" + id + ")"))
+                        .avvisi(List.of()).build());
+                continue;
+            }
+            if (tipoFatturaId.equals(d.getFkTipoDocumentoId())) {
+                fatture.add(d);
+            } else if (tipoRicevutaId.equals(d.getFkTipoDocumentoId())) {
+                ricevute.add(d);
+            } else {
+                bloccati.add(EliminazioneBatchDTO.Unita.builder()
+                        .documenti(List.of(DocumentoCoinvolto.builder().id(d.getId())
+                                .numero(d.getDocumentNumber()).tipo(CODICE_NOTA_CREDITO).build()))
+                        .blocchi(List.of("Le note di credito non si eliminano in blocco: si annullano dal loro dettaglio"))
+                        .avvisi(List.of()).build());
+            }
+        }
+
+        List<UnitaBatch> unita = new ArrayList<>();
+        Map<Integer, UnitaBatch> perBooking = new HashMap<>();
+        for (FiscalDocument f : fatture) {
+            UnitaBatch u = new UnitaBatch(f);
+            u.selezionati.add(f.getId());
+            valuta(tenantId, f, true, null).documenti().forEach(u::aggiungi);
+            unita.add(u);
+            if (f.getFkBookingId() != null) {
+                UnitaBatch gia = perBooking.get(f.getFkBookingId());
+                // Più fatture selezionate sulla stessa prenotazione: la ricevuta va con quella attiva
+                if (gia == null || annullataId.equals(gia.principale.getFkStatoDocumentoId())) {
+                    perBooking.put(f.getFkBookingId(), u);
+                }
+            }
+        }
+        for (FiscalDocument r : ricevute) {
+            UnitaBatch u = r.getFkBookingId() != null ? perBooking.get(r.getFkBookingId()) : null;
+            if (u == null) {
+                u = new UnitaBatch(r);
+                unita.add(u);
+            }
+            u.selezionati.add(r.getId());
+            u.aggiungi(r);
+        }
+        for (UnitaBatch u : unita) {
+            u.ricevutaInclusa = u.documenti.stream().anyMatch(d ->
+                    tipoRicevutaId.equals(d.getFkTipoDocumentoId()) && !u.selezionati.contains(d.getId()));
+        }
+        return unita;
+    }
+
+    private EliminazioneBatchDTO.Unita voce(UnitaBatch u, List<DocumentoCoinvolto> documenti, List<String> blocchi,
+                                            List<Avviso> avvisi, String motivo) {
+        return EliminazioneBatchDTO.Unita.builder()
+                .documenti(documenti != null ? documenti : coinvoltiDi(u.documenti))
+                .blocchi(blocchi)
+                .avvisi(avvisi)
+                .motivo(motivo)
+                .ricevutaInclusa(u.ricevutaInclusa)
+                .build();
+    }
+
+    /** Id distinti, non vuoti e al massimo {@link #BATCH_MAX}. */
+    private List<Integer> validaSelezione(List<Integer> documentIds) {
+        List<Integer> ids = documentIds == null ? List.of()
+                : documentIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            throw new IllegalArgumentException("Nessun documento selezionato");
+        }
+        if (ids.size() > BATCH_MAX) {
+            throw new IllegalArgumentException("Massimo " + BATCH_MAX + " documenti per richiesta (selezionati "
+                    + ids.size() + ")");
+        }
+        return ids;
+    }
+
     // ── valutazione ──────────────────────────────────────────────────────────
 
     /**
      * @param conRicevuta solo per la fattura: true = anche la ricevuta della prenotazione (tutti i
      *                    blocchi, tutto o niente); false = solo la fattura, blocchi della sola fattura
+     * @param sim         solo controllo in blocco: eliminazioni già simulate (null = stato reale)
      */
-    private Piano valuta(Integer tenantId, FiscalDocument doc, boolean conRicevuta) {
+    private Piano valuta(Integer tenantId, FiscalDocument doc, boolean conRicevuta, Simulazione sim) {
         Piano piano = new Piano();
         Integer tipoFatturaId = tipo(CODICE_FATTURA).getId();
         Integer tipoRicevutaId = tipo(CODICE_RICEVUTA).getId();
@@ -237,6 +551,10 @@ public class DocumentEliminazioneService {
         List<FiscalDocument> docsBooking = doc.getFkBookingId() != null
                 ? fiscalDocumentDAO.findByBookingId(doc.getFkBookingId())
                 : List.of(doc);
+        if (sim != null) {
+            // Documenti già eliminati nella simulazione: non esistono più
+            docsBooking = docsBooking.stream().filter(d -> !sim.documenti.contains(d.getId())).toList();
+        }
         List<FiscalDocument> ricevuteAttive = docsBooking.stream()
                 .filter(d -> tipoRicevutaId.equals(d.getFkTipoDocumentoId()))
                 .filter(d -> !annullataId.equals(d.getFkStatoDocumentoId()))
@@ -284,7 +602,7 @@ public class DocumentEliminazioneService {
         // Controlli della fattura
         List<FiscalDocument> ndcAttive = List.of();
         if (piano.fattura != null) {
-            controlliComuni(tenantId, piano.fattura, "", piano);
+            controlliComuni(tenantId, piano.fattura, "", piano, sim);
             ndcAttive = ndcService.ndcAttive(piano.fattura.getId(), tipo(CODICE_NOTA_CREDITO));
             if (!ndcAttive.isEmpty()) {
                 piano.blocchi.add("Nota di credito attiva collegata (" + numeri(ndcAttive)
@@ -295,8 +613,8 @@ public class DocumentEliminazioneService {
         // Controlli della ricevuta: prefissati col numero se si parte dalla fattura
         if (piano.ricevuta != null) {
             String prefisso = piano.fattura != null ? piano.ricevuta.getDocumentNumber() + ": " : "";
-            controlliComuni(tenantId, piano.ricevuta, prefisso, piano);
-            controlliRicevuta(tenantId, piano, prefisso);
+            controlliComuni(tenantId, piano.ricevuta, prefisso, piano, sim);
+            controlliRicevuta(tenantId, piano, prefisso, sim);
         }
 
         // Altri documenti sulla prenotazione (NDC o ricevute annullate, ...): resterebbero
@@ -335,7 +653,7 @@ public class DocumentEliminazioneService {
     }
 
     /** Stato, file SDI, ultimo della serie, email già inviata. */
-    private void controlliComuni(Integer tenantId, FiscalDocument d, String prefisso, Piano piano) {
+    private void controlliComuni(Integer tenantId, FiscalDocument d, String prefisso, Piano piano, Simulazione sim) {
         List<String> blocchi = piano.blocchi;
         if (d.getEmailInviataAt() != null) {
             piano.avvisi.add(Avviso.builder().codice("EMAIL_GIA_INVIATA")
@@ -359,7 +677,7 @@ public class DocumentEliminazioneService {
                     + (notBlank(d.getSdiProgressivo()) ? " (progressivo " + d.getSdiProgressivo() + ")" : "")
                     + ": eliminazione non consentita");
         }
-        String ultimo = ultimoDellaSerie(tenantId, d);
+        String ultimo = ultimoDellaSerie(tenantId, d, sim);
         if (ultimo != null) {
             String nomeSerie = tipo(CODICE_FATTURA).getId().equals(d.getFkTipoDocumentoId()) ? "fattura" : "ricevuta";
             blocchi.add(prefisso + "non è l'ultima " + nomeSerie + " del " + d.getIssueDate().getYear()
@@ -368,7 +686,7 @@ public class DocumentEliminazioneService {
     }
 
     /** Ritenuta, F24, liquidazione e CU della ricevuta. */
-    private void controlliRicevuta(Integer tenantId, Piano piano, String prefisso) {
+    private void controlliRicevuta(Integer tenantId, Piano piano, String prefisso, Simulazione sim) {
         FiscalDocument ric = piano.ricevuta;
         WithholdingLedger riga = withholdingLedgerDAO.findByFiscalDocumentId(ric.getId()).orElse(null);
         if (riga == null) {
@@ -425,7 +743,7 @@ public class DocumentEliminazioneService {
                     piano.blocchi.add(prefisso + "CU " + annoCu + " del proprietario già "
                             + ("sent".equals(cu.getStato()) ? "inviata" : "consegnata")
                             + ": eliminazione non consentita");
-                } else if (ritenuteResidue(tenantId, ric.getFkOwnerId(), annoCu, riga) == 0) {
+                } else if (ritenuteResidue(tenantId, ric.getFkOwnerId(), annoCu, riga, sim) == 0) {
                     // Ultima ritenuta valida dell'anno: la rigenerazione eliminerà la CU (CuService)
                     piano.avvisi.add(Avviso.builder().codice("CU_VERRA_ELIMINATA")
                             .messaggio("La CU " + annoCu + " del proprietario verrà eliminata alla "
@@ -445,15 +763,27 @@ public class DocumentEliminazioneService {
      * Ritenute valide (fk_ndc_id IS NULL, stesso filtro della CU) del proprietario nell'anno che
      * resterebbero dopo questa operazione: si tolgono le righe eliminate dalla stessa operazione.
      * Fattura + ricevuta: la fattura non ha righe di registro, quindi l'unica tolta è quella
-     * della ricevuta.
+     * della ricevuta. In simulazione si tolgono anche le righe delle ricevute già eliminate.
      */
-    private int ritenuteResidue(Integer tenantId, Integer ownerId, Integer anno, WithholdingLedger rigaEliminata) {
+    private int ritenuteResidue(Integer tenantId, Integer ownerId, Integer anno, WithholdingLedger rigaEliminata,
+                                Simulazione sim) {
         int valide = cuRecordDAO.countRitenuteValide(tenantId, ownerId, anno);
-        boolean rigaConta = rigaEliminata != null
-                && rigaEliminata.getFkNdcId() == null
-                && ownerId.equals(rigaEliminata.getFkOwnerId())
-                && anno.equals(rigaEliminata.getPeriodoAnno());
-        return Math.max(0, valide - (rigaConta ? 1 : 0));
+        int tolte = rigaValida(rigaEliminata, ownerId, anno) ? 1 : 0;
+        if (sim != null) {
+            tolte += (int) sim.righe.stream()
+                    .filter(r -> rigaEliminata == null || !r.getId().equals(rigaEliminata.getId()))
+                    .filter(r -> rigaValida(r, ownerId, anno))
+                    .count();
+        }
+        return Math.max(0, valide - tolte);
+    }
+
+    /** Riga che conta tra le ritenute valide del proprietario nell'anno (stesso filtro della CU). */
+    private static boolean rigaValida(WithholdingLedger r, Integer ownerId, Integer anno) {
+        return r != null
+                && r.getFkNdcId() == null
+                && ownerId.equals(r.getFkOwnerId())
+                && anno.equals(r.getPeriodoAnno());
     }
 
     /** F24_AGGIORNATO, con "resterà a zero" e "crediti rilasciati" quando applicabile. */
@@ -478,22 +808,38 @@ public class DocumentEliminazioneService {
 
     /**
      * null se il documento è l'ultimo della sua serie (progressivo più alto per tenant, tipo e
-     * anno di issue_date, annullati compresi), altrimenti il numero dell'ultimo.
+     * anno di issue_date, annullati compresi), altrimenti il numero dell'ultimo. In simulazione i
+     * progressivi già eliminati si scavalcano: dopo ogni eliminazione il precedente diventa l'ultimo.
      */
-    private String ultimoDellaSerie(Integer tenantId, FiscalDocument d) {
+    private String ultimoDellaSerie(Integer tenantId, FiscalDocument d, Simulazione sim) {
         int anno = d.getIssueDate().getYear();
         int ultimo = fiscalDocumentDAO.getNextProgressiveNumber(tenantId, d.getFkTipoDocumentoId(), anno) - 1;
+        if (sim != null) {
+            Set<Integer> eliminati = sim.progressivi.getOrDefault(new Serie(d.getFkTipoDocumentoId(), anno), Set.of());
+            while (ultimo > 0 && eliminati.contains(ultimo)) {
+                ultimo = fiscalDocumentDAO.findAdiacenteInSerie(tenantId, d.getFkTipoDocumentoId(), anno, ultimo, false)
+                        .map(DocumentEliminazioneService::progressivo)
+                        .filter(Objects::nonNull)
+                        .orElse(0);
+            }
+        }
         String[] parti = d.getDocumentNumber() != null ? d.getDocumentNumber().split("-") : new String[0];
-        Integer progressivo = null;
+        Integer progressivo = progressivo(d);
+        if (progressivo != null && progressivo == ultimo) return null;
+        return parti.length >= 3 ? parti[0] + "-" + anno + "-" + String.format("%04d", ultimo) : "n/d";
+    }
+
+    /** Progressivo dal terzo segmento del numero (es. FT-2026-0003 → 3); null se non standard. */
+    private static Integer progressivo(FiscalDocument d) {
+        String[] parti = d.getDocumentNumber() != null ? d.getDocumentNumber().split("-") : new String[0];
         if (parti.length >= 3) {
             try {
-                progressivo = Integer.parseInt(parti[2]);
+                return Integer.parseInt(parti[2]);
             } catch (NumberFormatException e) {
                 log.warn("DocumentEliminazioneService - numero documento non standard: {}", d.getDocumentNumber());
             }
         }
-        if (progressivo != null && progressivo == ultimo) return null;
-        return parti.length >= 3 ? parti[0] + "-" + anno + "-" + String.format("%04d", ultimo) : "n/d";
+        return null;
     }
 
     // ── esecuzione (dentro transazione e lock) ───────────────────────────────
@@ -594,7 +940,11 @@ public class DocumentEliminazioneService {
     }
 
     private List<DocumentoCoinvolto> coinvolti(Piano piano) {
-        return piano.documenti().stream()
+        return coinvoltiDi(piano.documenti());
+    }
+
+    private List<DocumentoCoinvolto> coinvoltiDi(List<FiscalDocument> documenti) {
+        return documenti.stream()
                 .map(d -> DocumentoCoinvolto.builder().id(d.getId()).numero(d.getDocumentNumber())
                         .tipo(nomeTipo(d)).build())
                 .toList();

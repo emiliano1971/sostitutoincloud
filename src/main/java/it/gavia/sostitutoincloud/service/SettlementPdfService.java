@@ -140,8 +140,13 @@ public class SettlementPdfService {
 
             righe.append("<tr>")
                     .append("<td>").append(i++).append("</td>")
+                    // Numero ricevuta ("—" se manca), sotto il codice prenotazione in piccolo
                     .append("<td style=\"font-family:monospace; font-size:8px\">")
-                    .append(esc(b.getExternalBookingId())).append("</td>")
+                    .append("<span class=\"ric\">")
+                    .append(b.getRicevutaNumber() != null ? esc(b.getRicevutaNumber()) : "&#8212;")
+                    .append("</span>")
+                    .append("<span class=\"sub\">").append(esc(b.getExternalBookingId())).append("</span>")
+                    .append("</td>")
                     .append("<td>").append(esc(b.getPropertyName())).append("</td>")
                     .append(cella("nowrap", data(b.getCheckinDate())))
                     .append(cella("nowrap", data(b.getCheckoutDate())))

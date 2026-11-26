@@ -4,11 +4,12 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
-import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send, Mail, Link2 } from 'lucide-react';
+import { Search, Filter, Eye, Loader2, AlertCircle, ChevronsUpDown, ChevronUp, ChevronDown, Info, X, RefreshCw, Ban, BarChart2, FileDown, Download, Send, Mail, Link2, Trash2 } from 'lucide-react';
 import { testoEmailInviata } from '@/lib/emailDocumenti';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import SdiDisabilitatoTooltip from '@/components/document/SdiDisabilitatoTooltip';
+import EliminaDocumentiBatchDialog from '@/components/document/EliminaDocumentiBatchDialog';
 import { useSdiAbilitato } from '@/hooks/useSdiAbilitato';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -142,6 +143,7 @@ const DocumentsList = () => {
   const [marcaInviati, setMarcaInviati] = useState(true);
   const [showSdiDialog, setShowSdiDialog] = useState(false);
   const [inviandoSdi, setInviandoSdi] = useState(false);
+  const [showEliminaDialog, setShowEliminaDialog] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -678,11 +680,29 @@ const DocumentsList = () => {
               <Send className="h-4 w-4" /> Invia a SDI
             </Button>
           </SdiDisabilitatoTooltip>
+          {/* Eliminazione in blocco: solo fatture PM e ricevute (le NDC sono escluse nel dialog) */}
+          {docs.some(d => selectedIds.has(d.id) && (d.documentType === 'fattura' || d.documentType === 'ricevuta')) && (
+            <Button variant="destructive" size="sm" className="gap-1" onClick={() => setShowEliminaDialog(true)}>
+              <Trash2 className="h-4 w-4" /> Elimina selezionati
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
             Annulla selezione
           </Button>
         </div>
       )}
+
+      <EliminaDocumentiBatchDialog
+        open={showEliminaDialog}
+        documenti={docs.filter(d => selectedIds.has(d.id))}
+        onClose={() => setShowEliminaDialog(false)}
+        onCompletato={() => {
+          // Selezione azzerata e lista ricaricata con gli stessi filtri (pagina compresa)
+          setShowEliminaDialog(false);
+          setSelectedIds(new Set());
+          setReloadKey(k => k + 1);
+        }}
+      />
 
       <Dialog open={showZipDialog} onOpenChange={open => { if (!scaricando) setShowZipDialog(open); }}>
         <DialogContent>

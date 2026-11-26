@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, FileText, Receipt, ReceiptText, User, Home, Calendar, CreditCard, Loader2, AlertCircle, Pencil, Check, X, RotateCcw, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Copy, FileDown, Mail, Phone, Send } from 'lucide-react';
 import { getContractRules, type ContractRule } from '@/api/contractApi';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import GuestEditDialog from '@/components/GuestEditDialog';
 import {
   getBookingById,
@@ -292,8 +293,12 @@ interface RigaSplitView {
   iva?: { imponibile: number; iva: number };
   /** Netto da precompilare nell'editor (gli override manuali sono netti). */
   nettoEditor?: number;
-  /** Commissione OTA dal file di import, se diversa dal netto: confronto con il valore trasformato. */
-  valoreFile?: number;
+  /**
+   * Valore letto dal file di import (riga source='import'): valore originale, natura (dai numeri
+   * della riga, non dal flag attuale del canale) e % sul lordo ospite. 'non_registrato' se il
+   * valore grezzo non è stato salvato (import precedenti alla migration 021).
+   */
+  valoreFile?: { valore: number; natura?: string; pctLordo: string } | 'non_registrato';
   /** Riepilogo "Totale servizi PM" (imponibile / IVA / totale) al posto dell'importo. */
   riepilogoIva?: { imponibile: number; iva: number; lordo: number };
   /** Ultima voce di costo: dopo di lei si mostrano "Aggiungi voce" e il form. */
@@ -686,6 +691,29 @@ const BookingDetail = () => {
   // La riga OTA mantiene editable: 'ota', quindi usa lo stesso editor e le stesse icone.
   // Ordine = ordinamento delle righe (OTA 10, pulizie 20, cambio 25, extra da 50, PM 1000):
   // la provvigione PM è l'ultima voce, dopo le extra e subito prima di "Aggiungi voce".
+  const pctLordoOspite = (v: number) =>
+    split.grossAmount > 0 ? ((v / split.grossAmount) * 100).toFixed(2) : '0.00';
+  /**
+   * Valore della riga da file. Commissione OTA: importo_originale_file (solo da migration 021).
+   * Pulizie / cambio biancheria: il backend non salva il grezzo, ma il file per queste voci è
+   * sempre trattato come lordo, quindi coincide con l'importo della riga.
+   * Natura dai numeri della riga (il flag del canale può essere cambiato dopo l'import):
+   * file = imponibile → netto, file = importo → lordo. Nessuna indicazione se coincidono
+   * entrambi (IVA 0, es. RF19) o nessuno dei due.
+   */
+  const infoFile = (r: BookingSplitRiga): RigaSplitView['valoreFile'] => {
+    const valore = r.importoOriginaleFile
+      ?? (r.tipoVoce === 'pulizie' || r.tipoVoce === 'cambio_biancheria' ? r.importo : null);
+    if (valore == null) return 'non_registrato';
+    const uguale = (a: number, b: number) => Math.abs(a - b) < 0.005;
+    const comeNetto = uguale(valore, nettoRiga(r));
+    const comeLordo = uguale(valore, r.importo);
+    const natura = comeNetto && !comeLordo ? `netto (+IVA ${r.aliquotaIva}%)`
+      : comeLordo && !comeNetto ? 'lordo (IVA inclusa)'
+      : undefined;
+    return { valore, natura, pctLordo: pctLordoOspite(valore) };
+  };
+
   const vistaCalcolata = (r: BookingSplitRiga): RigaSplitView => ({
     key: r.id,
     label: r.descrizione,
@@ -695,11 +723,8 @@ const BookingDetail = () => {
     source: r.source,
     nettoEditor: nettoRiga(r),
     ...(r.aliquotaIva > 0 ? { iva: { imponibile: nettoRiga(r), iva: r.importo - nettoRiga(r) } } : {}),
-    // Valore grezzo del file solo se diverge dal netto (commissione lorda scorporata):
-    // con una commissione netta dal file i due coincidono e l'hint sarebbe rumore.
-    ...(r.importoOriginaleFile != null && r.importoOriginaleFile !== nettoRiga(r)
-      ? { valoreFile: r.importoOriginaleFile }
-      : {}),
+    // Riga da file: sempre il valore letto, con natura e % sul lordo ospite
+    ...(r.source === 'import' ? { valoreFile: infoFile(r) } : {}),
     ...(r.tipoVoce === 'commissione_ota'
       ? { editable: 'ota' as const, descrizione: split.otaDescrizione }
       : r.tipoVoce === 'pulizie'
@@ -821,8 +846,12 @@ const BookingDetail = () => {
       {row.descrizione && (
         <span className="text-xs text-muted-foreground/70">{row.descrizione}</span>
       )}
-      {row.valoreFile != null && (
-        <span className="text-xs text-muted-foreground/60">file: {fmt(row.valoreFile)}</span>
+      {row.valoreFile != null && row.valoreFile !== 'non_registrato' && (
+        <span className="text-xs text-muted-foreground/60">
+          file: {fmt(row.valoreFile.valore)}
+          {row.valoreFile.natura && <> · {row.valoreFile.natura}</>}
+          {' · '}{row.valoreFile.pctLordo.replace('.', ',')}% del lordo ospite
+        </span>
       )}
       {/* % solo per le voci di costo e la tassa (row.pct), o per le voci modificabili */}
       {(row.pct || row.editable) && (
@@ -832,9 +861,18 @@ const BookingDetail = () => {
       {row.source === 'manuale' && (
         <span className="text-xs text-amber-600">importo modificato</span>
       )}
-      {row.source === 'import' && (
+      {row.source === 'import' && (row.valoreFile === 'non_registrato' ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} className="text-xs text-muted-foreground w-fit underline decoration-dotted cursor-help">
+              da file
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>valore originale non registrato</TooltipContent>
+        </Tooltip>
+      ) : (
         <span className="text-xs text-muted-foreground">da file</span>
-      )}
+      ))}
     </div>
   );
 

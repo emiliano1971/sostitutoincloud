@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,9 @@ import {
   type SettlementDetail as SettlementDetailType,
 } from '@/api/settlementApi';
 import { useToast } from '@/hooks/use-toast';
+
+/** Link nella tabella: sottolineato al passaggio, anello di focus visibile da tastiera. */
+const LINK_CLASS = 'hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 const statusColors: Record<string, string> = {
   pending: 'bg-muted text-muted-foreground',
@@ -151,7 +154,7 @@ const SettlementDetail = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">#</TableHead>
-                  <TableHead>ID Prenotazione</TableHead>
+                  <TableHead>Ricevuta</TableHead>
                   <TableHead>Immobile</TableHead>
                   <TableHead>Check-in</TableHead>
                   <TableHead>Check-out</TableHead>
@@ -182,7 +185,34 @@ const SettlementDetail = () => {
                       onClick={() => navigate(`/bookings/${b.bookingId}`)}
                     >
                       <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                      <TableCell className="font-mono text-xs">{b.externalBookingId}</TableCell>
+                      <TableCell>
+                        {/* Numero ricevuta (link al documento), sotto il codice prenotazione (link
+                            al booking). Link veri: focus con Tab e apertura con Invio; il click non
+                            risale alla riga, che porta comunque alla prenotazione. */}
+                        {b.ricevutaId && b.ricevutaNumber ? (
+                          <Link
+                            to={`/documents/${b.ricevutaId}`}
+                            className={LINK_CLASS + ' font-mono text-sm'}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {b.ricevutaNumber}
+                          </Link>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <span className="text-muted-foreground">—</span>
+                            <Badge variant="outline" className="text-xs font-normal text-warning border-warning/40">
+                              Senza ricevuta
+                            </Badge>
+                          </span>
+                        )}
+                        <Link
+                          to={`/bookings/${b.bookingId}`}
+                          className={LINK_CLASS + ' block w-fit font-mono text-xs text-muted-foreground'}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          {b.externalBookingId}
+                        </Link>
+                      </TableCell>
                       <TableCell>{b.propertyName}</TableCell>
                       <TableCell className="text-sm">{fmtDate(b.checkinDate)}</TableCell>
                       <TableCell className="text-sm">{fmtDate(b.checkoutDate)}</TableCell>

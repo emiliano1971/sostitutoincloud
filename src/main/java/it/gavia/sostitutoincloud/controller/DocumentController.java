@@ -13,6 +13,8 @@ import it.gavia.sostitutoincloud.dto.document.DocumentStatoUpdateDTO;
 import it.gavia.sostitutoincloud.dto.document.AnnullaInvioManualeRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.CambioDataRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.EliminaDocumentoRequestDTO;
+import it.gavia.sostitutoincloud.dto.document.EliminazioneBatchDTO;
+import it.gavia.sostitutoincloud.dto.document.EliminazioneBatchRequestDTO;
 import it.gavia.sostitutoincloud.dto.document.EmissioneControlloDTO;
 import it.gavia.sostitutoincloud.dto.fiscal.StatoFiscaleRicevutaDTO;
 import it.gavia.sostitutoincloud.service.AnnulloNonConsentitoException;
@@ -366,6 +368,36 @@ public class DocumentController {
                     .body(java.util.Map.of("error", "Eliminazione non consentita",
                             "message", e.getMessage(), "blocchi", e.getBlocchi()));
         }
+    }
+
+    /**
+     * Controllo dell'eliminazione in blocco (fatture PM e ricevute, massimo 50): simula l'ordine a
+     * ritroso e restituisce eliminabili, bloccati e non tentati. Non scrive nulla. 400 se la
+     * selezione è vuota o oltre il limite (GlobalExceptionHandler).
+     */
+    @PostMapping("/elimina-batch-controllo")
+    public ResponseEntity<EliminazioneBatchDTO> eliminaBatchControllo(
+            @RequestBody(required = false) EliminazioneBatchRequestDTO request) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.debug("DocumentController.eliminaBatchControllo() - tenantId={} ids={}",
+                tenantId, request != null ? request.getDocumentIds() : null);
+        return ResponseEntity.ok(documentEliminazioneService.controlloBatch(
+                tenantId, request != null ? request.getDocumentIds() : null));
+    }
+
+    /**
+     * Eliminazione in blocco: 200 sempre con il riepilogo (eliminati, bloccati, non tentati).
+     * 400 motivo mancante o fuori misura, selezione vuota o oltre il limite (GlobalExceptionHandler).
+     */
+    @PostMapping("/elimina-batch")
+    public ResponseEntity<EliminazioneBatchDTO> eliminaBatch(
+            @RequestBody(required = false) EliminazioneBatchRequestDTO request) {
+        Integer tenantId = SecurityUtils.getCurrentTenantId();
+        log.info("DocumentController.eliminaBatch() - tenantId={} ids={}",
+                tenantId, request != null ? request.getDocumentIds() : null);
+        return ResponseEntity.ok(documentEliminazioneService.eliminaBatch(tenantId,
+                request != null ? request.getDocumentIds() : null,
+                request != null ? request.getMotivo() : null));
     }
 
     /**
