@@ -79,6 +79,20 @@ public class SettlementBookingDAO {
         jdbcTemplate.update("DELETE FROM settlement_booking WHERE fk_booking_id = ?", bookingId);
     }
 
+    /**
+     * Toglie la prenotazione dal rendiconto indicato solo se questo è ancora modificabile
+     * ('pending' o 'calculated'). Usato dal cambio data della ricevuta: 0 righe = rendiconto
+     * cambiato nel frattempo. Il ricalcolo dei totali è a carico del chiamante.
+     */
+    public int deleteByBookingIdInSettlement(Integer bookingId, Integer settlementId) {
+        int righe = jdbcTemplate.update("DELETE FROM settlement_booking sb WHERE sb.fk_booking_id = ? " +
+                "AND sb.fk_settlement_id = ? AND EXISTS (SELECT 1 FROM settlement s " +
+                "WHERE s.id = sb.fk_settlement_id AND s.stato IN ('pending', 'calculated'))", bookingId, settlementId);
+        log.info("SettlementBookingDAO.deleteByBookingIdInSettlement() - bookingId={} settlementId={} righe={}",
+                bookingId, settlementId, righe);
+        return righe;
+    }
+
     public boolean existsBySettlementIdAndBookingId(Integer settlementId, Integer bookingId) {
         log.debug("SettlementBookingDAO.existsBySettlementIdAndBookingId() - settlementId={}, bookingId={}", settlementId, bookingId);
         String sql = "SELECT COUNT(*) FROM settlement_booking WHERE fk_settlement_id = ? AND fk_booking_id = ?";

@@ -386,9 +386,14 @@ export async function annullaInvioManuale(id: number, motivo: string): Promise<D
 /** Avviso del cambio data: richiede conferma, non blocca. */
 export interface AvvisoCambioData {
   codice: 'DATA_PRECEDE_CHECKOUT' | 'INVIO_SDI_TARDIVO' | 'EMAIL_GIA_INVIATA' | 'NDC_CREDITO_PERIODO'
-    | 'RICEVUTA_PERIODO_SPOSTATO';
+    | 'RICEVUTA_PERIODO_SPOSTATO' | 'F24_RICALCOLATO' | 'RENDICONTO_RICALCOLATO' | 'F24_DESTINAZIONE'
+    | 'RENDICONTO_DESTINAZIONE' | 'SCADENZA_F24_SUPERATA' | 'SCADENZA_ORIGINE_SUPERATA';
   messaggio: string;
 }
+
+/** Avvisi di scadenza F24 superata: richiedono una conferma esplicita anche lato server. */
+export const CODICI_AVVISO_SCADENZA: ReadonlyArray<AvvisoCambioData['codice']> =
+  ['SCADENZA_F24_SUPERATA', 'SCADENZA_ORIGINE_SUPERATA'];
 
 /** Esito di GET /documents/{id}/cambio-data-controllo: non scrive nulla. */
 export interface CambioDataControllo {
@@ -402,6 +407,8 @@ export interface CambioDataControllo {
   limitatoAlMese?: boolean;
   /** Motivo concreto del limite al mese (F24, rendiconto, stato della ritenuta). */
   motivoLimiteMese?: string;
+  /** Solo ricevuta con data in un altro mese: scadenza F24 superata, serve confermaScadenza. */
+  richiedeConfermaScadenza?: boolean;
 }
 
 /** Controllo del cambio data; senza data valuta solo il documento e l'intervallo. */
@@ -410,9 +417,14 @@ export async function getCambioDataControllo(id: number, data?: string): Promise
   return get<CambioDataControllo>(`/documents/${id}/cambio-data-controllo${q}`);
 }
 
-/** Cambio data di fattura PM / NDC mai inviata o di ricevuta: 400 data o motivo, 422 non consentito. */
-export async function cambiaDataDocumento(id: number, data: string, motivo: string): Promise<DocumentDetail> {
-  return post<DocumentDetail>(`/documents/${id}/cambio-data`, { data, motivo });
+/**
+ * Cambio data di fattura PM / NDC mai inviata o di ricevuta: 400 data o motivo, 422 non consentito
+ * (anche con scadenza F24 superata senza confermaScadenza).
+ */
+export async function cambiaDataDocumento(
+  id: number, data: string, motivo: string, confermaScadenza = false,
+): Promise<DocumentDetail> {
+  return post<DocumentDetail>(`/documents/${id}/cambio-data`, { data, motivo, confermaScadenza });
 }
 
 export async function aggiornaStatoDocumento(id: number, stato: string): Promise<void> {

@@ -28,13 +28,22 @@ public class CambioDataControlloDTO {
     private Boolean limitatoAlMese;
     /** Solo ricevuta con limitatoAlMese: motivo concreto (F24, rendiconto, stato della ritenuta). */
     private String motivoLimiteMese;
+    /**
+     * Solo ricevuta con data in un altro mese: true se tra gli avvisi c'è una scadenza F24 superata
+     * (SCADENZA_F24_SUPERATA, SCADENZA_ORIGINE_SUPERATA). Il cambio richiede confermaScadenza=true.
+     */
+    private Boolean richiedeConfermaScadenza;
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Avviso {
-        /** DATA_PRECEDE_CHECKOUT, INVIO_SDI_TARDIVO, EMAIL_GIA_INVIATA, NDC_CREDITO_PERIODO, RICEVUTA_PERIODO_SPOSTATO */
+        /**
+         * DATA_PRECEDE_CHECKOUT, INVIO_SDI_TARDIVO, EMAIL_GIA_INVIATA, NDC_CREDITO_PERIODO, RICEVUTA_PERIODO_SPOSTATO,
+         * F24_RICALCOLATO, RENDICONTO_RICALCOLATO, F24_DESTINAZIONE, RENDICONTO_DESTINAZIONE,
+         * SCADENZA_F24_SUPERATA, SCADENZA_ORIGINE_SUPERATA
+         */
         private String codice;
         private String messaggio;
     }

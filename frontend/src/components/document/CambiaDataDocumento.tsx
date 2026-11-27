@@ -10,7 +10,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  cambiaDataDocumento, getCambioDataControllo,
+  CODICI_AVVISO_SCADENZA, cambiaDataDocumento, getCambioDataControllo,
   type CambioDataControllo, type DocumentDetail,
 } from '@/api/documentApi';
 
@@ -30,7 +30,8 @@ interface Props {
 
 /**
  * Pulsante "Cambia data" + dialog per fattura PM / nota di credito mai inviata e per la
- * ricevuta (con la sua riga di ritenuta; cambio di mese limitato dal controllo). Il controllo
+ * ricevuta (con la sua riga di ritenuta: in un altro mese esce da F24 ready e rendiconto, con
+ * avvisi; scadenze F24 superate con una seconda conferma esplicita). Il controllo
  * senza data si carica al montaggio: se non consentito il pulsante resta disabilitato con i
  * blocchi nel tooltip. Nel dialog ogni cambio della data rilancia il controllo (con debounce)
  * per intervallo, blocchi e avvisi della data scelta.
@@ -44,6 +45,7 @@ const CambiaDataDocumento = ({ documentId, onCambiata, onErrore }: Props) => {
   const [isControllando, setIsControllando] = useState(false);
   const [motivo, setMotivo] = useState('');
   const [confermaAvvisi, setConfermaAvvisi] = useState(false);
+  const [confermaScadenza, setConfermaScadenza] = useState(false);
   const [isSalvando, setIsSalvando] = useState(false);
 
   useEffect(() => {
@@ -63,7 +65,7 @@ const CambiaDataDocumento = ({ documentId, onCambiata, onErrore }: Props) => {
     setIsControllando(true);
     const t = setTimeout(() => {
       getCambioDataControllo(documentId, data)
-        .then(c => { if (attivo) { setControlloData(c); setConfermaAvvisi(false); } })
+        .then(c => { if (attivo) { setControlloData(c); setConfermaAvvisi(false); setConfermaScadenza(false); } })
         .catch(err => { if (attivo) setControlloData({ consentito: false, blocchi: [err instanceof Error ? err.message : 'Controllo non riuscito'], avvisi: [], dataAttuale: base?.dataAttuale ?? '' }); })
         .finally(() => { if (attivo) setIsControllando(false); });
     }, DEBOUNCE_MS);
@@ -74,9 +76,13 @@ const CambiaDataDocumento = ({ documentId, onCambiata, onErrore }: Props) => {
   const motiviBlocco = erroreBase ? [erroreBase] : base?.blocchi ?? [];
   const motivoPulito = motivo.trim();
   const motivoValido = motivoPulito.length >= MOTIVO_MIN && motivoPulito.length <= MOTIVO_MAX;
-  const avvisi = controlloData?.avvisi ?? [];
+  const tuttiAvvisi = controlloData?.avvisi ?? [];
+  const avvisiScadenza = tuttiAvvisi.filter(a => CODICI_AVVISO_SCADENZA.includes(a.codice));
+  const avvisi = tuttiAvvisi.filter(a => !CODICI_AVVISO_SCADENZA.includes(a.codice));
+  const serveConfermaScadenza = controlloData?.richiedeConfermaScadenza === true || avvisiScadenza.length > 0;
   const dataValida = controlloData?.consentito === true && !isControllando;
-  const puoConfermare = dataValida && motivoValido && (avvisi.length === 0 || confermaAvvisi) && !isSalvando;
+  const puoConfermare = dataValida && motivoValido && (avvisi.length === 0 || confermaAvvisi)
+    && (!serveConfermaScadenza || confermaScadenza) && !isSalvando;
 
   const apri = () => {
     // Campo vuoto: la data attuale è già mostrata nella descrizione e darebbe subito il
@@ -85,6 +91,7 @@ const CambiaDataDocumento = ({ documentId, onCambiata, onErrore }: Props) => {
     setMotivo('');
     setControlloData(null);
     setConfermaAvvisi(false);
+    setConfermaScadenza(false);
     setAperto(true);
   };
 
@@ -92,7 +99,7 @@ const CambiaDataDocumento = ({ documentId, onCambiata, onErrore }: Props) => {
     if (!puoConfermare || !base) return;
     setIsSalvando(true);
     try {
-      const aggiornato = await cambiaDataDocumento(documentId, data, motivoPulito);
+      const aggiornato = await cambiaDataDocumento(documentId, data, motivoPulito, serveConfermaScadenza && confermaScadenza);
       setAperto(false);
       onCambiata(aggiornato, base.dataAttuale);
     } catch (err) {
@@ -188,6 +195,25 @@ const CambiaDataDocumento = ({ documentId, onCambiata, onErrore }: Props) => {
                     disabled={isSalvando}
                   />
                   Ho letto gli avvisi e confermo
+                </label>
+              </div>
+            )}
+            {!isControllando && avvisiScadenza.length > 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 space-y-2">
+                <p className="flex items-center gap-1 font-medium text-destructive">
+                  <AlertTriangle className="h-4 w-4" /> Scadenza F24 superata
+                </p>
+                <ul className="list-disc pl-5 space-y-1 text-xs text-destructive">
+                  {avvisiScadenza.map((a, i) => <li key={`${a.codice}-${i}`}>{a.messaggio}</li>)}
+                </ul>
+                <label className="flex items-center gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={confermaScadenza}
+                    onChange={e => setConfermaScadenza(e.target.checked)}
+                    disabled={isSalvando}
+                  />
+                  Confermo il cambio nonostante la scadenza superata
                 </label>
               </div>
             )}

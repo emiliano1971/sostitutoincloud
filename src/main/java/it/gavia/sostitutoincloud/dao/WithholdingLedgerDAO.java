@@ -351,6 +351,21 @@ public class WithholdingLedgerDAO {
         return righe;
     }
 
+    /**
+     * Cambio data della ricevuta in un altro mese con la ritenuta in un F24 ready
+     * (DocumentDataModificaService): la riga esce dall'F24 e torna 'da_versare'. Condizionale:
+     * riga ancora agganciata a quell'F24, versata o da_versare, senza NDC, e F24 ancora ready.
+     * Il totale dell'F24 va ricalcolato dal chiamante (F24Service.ricalcolaTotale).
+     */
+    public int sganciaDaF24Ready(Integer id, Integer f24RecordId) {
+        int righe = jdbcTemplate.update("UPDATE withholding_ledger SET fk_f24_record_id = NULL, stato = 'da_versare', " +
+                "updated_at = NOW() WHERE id = ? AND fk_f24_record_id = ? AND stato IN ('versata', 'da_versare') " +
+                "AND fk_ndc_id IS NULL AND EXISTS (SELECT 1 FROM f24_record f WHERE f.id = ? AND f.stato = 'ready')",
+                id, f24RecordId, f24RecordId);
+        log.info("WithholdingLedgerDAO.sganciaDaF24Ready() - id={} f24={} righe={}", id, f24RecordId, righe);
+        return righe;
+    }
+
     public int deleteById(Integer id) {
         log.info("WithholdingLedgerDAO.deleteById() - id={}", id);
         return jdbcTemplate.update("DELETE FROM withholding_ledger WHERE id = ?", id);

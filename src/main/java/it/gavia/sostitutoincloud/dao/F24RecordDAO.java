@@ -135,6 +135,15 @@ public class F24RecordDAO {
         log.info("F24RecordDAO.ricalcolaTotale() - id={}", id);
     }
 
+    /**
+     * Lock di riga (SELECT ... FOR UPDATE) fino a fine transazione: chi cambia lo stato
+     * dell'F24 (es. "segna pagato") attende. Usato dal cambio data della ricevuta.
+     */
+    public void lockById(Integer id) {
+        jdbcTemplate.queryForList("SELECT id FROM f24_record WHERE id = ? FOR UPDATE", Integer.class, id);
+        log.debug("F24RecordDAO.lockById() - id={}", id);
+    }
+
     public int deleteById(Integer id) {
         int righe = jdbcTemplate.update("DELETE FROM f24_record WHERE id = ?", id);
         log.info("F24RecordDAO.deleteById() - id={} righe={}", id, righe);

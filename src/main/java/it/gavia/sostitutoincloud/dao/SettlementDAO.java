@@ -105,6 +105,15 @@ public class SettlementDAO {
         return findById(id).orElseThrow();
     }
 
+    /**
+     * Lock di riga (SELECT ... FOR UPDATE) fino a fine transazione: chi cambia lo stato del
+     * rendiconto (approva, paga) attende. Usato dal cambio data della ricevuta.
+     */
+    public void lockById(Integer id) {
+        jdbcTemplate.queryForList("SELECT id FROM settlement WHERE id = ? FOR UPDATE", Integer.class, id);
+        log.debug("SettlementDAO.lockById() - id={}", id);
+    }
+
     public int deleteById(Integer id) {
         int righe = jdbcTemplate.update("DELETE FROM settlement WHERE id = ?", id);
         log.info("SettlementDAO.deleteById() - id={} righe={}", id, righe);

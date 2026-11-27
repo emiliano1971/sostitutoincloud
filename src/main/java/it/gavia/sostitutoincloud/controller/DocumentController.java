@@ -469,7 +469,8 @@ public class DocumentController {
                 request != null ? request.getData() : null);
         try {
             documentDataModificaService.modifica(tenantId, id,
-                    request != null ? request.getData() : null, request != null ? request.getMotivo() : null);
+                    request != null ? request.getData() : null, request != null ? request.getMotivo() : null,
+                    request != null && Boolean.TRUE.equals(request.getConfermaScadenza()));
             return ResponseEntity.ok(fiscalDocumentService.findById(tenantId, id).orElseThrow());
         } catch (NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
